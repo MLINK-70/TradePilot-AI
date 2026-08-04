@@ -32,8 +32,12 @@ class AnalyzeRequest(BaseModel):
 
 
 @app.post("/api/analyze")
-async def analyze(req: AnalyzeRequest):
-    """输入产品 + 目标国家 → 返回 Markdown 格式市场分析报告"""
+def analyze(req: AnalyzeRequest):
+    """输入产品 + 目标国家 → 返回 Markdown 格式市场分析报告
+
+    用同步 def（而非 async）：内部 analyze_market 是同步阻塞调用，
+    FastAPI 会把同步端点放入线程池执行，不阻塞事件循环。
+    """
     product = req.product.strip()
     country = req.country.strip()
     if not product or not country:
@@ -53,62 +57,71 @@ async def analyze(req: AnalyzeRequest):
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 
+def _safe(value, default=""):
+    """LLM 可能返回 null/None，统一兜底成字符串"""
+    return default if value is None else str(value)
+
+
 def markdown_report(product: str, country: str, d: dict) -> str:
     """把 DeepSeek 返回的结构化 JSON 渲染成 Markdown 报告"""
     lines = [f"# {product}市场分析（{country}）", ""]
 
     # 市场规模
-    ms = d.get("market_size", {})
+    ms = d.get("market_size") or {}
     lines += [
         "## 市场规模",
-        f"- **规模**：{ms.get('value', '未知')}（{ms.get('year', '')}年估算）",
-        f"- **说明**：{ms.get('note', '')}",
+        f"- **规模**：{_safe(ms.get('value'), '未知')}（{_safe(ms.get('year'))}年估算）",
+        f"- **说明**：{_safe(ms.get('note'))}",
         "",
     ]
 
     # 增长趋势
-    gt = d.get("growth_trend", {})
+    gt = d.get("growth_trend") or {}
     lines += [
         "## 增长趋势",
-        f"- **年复合增长率（CAGR）**：{gt.get('cagr', '未知')}",
-        f"- **预测区间**：{gt.get('forecast_years', '')}",
-        f"- **趋势描述**：{gt.get('description', '')}",
+        f"- **年复合增长率（CAGR）**：{_safe(gt.get('cagr'), '未知')}",
+        f"- **预测区间**：{_safe(gt.get('forecast_years'))}",
+        f"- **趋势描述**：{_safe(gt.get('description'))}",
         "",
         "**关键驱动因素**：",
-        *[f"- {item}" for item in gt.get("key_drivers", [])],
+        *[f"- {_safe(item)}" for item in (gt.get("key_drivers") or [])],
         "",
     ]
 
     # 热门品牌
-    brands = d.get("top_brands", [])
+    brands = d.get("top_brands") or []
     lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 |", "| --- | --- | --- |"]
     for b in brands:
-        lines.append(f"| {b.get('name', '')} | {b.get('origin', '')} | {b.get('position', '')} |")
+        if not isinstance(b, dict):
+            continue
+        lines.append(f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | {_safe(b.get('position'))} |")
     lines.append("")
 
     # 用户画像
-    up = d.get("user_profile", {})
+    up = d.get("user_profile") or {}
     lines += [
         "## 用户画像",
-        f"- **年龄区间**：{up.get('age_range', '')}",
-        f"- **收入水平**：{up.get('income_level', '')}",
+        f"- **年龄区间**：{_safe(up.get('age_range'))}",
+        f"- **收入水平**：{_safe(up.get('income_level'))}",
         "",
         "**核心需求**：",
-        *[f"- {item}" for item in up.get("key_needs", [])],
+        *[f"- {_safe(item)}" for item in (up.get("key_needs") or [])],
         "",
         "**购买习惯**：",
-        *[f"- {item}" for item in up.get("buying_habits", [])],
+        *[f"- {_safe(item)}" for item in (up.get("buying_habits") or [])],
         "",
     ]
 
     # 风险分析
-    risks = d.get("risks", [])
+    risks = d.get("risks") or []
     lines += ["## 风险分析", "| 风险类型 | 等级 | 说明 |", "| --- | --- | --- |"]
     for r in risks:
-        lines.append(f"| {r.get('type', '')} | {r.get('level', '')} | {r.get('description', '')} |")
+        if not isinstance(r, dict):
+            continue
+        lines.append(f"| {_safe(r.get('type'))} | {_safe(r.get('level'))} | {_safe(r.get('description'))} |")
     lines.append("")
 
     # 总结
-    lines += ["## AI 总结", d.get("summary", ""), ""]
+    lines += ["## AI 总结", _safe(d.get("summary")), ""]
 
     return "\n".join(lines)

@@ -28,7 +28,16 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product, country }),
       });
-      const data = await resp.json();
+      // 后端可能返回非 JSON（如 502 网关错误页），先防御再解析
+      let data = {};
+      try {
+        data = await resp.json();
+      } catch (_) {
+        if (resp.ok) {
+          showStatus('后端响应格式异常，请刷新重试', 'error');
+          return;
+        }
+      }
 
       if (!resp.ok) {
         showStatus(data.detail || '请求失败，请稍后重试', 'error');

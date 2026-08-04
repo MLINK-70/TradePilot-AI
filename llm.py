@@ -39,6 +39,7 @@ def analyze_market(product: str, country: str) -> dict:
                     "model": DEEPSEEK_MODEL,
                     "messages": messages,
                     "temperature": 0.7,
+                    "response_format": {"type": "json_object"},  # 强制 JSON 输出
                 },
                 timeout=60,
                 proxies={"http": None, "https": None},  # 强制直连
@@ -56,9 +57,16 @@ def analyze_market(product: str, country: str) -> dict:
             logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
             time.sleep(3)
 
-    # 解析 JSON：优先直接解析，失败则剥离 ```json 围栏再试一次
+    # 解析 JSON：优先直接解析；失败则剥离 markdown 围栏（大小写都处理）再试
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        stripped = content.strip().strip("`").removeprefix("json")
-        return json.loads(stripped)
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").strip()
+            if stripped.lower().startswith("json"):
+                stripped = stripped[4:].strip()
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            raise ValueError("DeepSeek 返回内容不是合法 JSON，请重试")
