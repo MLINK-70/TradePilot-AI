@@ -25,9 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 挂载前端静态目录，前后端同源
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
 
 class AnalyzeRequest(BaseModel):
     product: str
@@ -49,6 +46,11 @@ async def analyze(req: AnalyzeRequest):
 
     logging.info("分析完成: %s / %s", product, country)
     return {"report": markdown_report(product, country, data)}
+
+
+# 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，
+# 否则 "/" 挂载会拦截 /api 下的请求）
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 
 def markdown_report(product: str, country: str, d: dict) -> str:
