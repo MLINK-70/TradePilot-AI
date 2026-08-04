@@ -63,6 +63,8 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
+button.loading { background: var(--muted); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
 
 .status { margin-top: 0.8rem; min-height: 1.5rem; }
 .status.info { color: var(--muted); }

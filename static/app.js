@@ -19,8 +19,11 @@
 
     btn.disabled = true;
     btn.textContent = '分析中…';
+    btn.classList.add('loading');
     showStatus('正在生成市场分析报告，约需 10-30 秒…', 'info');
+    // 新请求开始即清空旧报告，避免误读上次结果
     reportEl.hidden = true;
+    reportEl.innerHTML = '';
 
     try {
       const resp = await fetch('/api/analyze', {
@@ -53,6 +56,7 @@
     } finally {
       btn.disabled = false;
       btn.textContent = '开始分析';
+      btn.classList.remove('loading');
     }
   });
 

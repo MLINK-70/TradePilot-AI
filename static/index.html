@@ -33,8 +33,18 @@
 
   <footer>数据由 AI 估算生成，仅供参考，非官方统计</footer>
 
+  <!-- marked + DOMPurify：CDN 加载失败时降级为纯文本展示 -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script>
+    if (typeof marked === 'undefined') {
+      // CDN 失败时用 <pre> 显示纯文本，保证功能可用
+      document.addEventListener('DOMContentLoaded', function () {
+        window.marked = { parse: function (text) { return '<pre>' + text.replace(/</g, '&lt;') + '</pre>'; } };
+      });
+      window.DOMPurify = { sanitize: function (html) { return html; } };
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

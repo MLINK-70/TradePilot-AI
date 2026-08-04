@@ -90,11 +90,15 @@ def markdown_report(product: str, country: str, d: dict) -> str:
 
     # 热门品牌
     brands = d.get("top_brands") or []
-    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 |", "| --- | --- | --- |"]
+    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 | 备注 |", "| --- | --- | --- | --- |"]
     for b in brands:
         if not isinstance(b, dict):
             continue
-        lines.append(f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | {_safe(b.get('position'))} |")
+        note = _safe(b.get("note"))
+        lines.append(
+            f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | "
+            f"{_safe(b.get('position'))} | {note} |"
+        )
     lines.append("")
 
     # 用户画像
