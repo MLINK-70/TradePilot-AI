@@ -1,0 +1,9 @@
+# 虚拟环境
+venv/
+
+# 密钥（绝不提交）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
