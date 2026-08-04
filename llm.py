@@ -1,5 +1,8 @@
 """llm.py — DeepSeek API 调用层：请求、JSON 解析、错误处理"""
 import json
+import logging
+
+import time
 
 import requests
 
@@ -21,28 +24,35 @@ def analyze_market(product: str, country: str) -> dict:
         {"role": "user", "content": build_user_prompt(product, country)},
     ]
 
-    try:
-        resp = requests.post(
-            f"{DEEPSEEK_BASE_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": DEEPSEEK_MODEL,
-                "messages": messages,
-                "temperature": 0.7,
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-    except requests.exceptions.Timeout:
-        raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
-    except requests.exceptions.HTTPError:
-        raise ValueError(f"DeepSeek API 返回错误：{resp.status_code}，可能是余额不足或 Key 无效")
-    except requests.exceptions.RequestException as e:
-        raise ValueError(f"DeepSeek API 网络错误：{e}")
+    # DeepSeek 有间歇性限流（短时密集请求被临时切断），
+    # 重试间隔取 3 秒以跨过限流窗口（实测 1 秒间隔仍在窗口内）
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": DEEPSEEK_MODEL,
+                    "messages": messages,
+                    "temperature": 0.7,
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            break
+        except requests.exceptions.Timeout:
+            raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
+        except requests.exceptions.HTTPError:
+            raise ValueError(f"DeepSeek API 返回错误：{resp.status_code}，可能是余额不足或 Key 无效")
+        except requests.exceptions.RequestException as e:
+            if attempt == 1:
+                raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
+            logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
+            time.sleep(3)
 
     # 解析 JSON：优先直接解析，失败则剥离 ```json 围栏再试一次
     try:
