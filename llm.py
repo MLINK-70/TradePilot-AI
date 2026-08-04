@@ -24,8 +24,8 @@ def analyze_market(product: str, country: str) -> dict:
         {"role": "user", "content": build_user_prompt(product, country)},
     ]
 
-    # DeepSeek 有间歇性限流（短时密集请求被临时切断），
-    # 重试间隔取 3 秒以跨过限流窗口（实测 1 秒间隔仍在窗口内）
+    # DeepSeek 是国内 API，强制直连不走代理（否则梯子 TUN 模式
+    # 会劫持流量导致并发时 "Response ended prematurely"）
     for attempt in range(2):
         try:
             resp = requests.post(
@@ -33,6 +33,7 @@ def analyze_market(product: str, country: str) -> dict:
                 headers={
                     "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
                     "Content-Type": "application/json",
+                    "Connection": "close",
                 },
                 json={
                     "model": DEEPSEEK_MODEL,
@@ -40,6 +41,7 @@ def analyze_market(product: str, country: str) -> dict:
                     "temperature": 0.7,
                 },
                 timeout=60,
+                proxies={"http": None, "https": None},  # 强制直连
             )
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
