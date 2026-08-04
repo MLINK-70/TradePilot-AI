@@ -1,0 +1,106 @@
+/* TradePilot AI — 暗色简洁风格 */
+:root {
+  --bg: #0f1420;
+  --card: #1a2130;
+  --border: #2a3348;
+  --text: #e6eaf2;
+  --muted: #8a94a8;
+  --accent: #4f8cff;
+  --error: #ff6b6b;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.7;
+  padding: 2rem 1rem;
+}
+
+.hero { text-align: center; margin-bottom: 2rem; }
+.hero h1 {
+  font-size: 2.2rem;
+  background: linear-gradient(90deg, var(--accent), #7aa5ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 0.05em;
+}
+.hero .subtitle { color: var(--muted); margin-top: 0.4rem; }
+
+main { max-width: 760px; margin: 0 auto; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.form-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.form-row label { flex: 0 0 5rem; color: var(--muted); }
+.form-row input {
+  flex: 1;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+.form-row input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+button {
+  width: 100%;
+  padding: 0.7rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.status { margin-top: 0.8rem; min-height: 1.5rem; }
+.status.info { color: var(--muted); }
+.status.error { color: var(--error); }
+
+.report {
+  margin-top: 1.5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 2rem;
+}
+
+.report h1 { font-size: 1.6rem; margin-bottom: 1rem; color: var(--accent); }
+.report h2 {
+  font-size: 1.15rem;
+  margin: 1.5rem 0 0.6rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+.report ul, .report ol { padding-left: 1.4rem; }
+.report li { margin: 0.2rem 0; }
+.report table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}
+.report th, .report td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+.report th { background: var(--bg); color: var(--muted); }
+
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 2.5rem;
+}

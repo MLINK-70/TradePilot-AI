@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 跨境市场分析</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>TradePilot AI</h1>
+    <p class="subtitle">AI 跨境市场分析 · 输入产品与目标国家，生成市场调研报告</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <form id="analyze-form" autocomplete="off">
+        <div class="form-row">
+          <label for="product">产品</label>
+          <input type="text" id="product" placeholder="例如：蓝牙耳机" required>
+        </div>
+        <div class="form-row">
+          <label for="country">目标国家</label>
+          <input type="text" id="country" placeholder="例如：德国" required>
+        </div>
+        <button type="submit" id="submit-btn">开始分析</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="report" class="report" hidden></section>
+  </main>
+
+  <footer>数据由 AI 估算生成，仅供参考，非官方统计</footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
