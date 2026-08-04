@@ -71,15 +71,21 @@ def analyze_market(product: str, country: str) -> dict:
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
             break
-        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
-            # 超时和网络错误都重试（瞬时抖动概率高），间隔 3 秒跨过限流窗口
+        except requests.exceptions.Timeout as e:
+            # 超时可能是瞬时抖动，重试一次
             if attempt == 1:
-                if isinstance(e, requests.exceptions.Timeout):
-                    raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
+                raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
+            logging.warning("DeepSeek 请求超时，3 秒后自动重试: %s", e)
+            time.sleep(3)
+        except requests.exceptions.HTTPError as e:
+            # 401/402 等错误重试无意义，立即报错（从异常取状态码，不依赖 resp）
+            code = e.response.status_code if e.response is not None else "?"
+            raise ValueError(f"DeepSeek API 返回错误：{code}，可能是余额不足或 Key 无效")
+        except requests.exceptions.RequestException as e:
+            # 网络错误可能是瞬时抖动，重试一次
+            if attempt == 1:
                 raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
             logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
             time.sleep(3)
-        except requests.exceptions.HTTPError:
-            raise ValueError(f"DeepSeek API 返回错误：{resp.status_code}，可能是余额不足或 Key 无效")
 
     return _parse_json(content)
