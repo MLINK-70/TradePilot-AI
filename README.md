@@ -71,11 +71,11 @@
 ## 目录结构
 
 ```
-├── main.py          # FastAPI 入口：路由 + Markdown 报告渲染
+├── main.py          # FastAPI 入口：路由 + Markdown 报告渲染（含 null 兜底）
 ├── config.py        # 读取 .env 配置（API Key / 模型）
-├── llm.py           # DeepSeek 调用层：请求、重试、JSON 解析、错误处理
-├── prompts.py       # 系统提示词（产品核心价值，独立成模块）
-├── static/          # 前端（原生 HTML/JS，marked.js 渲染 Markdown）
+├── llm.py           # DeepSeek 调用层：强制直连、自动重试、JSON 解析
+├── prompts.py       # 系统提示词（6 字段 JSON 协议，产品核心价值）
+├── static/          # 前端（原生 HTML/JS，marked.js 渲染 + CDN 降级容错）
 │   ├── index.html
 │   ├── app.js
 │   └── style.css
