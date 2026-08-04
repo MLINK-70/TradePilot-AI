@@ -10,6 +10,30 @@ from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from prompts import SYSTEM_PROMPT, build_user_prompt
 
 
+def _parse_json(content: str) -> dict:
+    """把 DeepSeek 返回的文本解析为 JSON 对象。
+
+    优先直接解析；失败则剥离 markdown 围栏（大小写都处理）再试；
+    顶层必须是 dict（防止返回合法数组导致渲染端 500）。
+    """
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").strip()
+            if stripped.lower().startswith("json"):
+                stripped = stripped[4:].strip()
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            raise ValueError("DeepSeek 返回内容不是合法 JSON，请重试")
+
+    if not isinstance(data, dict):
+        raise ValueError("DeepSeek 返回结构异常（非 JSON 对象），请重试")
+    return data
+
+
 def analyze_market(product: str, country: str) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
@@ -47,26 +71,15 @@ def analyze_market(product: str, country: str) -> dict:
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
             break
-        except requests.exceptions.Timeout:
-            raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
-        except requests.exceptions.HTTPError:
-            raise ValueError(f"DeepSeek API 返回错误：{resp.status_code}，可能是余额不足或 Key 无效")
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+            # 超时和网络错误都重试（瞬时抖动概率高），间隔 3 秒跨过限流窗口
             if attempt == 1:
+                if isinstance(e, requests.exceptions.Timeout):
+                    raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
                 raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
             logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
             time.sleep(3)
+        except requests.exceptions.HTTPError:
+            raise ValueError(f"DeepSeek API 返回错误：{resp.status_code}，可能是余额不足或 Key 无效")
 
-    # 解析 JSON：优先直接解析；失败则剥离 markdown 围栏（大小写都处理）再试
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        stripped = content.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`").strip()
-            if stripped.lower().startswith("json"):
-                stripped = stripped[4:].strip()
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            raise ValueError("DeepSeek 返回内容不是合法 JSON，请重试")
+    return _parse_json(content)

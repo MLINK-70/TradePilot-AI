@@ -70,7 +70,7 @@ def markdown_report(product: str, country: str, d: dict) -> str:
     ms = d.get("market_size") or {}
     lines += [
         "## 市场规模",
-        f"- **规模**：{_safe(ms.get('value'), '未知')}（{_safe(ms.get('year'))}年估算）",
+        f"- **规模**：{_safe(ms.get('value'), '未知')}（{_safe(ms.get('year'), '未知')}年估算）",
         f"- **说明**：{_safe(ms.get('note'))}",
         "",
     ]
