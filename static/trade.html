@@ -25,6 +25,9 @@
     .stat { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem; text-align: center; }
     .stat .num { font-size: 1.3rem; font-weight: bold; color: var(--accent); }
     .stat .lbl { color: var(--muted); font-size: 0.8rem; }
+    .year-pair { flex: 1; display: flex; align-items: center; gap: 0.6rem; }
+    .year-pair input { flex: 1; }
+    .year-sep { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -50,12 +53,12 @@
           <datalist id="target-list"></datalist>
         </div>
         <div class="form-row">
-          <label for="start-year">起始年份</label>
-          <input type="number" id="start-year" placeholder="例如：2020" value="2020" min="1990" max="2024" required>
-        </div>
-        <div class="form-row">
-          <label for="end-year">截至年份</label>
-          <input type="number" id="end-year" placeholder="留空默认到今年" min="1990" max="2024">
+          <label>年份范围</label>
+          <div class="year-pair">
+            <input type="number" id="start-year" placeholder="起始" value="2020" min="1990" max="2024" required>
+            <span class="year-sep">至</span>
+            <input type="number" id="end-year" placeholder="截至（留空=最新）" min="1990" max="2024">
+          </div>
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
       </form>
