@@ -42,15 +42,18 @@
       <form id="trade-form" autocomplete="off">
         <div class="form-row">
           <label for="product">产品</label>
-          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required>
+          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" list="product-list" required>
+          <datalist id="product-list"></datalist>
         </div>
         <div class="form-row">
           <label for="target">国家/组织</label>
-          <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" required>
+          <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" list="target-list" required>
+          <datalist id="target-list"></datalist>
         </div>
         <div class="form-row">
           <label for="years">年份范围</label>
-          <input type="text" id="years" placeholder="例如：2020-2022 或 2020,2022" value="2020-2024" required>
+          <input type="text" id="years" placeholder="例如：2020-2022 或 2020,2022" value="2020-2024" list="year-list" required>
+          <datalist id="year-list"></datalist>
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
       </form>
@@ -91,6 +94,38 @@
 
       // 保存最近一次查询，供下载按钮使用
       let lastQuery = null;
+
+      // 页面加载时拉取下拉选项
+      (async function loadOptions() {
+        try {
+          const resp = await fetch('/api/trade/options');
+          const data = await resp.json();
+
+          const productList = document.getElementById('product-list');
+          data.products.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            productList.appendChild(opt);
+          });
+
+          const targetList = document.getElementById('target-list');
+          data.targets.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.name + (t.is_group ? '（组织聚合）' : '');
+            targetList.appendChild(opt);
+          });
+
+          const yearList = document.getElementById('year-list');
+          const thisYear = new Date().getFullYear();
+          for (let y = thisYear; y >= thisYear - 10; y--) {
+            const opt = document.createElement('option');
+            opt.value = String(y);
+            yearList.appendChild(opt);
+          }
+        } catch (_) {
+          // 选项加载失败不阻断手动输入
+        }
+      })();
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
