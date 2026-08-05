@@ -143,8 +143,12 @@ def fetch_year(cmd_code: str, partner_code: str, period: str) -> list:
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
-            data = resp.json().get("data", [])
-            save_cache(cmd_code, partner_code, period, flow_code, data)
+            try:
+                data = resp.json().get("data", [])
+            except ValueError:
+                raise ValueError(f"UN Comtrade 返回非 JSON 响应（HTTP {resp.status_code}）")
+            if data:
+                save_cache(cmd_code, partner_code, period, flow_code, data)
             return data
         except requests.exceptions.RequestException as e:
             if attempt == 2:
@@ -155,12 +159,18 @@ def fetch_year(cmd_code: str, partner_code: str, period: str) -> list:
 
 
 def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
-    """组织聚合查询（欧盟/东盟/一带一路）：循环查成员国数据
+    """组织聚合查询（欧盟/东盟/RCEP）：循环查成员国数据并缓存聚合结果
 
     preview 免费接口对组代码（97/948）不返回数据，统一走成员清单聚合。
+    聚合结果按 (cmd_code, group_code, period) 缓存，避免重复全量循环。
     """
+    cached = get_cached(cmd_code, group_code, period, "X")
+    if cached is not None:
+        return cached
+
     members = GROUP_MEMBERS[group_code]
     all_rows = []
+    failed = []
     for i, country in enumerate(members):
         code = AREA_MAP.get(country, "")
         if not code:
@@ -170,10 +180,16 @@ def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
             rows = fetch_year(cmd_code, code, period)
             all_rows.extend(rows)
         except ValueError as e:
+            failed.append(country)
             print(f"[跳过] {country}: {e}")
         time.sleep(1)  # 限流避让
         if i % 10 == 9:
             print(f"[进度] 已查 {i + 1}/{len(members)} 国")
+
+    if failed:
+        print(f"[警告] {len(failed)} 国查询失败: {', '.join(failed)}")
+
+    save_cache(cmd_code, group_code, period, "X", all_rows)
     return all_rows
 
 

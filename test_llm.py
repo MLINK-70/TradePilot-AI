@@ -1,4 +1,7 @@
-"""llm.py 单元测试：JSON 解析 + 异常分派 + 重试策略 + 缓存"""
+"""llm.py 单元测试：JSON 解析 + 异常分派 + 重试策略 + 缓存
+
+注意：trade 相关测试需要网络，不在本文件。
+"""
 import unittest
 from unittest import mock
 
