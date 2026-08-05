@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 贸易数据</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
   <style>
     .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
     .tabs a {
@@ -31,6 +31,7 @@
   </style>
 </head>
 <body>
+  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
   <header class="hero">
     <span class="eyebrow">UN Comtrade · Export Intelligence</span>
     <h1>TradePilot AI</h1>
@@ -94,12 +95,12 @@
   <footer>数据来源：UN Comtrade 公共 API · 出口流向数据</footer>
 
   <script src="echarts.min.js"></script>
+  <script src="theme.js"></script>
   <script>
     (function () {
       'use strict';
 
-      const form = document.getElementById('trade-form');
-      const btn = document.getElementById('submit-btn');
+      const form = document.getElementById('trade-form');      const btn = document.getElementById('submit-btn');
       const statusEl = document.getElementById('status');
       const resultEl = document.getElementById('result');
       let chart = null;
