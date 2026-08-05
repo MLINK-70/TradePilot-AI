@@ -82,6 +82,7 @@ class TradeExportRequest(BaseModel):
     product: str
     target: str
     year: str
+    reporter: str = "中国"  # 出口国（报告国），默认中国
 
 
 def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
@@ -89,10 +90,11 @@ def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
     product = req.product.strip()
     target = req.target.strip()
     year = req.year.strip()
+    reporter = (req.reporter or "中国").strip()
     if not product or not target or not year:
         raise HTTPException(status_code=400, detail="product、target、year 不能为空")
     try:
-        hs, rows = query_trade(product, target, year)
+        hs, rows = query_trade(product, target, year, reporter=reporter)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return hs, rows
@@ -141,6 +143,7 @@ class TradeQueryRequest(BaseModel):
     target: str
     start_year: int          # 起始年
     end_year: int | None = None  # 截至年（可选，留空默认到最新）
+    reporter: str = "中国"   # 出口国（报告国），默认中国
 
 
 def _years_from_range(start_year: int, end_year: int | None) -> list:
@@ -179,14 +182,14 @@ def trade_query(req: TradeQueryRequest):
 
     try:
         if len(years) == 1:
-            hs, rows = query_trade(product, target, str(years[0]))
+            hs, rows = query_trade(product, target, str(years[0]), reporter=req.reporter)
             trend = summarize_trend(rows)
         else:
-            hs, rows, trend = query_trend(product, target, years)
+            hs, rows, trend = query_trend(product, target, years, reporter=req.reporter)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    logging.info("贸易查询: %s / %s / %d-%s", product, target, req.start_year, req.end_year or "最新")
+    logging.info("贸易查询: %s→%s / %s / %d-%s", req.reporter, target, product, req.start_year, req.end_year or "最新")
     return {
         "hs_code": hs,
         "total_value": sum(r.get("primaryValue") or 0 for r in rows),

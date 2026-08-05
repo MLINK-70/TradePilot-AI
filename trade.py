@@ -85,15 +85,19 @@ def partner_lookup(name: str) -> str:
     return AREA_MAP.get(name.strip(), "")
 
 
-def fetch_year(cmd_code: str, partner_code: str, period: str) -> list:
-    """查单年数据：先查缓存，未命中打 API 并写缓存"""
-    flow_code = "X"  # X=出口（中国为报告国时即中国出口）
-    cached = get_cached(cmd_code, partner_code, period, flow_code)
+def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "中国") -> list:
+    """查单年数据：先查缓存，未命中打 API 并写缓存
+
+    reporter: 出口国（报告国），默认中国
+    """
+    reporter_code = AREA_MAP.get(reporter, "156")
+    flow_code = "X"  # X=出口（reporter 为报告国时即该国的出口）
+    cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code)
     if cached is not None:
         return cached
 
     params = {
-        "reporterCode": "156",  # 中国
+        "reporterCode": reporter_code,
         "period": period,
         "partnerCode": partner_code,
         "cmdCode": cmd_code,
@@ -120,7 +124,7 @@ def fetch_year(cmd_code: str, partner_code: str, period: str) -> list:
             except ValueError:
                 raise ValueError(f"UN Comtrade 返回非 JSON 响应（HTTP {resp.status_code}）")
             if data:
-                save_cache(cmd_code, partner_code, period, flow_code, data)
+                save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
             return data
         except requests.exceptions.RequestException as e:
             if attempt == 2:
@@ -130,13 +134,14 @@ def fetch_year(cmd_code: str, partner_code: str, period: str) -> list:
     return []
 
 
-def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
+def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "中国") -> list:
     """组织聚合查询（欧盟/东盟/RCEP）：循环查成员国数据并缓存聚合结果
 
     preview 免费接口对组代码（97/948）不返回数据，统一走成员清单聚合。
-    聚合结果按 (cmd_code, group_code, period) 缓存，避免重复全量循环。
+    聚合结果按 (cmd_code, group_code, period, reporter) 缓存，避免重复全量循环。
     """
-    cached = get_cached(cmd_code, group_code, period, "X")
+    reporter_code = AREA_MAP.get(reporter, "156")
+    cached = get_cached(cmd_code, group_code, period, "X", reporter_code)
     if cached is not None:
         return cached
 
@@ -149,7 +154,7 @@ def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
             print(f"[跳过] {country}: 无代码")
             continue
         try:
-            rows = fetch_year(cmd_code, code, period)
+            rows = fetch_year(cmd_code, code, period, reporter)
             all_rows.extend(rows)
         except ValueError as e:
             failed.append(country)
@@ -163,12 +168,12 @@ def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
 
     # 空结果不缓存：429 或成员全失败时缓存 []，后续查询永远拿到 0
     if all_rows:
-        save_cache(cmd_code, group_code, period, "X", all_rows)
+        save_cache(cmd_code, group_code, period, "X", all_rows, reporter_code)
     return all_rows
 
 
-def query_trade(product: str, target: str, year: str):
-    """主入口：产品 + 国家/组织 + 年份 → 数据列表"""
+def query_trade(product: str, target: str, year: str, reporter: str = "中国"):
+    """主入口：产品 + 国家/组织 + 年份 + 出口国 → 数据列表"""
     init_db()
 
     hs = hs_lookup(product)
@@ -180,16 +185,16 @@ def query_trade(product: str, target: str, year: str):
         raise ValueError(f"未找到国家/组织「{target}」的代码")
 
     if target_code in GROUP_MEMBERS:
-        rows = fetch_group(hs, year, target_code)
+        rows = fetch_group(hs, year, target_code, reporter)
     else:
-        rows = fetch_year(hs, target_code, year)
+        rows = fetch_year(hs, target_code, year, reporter)
 
     log_query(product, hs, target)
     return hs, rows
 
 
-def query_trend(product: str, target: str, years: list) -> tuple[str, list, dict]:
-    """年份范围查询：产品 + 国家/组织 + 年份列表 → (hs_code, 全部行, 逐年汇总)
+def query_trend(product: str, target: str, years: list, reporter: str = "中国") -> tuple[str, list, dict]:
+    """年份范围查询：产品 + 国家/组织 + 年份列表 + 出口国 → (hs_code, 全部行, 逐年汇总)
 
     years 如 [2018, 2019, 2020, 2021, 2022]，每年代价同单年查询；
     单国每年 1 次请求，组织每年 N 国请求（已有缓存则秒回）。
@@ -207,10 +212,10 @@ def query_trend(product: str, target: str, years: list) -> tuple[str, list, dict
     all_rows = []
     if target_code in GROUP_MEMBERS:
         for year in years:
-            all_rows.extend(fetch_group(hs, str(year), target_code))
+            all_rows.extend(fetch_group(hs, str(year), target_code, reporter))
     else:
         for year in years:
-            all_rows.extend(fetch_year(hs, target_code, str(year)))
+            all_rows.extend(fetch_year(hs, target_code, str(year), reporter))
 
     log_query(product, hs, target)
     return hs, all_rows, summarize_trend(all_rows)

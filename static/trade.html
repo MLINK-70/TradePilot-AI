@@ -48,7 +48,11 @@
           <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required>
         </div>
         <div class="form-row">
-          <label for="target">国家/组织</label>
+          <label>出口国</label>
+          <input type="text" id="reporter" placeholder="默认中国，可改任意国家" value="中国" list="target-list" required>
+        </div>
+        <div class="form-row">
+          <label for="target">目标市场</label>
           <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" list="target-list" required>
           <datalist id="target-list"></datalist>
         </div>
@@ -128,13 +132,14 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const product = document.getElementById('product').value.trim();
+        const reporter = document.getElementById('reporter').value.trim();
         const target = document.getElementById('target').value.trim();
         const startYear = parseInt(document.getElementById('start-year').value, 10);
         const endYearRaw = document.getElementById('end-year').value.trim();
         const endYear = endYearRaw ? parseInt(endYearRaw, 10) : null;
 
         if (!product || !target || !startYear) {
-          showStatus('请填写产品、国家/组织和起始年份', 'error');
+          showStatus('请填写产品、目标市场和起始年份', 'error');
           return;
         }
         if (endYear !== null && endYear < startYear) {
@@ -151,7 +156,7 @@
           const resp = await fetch('/api/trade/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product, target, start_year: startYear, end_year: endYear }),
+            body: JSON.stringify({ product, target, start_year: startYear, end_year: endYear, reporter }),
           });
           let data = {};
           try { data = await resp.json(); } catch (_) {}
@@ -161,7 +166,7 @@
             return;
           }
 
-          lastQuery = { product, target, start_year: startYear, end_year: endYear };
+          lastQuery = { product, reporter, target, start_year: startYear, end_year: endYear };
           render(data);
           showStatus('', '');
         } catch (err) {
@@ -177,10 +182,13 @@
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
         document.getElementById('stat-count').textContent = data.record_count;
         document.getElementById('chart-meta').textContent =
-          'HS' + data.hs_code + ' · 中国出口 · 数据来源 UN Comtrade';
+          'HS' + data.hs_code + ' · ' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target + ' · 数据来源 UN Comtrade';
 
         const years = data.trend.map(t => t.year);
         const values = data.trend.map(t => t.value);
+
+        // 先显示容器再初始化图表（hidden 容器里 init 会算出 0 尺寸，图挤成一团）
+        resultEl.hidden = false;
 
         if (chart) { chart.dispose(); }
         chart = echarts.init(document.getElementById('trend-chart'));
@@ -211,7 +219,6 @@
             areaStyle: { color: 'rgba(79,140,255,0.15)' },
           }],
         });
-        resultEl.hidden = false;
       }
 
       document.getElementById('dl-report').addEventListener('click', async () => {
@@ -219,7 +226,7 @@
         const resp = await fetch('/api/trade/export/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year) }),
+          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year), reporter: lastQuery.reporter }),
         });
         if (resp.ok) {
           const blob = await resp.blob();
