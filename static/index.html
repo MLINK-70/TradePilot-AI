@@ -5,11 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境市场分析</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
+    .tabs a {
+      padding: 0.4rem 1.2rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
+  </style>
 </head>
 <body>
   <header class="hero">
     <h1>TradePilot AI</h1>
     <p class="subtitle">AI 跨境市场分析 · 输入产品与目标国家，生成市场调研报告</p>
+    <nav class="tabs">
+      <a href="/" class="active">市场分析</a>
+      <a href="/trade.html">贸易数据</a>
+    </nav>
   </header>
 
   <main>
