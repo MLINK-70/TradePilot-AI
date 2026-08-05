@@ -5,13 +5,17 @@
 llm.py / prompts.py 是所有模块共用的底座。
 """
 import logging
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market
+from trade import query_trade
+from export import build_csv, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -50,6 +54,64 @@ def analyze(req: AnalyzeRequest):
 
     logging.info("分析完成: %s / %s", product, country)
     return {"report": markdown_report(product, country, data)}
+
+
+class TradeExportRequest(BaseModel):
+    product: str
+    target: str
+    year: str
+
+
+def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
+    """复用查询逻辑：产品 + 国家/组织 + 年份 → (hs_code, rows)"""
+    product = req.product.strip()
+    target = req.target.strip()
+    year = req.year.strip()
+    if not product or not target or not year:
+        raise HTTPException(status_code=400, detail="product、target、year 不能为空")
+    try:
+        hs, rows = query_trade(product, target, year)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return hs, rows
+
+
+def _download_headers(filename: str) -> dict:
+    """构建下载响应头，中文文件名用 RFC 5987 编码（HTTP 头只支持 latin-1）"""
+    return {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+    }
+
+
+@app.post("/api/trade/export/report")
+def export_report(req: TradeExportRequest):
+    """下载 Word 分析报告（数据总览 + 原始数据 + AI 分析）"""
+    hs, rows = _fetch_trade_data(req)
+    try:
+        ai = analyze_market(req.product.strip(), req.target.strip())
+    except ValueError:
+        ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
+    buf = build_word_report(req.product.strip(), req.target.strip(), req.year.strip(),
+                            hs, rows, ai)
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{req.year.strip()}-报告.docx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=_download_headers(filename),
+    )
+
+
+@app.post("/api/trade/export/data")
+def export_data(req: TradeExportRequest):
+    """下载 CSV 原始数据（UN Comtrade 原始记录）"""
+    hs, rows = _fetch_trade_data(req)
+    buf = build_csv(rows)
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{req.year.strip()}-原始数据.csv"
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
+        headers=_download_headers(filename),
+    )
 
 
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，
