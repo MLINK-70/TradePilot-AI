@@ -16,18 +16,19 @@
       font-size: 0.9rem;
     }
     .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
-    .download-row { margin-top: 0.8rem; }
-    .download-row button {
-      width: 100%;
-      padding: 0.6rem;
+    .btn-row { display: flex; gap: 0.8rem; }
+    .btn-row .btn-primary { flex: 1; }
+    .btn-row .btn-secondary {
+      flex: 1;
+      padding: 0.7rem;
       border: 1px solid var(--accent);
       border-radius: 8px;
       background: transparent;
       color: var(--accent);
-      font-size: 0.9rem;
+      font-size: 1rem;
       cursor: pointer;
     }
-    .download-row button:hover { background: rgba(79, 140, 255, 0.1); }
+    .btn-row .btn-secondary:hover { background: rgba(79, 140, 255, 0.1); }
   </style>
 </head>
 <body>
@@ -51,12 +52,12 @@
           <label for="country">目标国家</label>
           <input type="text" id="country" placeholder="例如：德国" required>
         </div>
-        <button type="submit" id="submit-btn">开始分析</button>
+        <div class="btn-row">
+          <button type="submit" id="submit-btn" class="btn-primary">开始分析</button>
+          <button type="button" id="dl-report" class="btn-secondary" hidden>下载 Word 报告</button>
+        </div>
       </form>
       <p id="status" class="status"></p>
-      <div id="download-row" class="download-row" hidden>
-        <button id="dl-report">下载 Word 报告</button>
-      </div>
     </section>
 
     <section id="report" class="report" hidden></section>

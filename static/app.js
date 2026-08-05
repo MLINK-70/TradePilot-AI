@@ -6,7 +6,6 @@
   const btn = document.getElementById('submit-btn');
   const statusEl = document.getElementById('status');
   const reportEl = document.getElementById('report');
-  const downloadRow = document.getElementById('download-row');
   const dlBtn = document.getElementById('dl-report');
   let lastQuery = null;
 
@@ -50,6 +49,7 @@
     btn.disabled = true;
     btn.textContent = '分析中…';
     btn.classList.add('loading');
+    dlBtn.hidden = true;
     showStatus('正在生成市场分析报告，约需 10-30 秒…', 'info');
     // 新请求开始即清空旧报告，避免误读上次结果
     reportEl.hidden = true;
@@ -81,7 +81,7 @@
       reportEl.innerHTML = DOMPurify.sanitize(marked.parse(data.report));
       reportEl.hidden = false;
       lastQuery = { product, country };
-      downloadRow.hidden = false;
+      dlBtn.hidden = false;
       showStatus('', '');
     } catch (err) {
       showStatus('网络错误，请确认后端服务已启动', 'error');
