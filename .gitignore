@@ -7,3 +7,6 @@ venv/
 # Python 缓存
 __pycache__/
 *.pyc
+
+# SQLite 数据库（本地缓存，不进版本库）
+*.db
