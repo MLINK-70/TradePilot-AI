@@ -117,16 +117,15 @@ def export_data(req: TradeExportRequest):
 class TradeQueryRequest(BaseModel):
     product: str
     target: str
-    years: str  # "2020-2022" 或 "2020,2022" 或 "2022"
+    start_year: int  # 起始年：查该年至今；前端也可传单年（同一年）
 
 
-def _parse_years_arg(arg: str) -> list:
-    """解析年份参数（与 trade.py 命令行一致）"""
-    arg = arg.strip()
-    if "-" in arg:
-        start, end = arg.split("-")
-        return list(range(int(start), int(end) + 1))
-    return [int(y) for y in arg.split(",") if y.strip().isdigit()]
+def _years_from_start(start_year: int) -> list:
+    """起始年 → 年份列表（起始年至今）"""
+    latest = 2024  # UN Comtrade 数据更新至最新可用年份（1-3 月延迟）
+    if start_year > latest:
+        start_year = latest
+    return list(range(start_year, latest + 1))
 
 
 @app.get("/api/trade/options")
@@ -143,15 +142,15 @@ def trade_options():
 
 @app.post("/api/trade/query")
 def trade_query(req: TradeQueryRequest):
-    """贸易数据查询：产品 + 国家/组织 + 年份范围 → 数据 + 趋势汇总"""
+    """贸易数据查询：产品 + 国家/组织 + 起始年 → 数据 + 趋势汇总"""
     product = req.product.strip()
     target = req.target.strip()
-    if not product or not target or not req.years.strip():
-        raise HTTPException(status_code=400, detail="product、target、years 不能为空")
+    if not product or not target or not req.start_year:
+        raise HTTPException(status_code=400, detail="product、target、start_year 不能为空")
 
-    years = _parse_years_arg(req.years)
+    years = _years_from_start(req.start_year)
     if not years:
-        raise HTTPException(status_code=400, detail=f"无法解析年份「{req.years}」")
+        raise HTTPException(status_code=400, detail=f"起始年无效「{req.start_year}」")
 
     try:
         if len(years) == 1:
@@ -162,7 +161,7 @@ def trade_query(req: TradeQueryRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    logging.info("贸易查询: %s / %s / %s", product, target, req.years)
+    logging.info("贸易查询: %s / %s / 起始 %d", product, target, req.start_year)
     return {
         "hs_code": hs,
         "total_value": sum(r.get("primaryValue") or 0 for r in rows),

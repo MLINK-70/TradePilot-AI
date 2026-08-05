@@ -42,8 +42,7 @@
       <form id="trade-form" autocomplete="off">
         <div class="form-row">
           <label for="product">产品</label>
-          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" list="product-list" required>
-          <datalist id="product-list"></datalist>
+          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required>
         </div>
         <div class="form-row">
           <label for="target">国家/组织</label>
@@ -51,8 +50,8 @@
           <datalist id="target-list"></datalist>
         </div>
         <div class="form-row">
-          <label for="years">年份范围</label>
-          <input type="text" id="years" placeholder="例如：2020-2022 或 2020,2022" value="2020-2024" list="year-list" required>
+          <label for="start-year">起始年份</label>
+          <input type="number" id="start-year" placeholder="例如：2020（查询该年至今）" value="2020" min="1990" max="2024" list="year-list" required>
           <datalist id="year-list"></datalist>
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
@@ -101,13 +100,6 @@
           const resp = await fetch('/api/trade/options');
           const data = await resp.json();
 
-          const productList = document.getElementById('product-list');
-          data.products.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p;
-            productList.appendChild(opt);
-          });
-
           const targetList = document.getElementById('target-list');
           data.targets.forEach(t => {
             const opt = document.createElement('option');
@@ -116,8 +108,7 @@
           });
 
           const yearList = document.getElementById('year-list');
-          const thisYear = new Date().getFullYear();
-          for (let y = thisYear; y >= thisYear - 10; y--) {
+          for (let y = 2024; y >= 1990; y--) {
             const opt = document.createElement('option');
             opt.value = String(y);
             yearList.appendChild(opt);
@@ -131,10 +122,10 @@
         e.preventDefault();
         const product = document.getElementById('product').value.trim();
         const target = document.getElementById('target').value.trim();
-        const years = document.getElementById('years').value.trim();
+        const startYear = parseInt(document.getElementById('start-year').value, 10);
 
-        if (!product || !target || !years) {
-          showStatus('请填写产品、国家/组织和年份范围', 'error');
+        if (!product || !target || !startYear) {
+          showStatus('请填写产品、国家/组织和起始年份', 'error');
           return;
         }
 
@@ -147,7 +138,7 @@
           const resp = await fetch('/api/trade/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product, target, years }),
+            body: JSON.stringify({ product, target, start_year: startYear }),
           });
           let data = {};
           try { data = await resp.json(); } catch (_) {}
@@ -157,7 +148,7 @@
             return;
           }
 
-          lastQuery = { product, target, years };
+          lastQuery = { product, target, start_year: startYear };
           render(data);
           showStatus('', '');
         } catch (err) {
@@ -215,7 +206,7 @@
         const resp = await fetch('/api/trade/export/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.years).split(',')[0] }),
+          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year) }),
         });
         if (resp.ok) {
           const blob = await resp.blob();
@@ -233,7 +224,7 @@
         const resp = await fetch('/api/trade/export/data', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.years).split(',')[0] }),
+          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year) }),
         });
         if (resp.ok) {
           const blob = await resp.blob();
