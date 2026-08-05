@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market
-from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, query_trade, query_trend, summarize_trend
+from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
 
@@ -159,7 +159,7 @@ class TradeQueryRequest(BaseModel):
 
 def _years_from_range(start_year: int, end_year: int | None) -> list:
     """起止年 → 年份列表；end_year 为空默认到最新可用年份"""
-    latest = 2024  # UN Comtrade 数据更新至最新可用年份（1-3 月延迟）
+    latest = get_latest_year()  # 动态探测最新可用年份
     if end_year is None or end_year > latest:
         end_year = latest
     if start_year > end_year:

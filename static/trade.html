@@ -100,7 +100,8 @@
     (function () {
       'use strict';
 
-      const form = document.getElementById('trade-form');      const btn = document.getElementById('submit-btn');
+      const form = document.getElementById('trade-form');
+      const btn = document.getElementById('submit-btn');
       const statusEl = document.getElementById('status');
       const resultEl = document.getElementById('result');
       let chart = null;
@@ -250,7 +251,7 @@
           const blob = await resp.blob();
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = 'TradePilot-报告.docx';
+          a.download = '';  // 留空让后端 Content-Disposition 的精确文件名生效
           a.click();
         } else {
           showStatus('报告下载失败', 'error');
@@ -272,7 +273,7 @@
           const blob = await resp.blob();
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = 'TradePilot-原始数据.csv';
+          a.download = '';  // 留空让后端 Content-Disposition 的精确文件名生效
           a.click();
         } else {
           showStatus('数据下载失败', 'error');

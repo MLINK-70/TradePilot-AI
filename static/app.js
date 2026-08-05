@@ -23,7 +23,7 @@
         const blob = await resp.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'TradePilot-市场分析报告.docx';
+        a.download = '';  // 留空让后端 Content-Disposition 的精确文件名生效
         a.click();
       } else {
         showStatus('报告下载失败', 'error');

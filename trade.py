@@ -90,6 +90,45 @@ GROUP_MEMBERS = {
 }
 
 
+def get_latest_year() -> int:
+    """探测 UN Comtrade 最新可用年份（从今年往前找第一个有数据的年份）
+
+    探测结果写入缓存表（reporter_code='META'），避免每次查询都探测。
+    """
+    import datetime
+    from database import get_cached, save_cache
+
+    meta_key = "LATEST_YEAR"
+    cached = get_cached(meta_key, "0", "0", "X", "META")
+    if cached:
+        return int(cached[0]["year"])
+
+    this_year = datetime.date.today().year
+    for y in range(this_year, this_year - 3, -1):
+        try:
+            params = {
+                "reporterCode": "156",
+                "period": str(y),
+                "partnerCode": "0",
+                "cmdCode": "8518",
+                "flowCode": "X",
+                "maxRecords": 1,
+            }
+            resp = requests.get(
+                BASE_URL, params=params,
+                headers={"Accept": "application/json"},
+                timeout=30,
+                proxies={"http": None, "https": None},
+            )
+            if resp.status_code == 200 and resp.json().get("count", 0) > 0:
+                save_cache(meta_key, "0", "0", "X", [{"year": y}], "META")
+                return y
+        except Exception:
+            continue
+        time.sleep(1)
+    return 2024  # 兜底
+
+
 def hs_lookup(product: str) -> str:
     """产品名 → HS 编码；支持直接传 4-6 位数字编码"""
     product = product.strip()
@@ -141,6 +180,10 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 data = resp.json().get("data", [])
             except ValueError:
                 raise ValueError(f"UN Comtrade 返回非 JSON 响应（HTTP {resp.status_code}）")
+            if len(data) >= 500:
+                # 触顶提示：preview 接口 4 位码返回聚合记录，理论上不会触发；
+                # 若触发说明可能有更细粒度数据被截断
+                print(f"[警告] HS{cmd_code} {period} 返回 {len(data)} 条，可能达到记录上限")
             if data:
                 save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
             return data
