@@ -189,7 +189,9 @@ def fetch_group(cmd_code: str, period: str, group_code: str) -> list:
     if failed:
         print(f"[警告] {len(failed)} 国查询失败: {', '.join(failed)}")
 
-    save_cache(cmd_code, group_code, period, "X", all_rows)
+    # 空结果不缓存：429 或成员全失败时缓存 []，后续查询永远拿到 0
+    if all_rows:
+        save_cache(cmd_code, group_code, period, "X", all_rows)
     return all_rows
 
 
