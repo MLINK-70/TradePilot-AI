@@ -1,8 +1,8 @@
 """llm.py — DeepSeek API 调用层：请求、JSON 解析、错误处理"""
 import json
 import logging
-
 import time
+from functools import lru_cache
 
 import requests
 
@@ -34,11 +34,13 @@ def _parse_json(content: str) -> dict:
     return data
 
 
+@lru_cache(maxsize=64)
 def analyze_market(product: str, country: str) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
     失败时抛 ValueError，由 main.py 统一转成 502。
+    已加缓存：相同 (产品, 国家) 直接命中，不重复消耗 API token。
     """
     if not DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
