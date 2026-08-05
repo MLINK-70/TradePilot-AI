@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 贸易数据</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
+    .tabs a {
+      padding: 0.4rem 1.2rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .chart-box { margin-top: 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+    #trend-chart { width: 100%; height: 360px; }
+    .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
+    .download-row { display: flex; gap: 0.8rem; margin-top: 1rem; }
+    .download-row button { flex: 1; }
+    .stats { display: flex; gap: 1rem; margin-top: 1rem; }
+    .stat { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem; text-align: center; }
+    .stat .num { font-size: 1.3rem; font-weight: bold; color: var(--accent); }
+    .stat .lbl { color: var(--muted); font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <h1>TradePilot AI</h1>
+    <p class="subtitle">AI 跨境市场分析 · 贸易数据查询（中国出口）</p>
+    <nav class="tabs">
+      <a href="/">市场分析</a>
+      <a href="/trade.html" class="active">贸易数据</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <form id="trade-form" autocomplete="off">
+        <div class="form-row">
+          <label for="product">产品</label>
+          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required>
+        </div>
+        <div class="form-row">
+          <label for="target">国家/组织</label>
+          <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" required>
+        </div>
+        <div class="form-row">
+          <label for="years">年份范围</label>
+          <input type="text" id="years" placeholder="例如：2020-2022 或 2020,2022" value="2020-2024" required>
+        </div>
+        <button type="submit" id="submit-btn">查询数据</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="result" hidden>
+      <div class="stats">
+        <div class="stat"><div class="num" id="stat-total">—</div><div class="lbl">总出口额（美元）</div></div>
+        <div class="stat"><div class="num" id="stat-weight">—</div><div class="lbl">总净重（公斤）</div></div>
+        <div class="stat"><div class="num" id="stat-count">—</div><div class="lbl">数据记录数</div></div>
+      </div>
+
+      <div class="chart-box">
+        <div id="trend-chart"></div>
+        <p class="meta" id="chart-meta"></p>
+      </div>
+
+      <div class="download-row">
+        <button id="dl-report">下载 Word 报告</button>
+        <button id="dl-data">下载 CSV 数据</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>数据来源：UN Comtrade 公共 API · 中国为报告国 · 出口流向</footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const form = document.getElementById('trade-form');
+      const btn = document.getElementById('submit-btn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      let chart = null;
+
+      // 保存最近一次查询，供下载按钮使用
+      let lastQuery = null;
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const product = document.getElementById('product').value.trim();
+        const target = document.getElementById('target').value.trim();
+        const years = document.getElementById('years').value.trim();
+
+        if (!product || !target || !years) {
+          showStatus('请填写产品、国家/组织和年份范围', 'error');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '查询中…';
+        showStatus('正在从 UN Comtrade 获取数据，组织聚合可能需要 1-2 分钟…', 'info');
+        resultEl.hidden = true;
+
+        try {
+          const resp = await fetch('/api/trade/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product, target, years }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+
+          if (!resp.ok) {
+            showStatus(data.detail || '查询失败，请稍后重试', 'error');
+            return;
+          }
+
+          lastQuery = { product, target, years };
+          render(data);
+          showStatus('', '');
+        } catch (err) {
+          showStatus('网络错误，请确认后端服务已启动', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '查询数据';
+        }
+      });
+
+      function render(data) {
+        document.getElementById('stat-total').textContent = data.total_value.toLocaleString('zh-CN');
+        document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
+        document.getElementById('stat-count').textContent = data.record_count;
+        document.getElementById('chart-meta').textContent =
+          'HS' + data.hs_code + ' · 中国出口 · 数据来源 UN Comtrade';
+
+        const years = data.trend.map(t => t.year);
+        const values = data.trend.map(t => t.value);
+
+        if (chart) { chart.dispose(); }
+        chart = echarts.init(document.getElementById('trend-chart'));
+        chart.setOption({
+          backgroundColor: 'transparent',
+          tooltip: {
+            trigger: 'axis',
+            formatter: function (params) {
+              const p = params[0];
+              return p.name + '年：' + p.value.toLocaleString('zh-CN') + ' 美元';
+            },
+          },
+          grid: { left: 90, right: 30, top: 30, bottom: 40 },
+          xAxis: { type: 'category', data: years, axisLabel: { color: '#8a94a8' } },
+          yAxis: {
+            type: 'value',
+            axisLabel: { color: '#8a94a8', formatter: v => (v / 1e8).toFixed(1) + '亿' },
+            splitLine: { lineStyle: { color: '#2a3348' } },
+          },
+          series: [{
+            name: '出口额',
+            type: 'line',
+            data: values,
+            smooth: true,
+            symbolSize: 8,
+            lineStyle: { color: '#4f8cff', width: 3 },
+            itemStyle: { color: '#4f8cff' },
+            areaStyle: { color: 'rgba(79,140,255,0.15)' },
+          }],
+        });
+        resultEl.hidden = false;
+      }
+
+      document.getElementById('dl-report').addEventListener('click', async () => {
+        if (!lastQuery) return;
+        const resp = await fetch('/api/trade/export/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.years).split(',')[0] }),
+        });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'TradePilot-报告.docx';
+          a.click();
+        } else {
+          showStatus('报告下载失败', 'error');
+        }
+      });
+
+      document.getElementById('dl-data').addEventListener('click', async () => {
+        if (!lastQuery) return;
+        const resp = await fetch('/api/trade/export/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.years).split(',')[0] }),
+        });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'TradePilot-原始数据.csv';
+          a.click();
+        } else {
+          showStatus('数据下载失败', 'error');
+        }
+      });
+
+      function showStatus(text, type) {
+        statusEl.textContent = text;
+        statusEl.className = 'status ' + type;
+      }
+    })();
+  </script>
+</body>
+</html>

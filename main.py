@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market
-from trade import query_trade
+from trade import query_trade, query_trend, summarize_trend
 from export import build_csv, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -112,6 +112,61 @@ def export_data(req: TradeExportRequest):
         media_type="text/csv",
         headers=_download_headers(filename),
     )
+
+
+class TradeQueryRequest(BaseModel):
+    product: str
+    target: str
+    years: str  # "2020-2022" 或 "2020,2022" 或 "2022"
+
+
+def _parse_years_arg(arg: str) -> list:
+    """解析年份参数（与 trade.py 命令行一致）"""
+    arg = arg.strip()
+    if "-" in arg:
+        start, end = arg.split("-")
+        return list(range(int(start), int(end) + 1))
+    return [int(y) for y in arg.split(",") if y.strip().isdigit()]
+
+
+@app.post("/api/trade/query")
+def trade_query(req: TradeQueryRequest):
+    """贸易数据查询：产品 + 国家/组织 + 年份范围 → 数据 + 趋势汇总"""
+    product = req.product.strip()
+    target = req.target.strip()
+    if not product or not target or not req.years.strip():
+        raise HTTPException(status_code=400, detail="product、target、years 不能为空")
+
+    years = _parse_years_arg(req.years)
+    if not years:
+        raise HTTPException(status_code=400, detail=f"无法解析年份「{req.years}」")
+
+    try:
+        if len(years) == 1:
+            hs, rows = query_trade(product, target, str(years[0]))
+            trend = summarize_trend(rows)
+        else:
+            hs, rows, trend = query_trend(product, target, years)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    logging.info("贸易查询: %s / %s / %s", product, target, req.years)
+    return {
+        "hs_code": hs,
+        "total_value": sum(r.get("primaryValue") or 0 for r in rows),
+        "total_weight": sum(r.get("netWgt") or 0 for r in rows),
+        "record_count": len(rows),
+        "trend": [{"year": y, "value": v["value"], "weight": v["weight"]} for y, v in trend.items()],
+        "rows": [
+            {
+                "year": r.get("refYear"),
+                "partner_code": r.get("partnerCode"),
+                "value": r.get("primaryValue") or 0,
+                "weight": r.get("netWgt") or 0,
+            }
+            for r in rows
+        ],
+    }
 
 
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，
