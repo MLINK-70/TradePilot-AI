@@ -55,9 +55,10 @@
         <div class="form-row">
           <label>年份范围</label>
           <div class="year-pair">
-            <input type="number" id="start-year" placeholder="起始" value="2020" min="1990" max="2024" required>
+            <input type="text" id="start-year" placeholder="起始" value="2020" list="year-list" required>
             <span class="year-sep">至</span>
-            <input type="number" id="end-year" placeholder="截至（留空=最新）" min="1990" max="2024">
+            <input type="text" id="end-year" placeholder="截至（留空=最新）" list="year-list">
+            <datalist id="year-list"></datalist>
           </div>
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
@@ -112,6 +113,13 @@
             opt.value = t.name + (t.is_group ? '（组织聚合）' : '');
             targetList.appendChild(opt);
           });
+
+          const yearList = document.getElementById('year-list');
+          for (let y = 2024; y >= 1990; y--) {
+            const opt = document.createElement('option');
+            opt.value = String(y);
+            yearList.appendChild(opt);
+          }
         } catch (_) {
           // 选项加载失败不阻断手动输入
         }
