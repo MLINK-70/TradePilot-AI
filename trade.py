@@ -216,21 +216,83 @@ def query_trade(product: str, target: str, year: str):
     return hs, rows
 
 
+def query_trend(product: str, target: str, years: list) -> tuple[str, list, dict]:
+    """年份范围查询：产品 + 国家/组织 + 年份列表 → (hs_code, 全部行, 逐年汇总)
+
+    years 如 [2018, 2019, 2020, 2021, 2022]，每年代价同单年查询；
+    单国每年 1 次请求，组织每年 N 国请求（已有缓存则秒回）。
+    """
+    init_db()
+
+    hs = hs_lookup(product)
+    if not hs:
+        raise ValueError(f"未找到产品「{product}」的 HS 编码，可手输 4-6 位数字编码")
+
+    target_code = partner_lookup(target)
+    if not target_code:
+        raise ValueError(f"未找到国家/组织「{target}」的代码")
+
+    all_rows = []
+    if target_code in GROUP_MEMBERS:
+        for year in years:
+            all_rows.extend(fetch_group(hs, str(year), target_code))
+    else:
+        for year in years:
+            all_rows.extend(fetch_year(hs, target_code, str(year)))
+
+    log_query(product, hs, target)
+    return hs, all_rows, summarize_trend(all_rows)
+
+
+def summarize_trend(rows: list) -> dict:
+    """逐年汇总：{year: {"value": float, "weight": float}}，按 refYear 聚合"""
+    by_year: dict[int, dict] = {}
+    for r in rows:
+        year = r.get("refYear")
+        if not year:
+            continue
+        entry = by_year.setdefault(year, {"value": 0.0, "weight": 0.0})
+        entry["value"] += r.get("primaryValue") or 0
+        entry["weight"] += r.get("netWgt") or 0
+    return {y: v for y, v in sorted(by_year.items())}
+
+
+def _parse_years(arg: str) -> list:
+    """解析年份参数：'2022' / '2020-2022' / '2018,2020,2022'"""
+    arg = arg.strip()
+    if "-" in arg:
+        start, end = arg.split("-")
+        return list(range(int(start), int(end) + 1))
+    return [int(y) for y in arg.split(",") if y.strip().isdigit()]
+
+
 if __name__ == "__main__":
-    # 用法：python trade.py 蓝牙耳机 德国 2022
+    # 用法: python trade.py 蓝牙耳机 德国 2022 | 2020-2022 | 2018,2020,2022
     if len(sys.argv) < 4:
-        print("用法: python trade.py <产品名或HS编码> <国家/组织> <年份>")
+        print("用法: python trade.py <产品名或HS编码> <国家/组织> <年份或范围>")
         sys.exit(1)
 
     product_arg, target_arg, year_arg = sys.argv[1], sys.argv[2], sys.argv[3]
+    years = _parse_years(year_arg)
+    if not years:
+        print(f"错误: 无法解析年份「{year_arg}」，支持 2022 / 2020-2022 / 2018,2020,2022")
+        sys.exit(1)
+
     try:
-        hs_code, data = query_trade(product_arg, target_arg, year_arg)
+        if len(years) == 1:
+            hs_code, data = query_trade(product_arg, target_arg, str(years[0]))
+            trend = summarize_trend(data)
+        else:
+            hs_code, data, trend = query_trend(product_arg, target_arg, years)
         total_value = sum(r.get("primaryValue") or 0 for r in data)
         total_wgt = sum(r.get("netWgt") or 0 for r in data)
         print(f"\n=== {product_arg}(HS{hs_code}) 中国出口 {target_arg} {year_arg} ===")
         print(f"记录数: {len(data)}")
         print(f"贸易总额: {total_value:,.0f} 美元")
         print(f"总净重: {total_wgt:,.0f} 公斤")
+        print("逐年趋势:")
+        for y, v in trend.items():
+            print(f"  {y}: {v['value']:,.0f} 美元 | {v['weight']:,.0f} 公斤")
         for r in data[:5]:
             print(f"  {r.get('cmdDesc') or 'N/A'} | {r.get('partnerDesc')} | {r.get('primaryValue') or 0:,.0f} 美元")
     except ValueError as e:
