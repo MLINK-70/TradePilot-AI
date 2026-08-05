@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from llm import analyze_market
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, query_trade, query_trend, summarize_trend
-from export import build_csv, build_word_report
+from export import build_csv, build_market_report, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -54,6 +54,28 @@ def analyze(req: AnalyzeRequest):
 
     logging.info("分析完成: %s / %s", product, country)
     return {"report": markdown_report(product, country, data)}
+
+
+@app.post("/api/analyze/export")
+def export_market_report(req: AnalyzeRequest):
+    """下载市场分析 Word 报告"""
+    product = req.product.strip()
+    country = req.country.strip()
+    if not product or not country:
+        raise HTTPException(status_code=400, detail="product 和 country 不能为空")
+
+    try:
+        data = analyze_market(product, country)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    buf = build_market_report(product, country, data)
+    filename = f"TradePilot-{product}-{country}-市场分析报告.docx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=_download_headers(filename),
+    )
 
 
 class TradeExportRequest(BaseModel):

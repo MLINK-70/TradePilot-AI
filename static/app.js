@@ -6,6 +6,36 @@
   const btn = document.getElementById('submit-btn');
   const statusEl = document.getElementById('status');
   const reportEl = document.getElementById('report');
+  const downloadRow = document.getElementById('download-row');
+  const dlBtn = document.getElementById('dl-report');
+  let lastQuery = null;
+
+  dlBtn.addEventListener('click', async () => {
+    if (!lastQuery) return;
+    dlBtn.disabled = true;
+    dlBtn.textContent = '生成中…';
+    try {
+      const resp = await fetch('/api/analyze/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lastQuery),
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'TradePilot-市场分析报告.docx';
+        a.click();
+      } else {
+        showStatus('报告下载失败', 'error');
+      }
+    } catch (_) {
+      showStatus('网络错误，下载失败', 'error');
+    } finally {
+      dlBtn.disabled = false;
+      dlBtn.textContent = '下载 Word 报告';
+    }
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -50,6 +80,8 @@
       // DOMPurify 先过滤再插入，防止报告内容里的恶意 HTML
       reportEl.innerHTML = DOMPurify.sanitize(marked.parse(data.report));
       reportEl.hidden = false;
+      lastQuery = { product, country };
+      downloadRow.hidden = false;
       showStatus('', '');
     } catch (err) {
       showStatus('网络错误，请确认后端服务已启动', 'error');

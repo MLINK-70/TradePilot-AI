@@ -75,6 +75,89 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     return buf
 
 
+def build_market_report(product: str, country: str, ai: dict) -> io.BytesIO:
+    """生成市场分析 Word 报告（AI 结构化数据 → 文档）"""
+    doc = Document()
+    style = doc.styles["Normal"]
+    style.font.name = "微软雅黑"
+    style.font.size = Pt(10.5)
+
+    h = doc.add_heading(f"{product}市场分析（{country}）", level=0)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    meta = doc.add_paragraph()
+    meta.add_run("声明: 本报告由 AI 大模型生成，数据为估算值，仅供参考，非官方统计")
+
+    # 市场规模
+    doc.add_heading("市场规模", level=1)
+    ms = ai.get("market_size") or {}
+    doc.add_paragraph(f"规模: {ms.get('value', '未知')}（{ms.get('year', '')}年估算）")
+    if ms.get("note"):
+        doc.add_paragraph(f"说明: {ms.get('note')}")
+
+    # 增长趋势
+    doc.add_heading("增长趋势", level=1)
+    gt = ai.get("growth_trend") or {}
+    doc.add_paragraph(f"CAGR: {gt.get('cagr', '未知')} | 预测区间: {gt.get('forecast_years', '')}")
+    doc.add_paragraph(gt.get("description", ""))
+    if gt.get("key_drivers"):
+        doc.add_heading("关键驱动因素", level=2)
+        for k in gt["key_drivers"]:
+            doc.add_paragraph(f"• {k}", style="List Bullet")
+
+    # 热门品牌
+    doc.add_heading("热门品牌", level=1)
+    brands = ai.get("top_brands") or []
+    if brands:
+        tbl = doc.add_table(rows=1 + len(brands), cols=4)
+        tbl.style = "Light Grid Accent 1"
+        for j, head in enumerate(["品牌", "所属国家", "市场地位", "备注"]):
+            tbl.rows[0].cells[j].text = head
+        for i, b in enumerate(brands, 1):
+            if not isinstance(b, dict):
+                continue
+            tbl.rows[i].cells[0].text = str(b.get("name", ""))
+            tbl.rows[i].cells[1].text = str(b.get("origin", ""))
+            tbl.rows[i].cells[2].text = str(b.get("position", ""))
+            tbl.rows[i].cells[3].text = str(b.get("note", ""))
+
+    # 用户画像
+    doc.add_heading("用户画像", level=1)
+    up = ai.get("user_profile") or {}
+    doc.add_paragraph(f"年龄区间: {up.get('age_range', '')} | 收入水平: {up.get('income_level', '')}")
+    if up.get("key_needs"):
+        doc.add_heading("核心需求", level=2)
+        for n in up["key_needs"]:
+            doc.add_paragraph(f"• {n}", style="List Bullet")
+    if up.get("buying_habits"):
+        doc.add_heading("购买习惯", level=2)
+        for b in up["buying_habits"]:
+            doc.add_paragraph(f"• {b}", style="List Bullet")
+
+    # 风险分析
+    doc.add_heading("风险分析", level=1)
+    risks = ai.get("risks") or []
+    if risks:
+        tbl = doc.add_table(rows=1 + len(risks), cols=3)
+        tbl.style = "Light Grid Accent 1"
+        for j, head in enumerate(["风险类型", "等级", "说明"]):
+            tbl.rows[0].cells[j].text = head
+        for i, r in enumerate(risks, 1):
+            if not isinstance(r, dict):
+                continue
+            tbl.rows[i].cells[0].text = str(r.get("type", ""))
+            tbl.rows[i].cells[1].text = str(r.get("level", ""))
+            tbl.rows[i].cells[2].text = str(r.get("description", ""))
+
+    # AI 总结
+    doc.add_heading("AI 总结", level=1)
+    doc.add_paragraph(ai.get("summary", ""))
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def build_csv(rows: list) -> io.BytesIO:
     """生成 CSV 原始数据（内存流）"""
     buf = io.StringIO()

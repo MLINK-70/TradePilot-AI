@@ -16,6 +16,18 @@
       font-size: 0.9rem;
     }
     .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .download-row { margin-top: 0.8rem; }
+    .download-row button {
+      width: 100%;
+      padding: 0.6rem;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--accent);
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .download-row button:hover { background: rgba(79, 140, 255, 0.1); }
   </style>
 </head>
 <body>
@@ -42,6 +54,9 @@
         <button type="submit" id="submit-btn">开始分析</button>
       </form>
       <p id="status" class="status"></p>
+      <div id="download-row" class="download-row" hidden>
+        <button id="dl-report">下载 Word 报告</button>
+      </div>
     </section>
 
     <section id="report" class="report" hidden></section>
