@@ -23,7 +23,10 @@
         const blob = await resp.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = '';  // 留空让后端 Content-Disposition 的精确文件名生效
+        // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.docx';
         a.click();
       } else {
         showStatus('报告下载失败', 'error');
