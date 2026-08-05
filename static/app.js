@@ -23,8 +23,15 @@
         const blob = await resp.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = '';  // 留空让后端 Content-Disposition 的精确文件名生效
+
+        let filename = '报告.docx';
+        const disposition = resp.headers.get('Content-Disposition');
+        if (disposition && disposition.indexOf('filename*=UTF-8\'\'') !== -1) {
+            filename = decodeURIComponent(disposition.split('filename*=UTF-8\'\'')[1]);
+        }
+        a.download = filename;
         a.click();
+        URL.revokeObjectURL(a.href);
       } else {
         showStatus('报告下载失败', 'error');
       }

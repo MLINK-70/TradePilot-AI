@@ -96,7 +96,9 @@ def get_latest_year() -> int:
     探测结果写入缓存表（reporter_code='META'），避免每次查询都探测。
     """
     import datetime
-    from database import get_cached, save_cache
+    from database import get_cached, save_cache, init_db
+
+    init_db()
 
     meta_key = "LATEST_YEAR"
     cached = get_cached(meta_key, "0", "0", "X", "META")
