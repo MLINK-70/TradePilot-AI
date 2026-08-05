@@ -1,27 +1,45 @@
 /* ============================================================
-   TradePilot AI — 设计系统
-   主题：深海 + 航线 + 数据仪表（贸易领航员）
+   TradePilot AI — 设计系统 v3（亮色专业风）
+   主题：亮色 + 数据专业感（参考 UN Comtrade 官方风格）
    ============================================================ */
 
 :root {
   /* 调色板 */
-  --bg: #0a1020;
-  --bg-glow: rgba(62, 123, 250, 0.07);
-  --card: #111b30;
-  --card-2: #0d1526;
-  --border: #1e2b47;
-  --accent: #3e7bfa;
-  --accent-soft: rgba(62, 123, 250, 0.12);
-  --gold: #d9a94a;
-  --teal: #2fb5a5;
-  --text: #e7edf8;
-  --muted: #8b9bb8;
-  --error: #ff6b6b;
+  --bg: #f5f7fa;
+  --bg-glow: rgba(46, 91, 255, 0.05);
+  --card: #ffffff;
+  --card-2: #f0f4fa;
+  --border: #dde4ee;
+  --accent: #2e5bff;
+  --accent-soft: rgba(46, 91, 255, 0.08);
+  --gold: #b8860b;
+  --teal: #0d9488;
+  --text: #1a2333;
+  --muted: #64748b;
+  --error: #dc2626;
 
   /* 布局 */
-  --radius: 14px;
-  --radius-sm: 10px;
+  --radius: 12px;
+  --radius-sm: 8px;
   --max-w: 860px;
+}
+
+/* ============ 夜间模式（跟随系统） ============ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a1020;
+    --bg-glow: rgba(62, 123, 250, 0.07);
+    --card: #111b30;
+    --card-2: #0d1526;
+    --border: #1e2b47;
+    --accent: #3e7bfa;
+    --accent-soft: rgba(62, 123, 250, 0.12);
+    --gold: #d9a94a;
+    --teal: #2fb5a5;
+    --text: #e7edf8;
+    --muted: #8b9bb8;
+    --error: #ff6b6b;
+  }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -60,7 +78,7 @@ body {
   font-size: 2.6rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  background: linear-gradient(120deg, #ffffff 30%, var(--accent) 100%);
+  background: linear-gradient(120deg, #0f1e3d 30%, var(--accent) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -88,7 +106,7 @@ body {
   height: 7px;
   border-radius: 50%;
   background: var(--gold);
-  box-shadow: 0 0 0 3px rgba(217, 169, 74, 0.15);
+  box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.12);
 }
 
 /* ============ 导航 Tab ============ */
@@ -99,11 +117,12 @@ body {
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--muted);
+  background: var(--card);
   text-decoration: none;
   font-size: 0.85rem;
   transition: all 0.15s ease;
 }
-.tabs a:hover { color: var(--text); border-color: var(--accent); }
+.tabs a:hover { color: var(--accent); border-color: var(--accent); }
 .tabs a.active {
   background: var(--accent);
   color: #fff;
@@ -119,7 +138,7 @@ main { max-width: var(--max-w); margin: 0 auto; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.6rem 1.8rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 3px rgba(15, 30, 61, 0.06), 0 8px 24px rgba(15, 30, 61, 0.05);
 }
 
 /* ============ 表单 ============ */
@@ -136,12 +155,12 @@ main { max-width: var(--max-w); margin: 0 auto; }
   padding: 0.62rem 0.85rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--card-2);
+  background: var(--card);
   color: var(--text);
   font-size: 0.95rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.form-row input::placeholder { color: #56617d; }
+.form-row input::placeholder { color: #94a3b8; }
 .form-row input:focus {
   outline: none;
   border-color: var(--accent);
@@ -166,7 +185,7 @@ button {
   cursor: pointer;
   transition: background 0.15s ease, transform 0.05s ease;
 }
-button:hover:not(:disabled) { background: #5791ff; }
+button:hover:not(:disabled) { background: #4a74ff; }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 button.loading { animation: pulse 1.2s infinite; }
@@ -208,7 +227,7 @@ button.loading { animation: pulse 1.2s infinite; }
 .stat .num {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--gold);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 .stat .lbl { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
@@ -264,7 +283,7 @@ footer {
   color: var(--muted);
   font-size: 0.78rem;
   margin-top: 2.8rem;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 /* ============ 响应式 ============ */

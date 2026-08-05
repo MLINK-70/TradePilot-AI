@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 贸易数据</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
   <style>
     .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
     .tabs a {
@@ -91,7 +91,7 @@
     </section>
   </main>
 
-  <footer>数据来源：UN Comtrade 公共 API · 中国为报告国 · 出口流向</footer>
+  <footer>数据来源：UN Comtrade 公共 API · 出口流向数据</footer>
 
   <script src="echarts.min.js"></script>
   <script>
@@ -106,6 +106,13 @@
 
       // 保存最近一次查询，供下载按钮使用
       let lastQuery = null;
+
+      // 图表配色跟随系统主题（暗色/亮色）
+      function chartColors() {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? { axis: '#8b9bb8', line: '#1e2b47', accent: '#4f8cff', area: 'rgba(79,140,255,0.15)' }
+          : { axis: '#64748b', line: '#dde4ee', accent: '#2e5bff', area: 'rgba(46,91,255,0.12)' };
+      }
 
       // 页面加载时拉取下拉选项
       (async function loadOptions() {
@@ -184,9 +191,10 @@
         document.getElementById('stat-total').textContent = data.total_value.toLocaleString('zh-CN');
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
         document.getElementById('stat-count').textContent = data.record_count;
-        document.getElementById('chart-meta').textContent =
-          'HS' + data.hs_code + '（' + (data.hs_description || '品名待确认') + '）· ' +
-          (lastQuery.reporter || '中国') + '出口至' + lastQuery.target + ' · 数据来源 UN Comtrade';
+        document.getElementById('chart-meta').innerHTML =
+          'HS' + data.hs_code + ' · ' + (data.hs_description || '品名待确认') +
+          '<br>' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
+          ' · 数据来源 UN Comtrade';
 
         const years = data.trend.map(t => t.year);
         const values = data.trend.map(t => t.value);
@@ -195,6 +203,7 @@
         resultEl.hidden = false;
 
         if (chart) { chart.dispose(); }
+        const c = chartColors();
         chart = echarts.init(document.getElementById('trend-chart'));
         chart.setOption({
           backgroundColor: 'transparent',
@@ -206,11 +215,11 @@
             },
           },
           grid: { left: 90, right: 30, top: 30, bottom: 40 },
-          xAxis: { type: 'category', data: years, axisLabel: { color: '#8a94a8' } },
+          xAxis: { type: 'category', data: years, axisLabel: { color: c.axis } },
           yAxis: {
             type: 'value',
-            axisLabel: { color: '#8a94a8', formatter: v => (v / 1e8).toFixed(1) + '亿' },
-            splitLine: { lineStyle: { color: '#2a3348' } },
+            axisLabel: { color: c.axis, formatter: v => (v / 1e8).toFixed(1) + '亿' },
+            splitLine: { lineStyle: { color: c.line } },
           },
           series: [{
             name: '出口额',
@@ -218,9 +227,9 @@
             data: values,
             smooth: true,
             symbolSize: 8,
-            lineStyle: { color: '#4f8cff', width: 3 },
-            itemStyle: { color: '#4f8cff' },
-            areaStyle: { color: 'rgba(79,140,255,0.15)' },
+            lineStyle: { color: c.accent, width: 3 },
+            itemStyle: { color: c.accent },
+            areaStyle: { color: c.area },
           }],
         });
       }
