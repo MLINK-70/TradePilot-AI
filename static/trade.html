@@ -183,7 +183,8 @@
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
         document.getElementById('stat-count').textContent = data.record_count;
         document.getElementById('chart-meta').textContent =
-          'HS' + data.hs_code + ' · ' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target + ' · 数据来源 UN Comtrade';
+          'HS' + data.hs_code + '（' + (data.hs_description || '品名待确认') + '）· ' +
+          (lastQuery.reporter || '中国') + '出口至' + lastQuery.target + ' · 数据来源 UN Comtrade';
 
         const years = data.trend.map(t => t.year);
         const values = data.trend.map(t => t.value);

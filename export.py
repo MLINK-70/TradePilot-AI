@@ -11,7 +11,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
-                      rows: list, ai: dict) -> io.BytesIO:
+                      rows: list, ai: dict, hs_description: str = "") -> io.BytesIO:
     """生成 Word 分析报告（内存流，供 FastAPI 返回下载）"""
     total_value = sum(r.get("primaryValue") or 0 for r in rows)
     total_wgt = sum(r.get("netWgt") or 0 for r in rows)
@@ -25,7 +25,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     meta = doc.add_paragraph()
-    meta.add_run(f"查询: 产品 {product}（HS{hs_code}）→ {target} | 年份 {year}\n")
+    hs_desc = f"（{hs_description}）" if hs_description else ""
+    meta.add_run(f"查询: 产品 {product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}\n")
     meta.add_run("数据来源: UN Comtrade 公共 API\n")
     meta.add_run("声明: 贸易数据为 UN 官方汇总; AI 分析由大模型生成，仅供参考")
     meta.runs[0].bold = True

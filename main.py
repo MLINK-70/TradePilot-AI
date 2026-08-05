@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from llm import analyze_market
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, query_trade, query_trend, summarize_trend
+from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -125,7 +126,7 @@ def export_report(req: TradeExportRequest):
         ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
     year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
-                            hs, rows, ai)
+                            hs, rows, ai, get_hs_description(hs))
     filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.docx"
     return StreamingResponse(
         buf,
@@ -202,6 +203,7 @@ def trade_query(req: TradeQueryRequest):
     logging.info("贸易查询: %s→%s / %s / %d-%s", req.reporter, target, product, req.start_year, req.end_year or "最新")
     return {
         "hs_code": hs,
+        "hs_description": get_hs_description(hs),  # HS 编码品名解释
         "total_value": sum(r.get("primaryValue") or 0 for r in rows),
         "total_weight": sum(r.get("netWgt") or 0 for r in rows),
         "record_count": len(rows),
