@@ -81,20 +81,28 @@ def export_market_report(req: AnalyzeRequest):
 class TradeExportRequest(BaseModel):
     product: str
     target: str
-    year: str
+    start_year: int          # 起始年
+    end_year: int | None = None  # 截至年（可选，留空默认到最新）
     reporter: str = "中国"  # 出口国（报告国），默认中国
 
 
 def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
-    """复用查询逻辑：产品 + 国家/组织 + 年份 → (hs_code, rows)"""
+    """复用查询逻辑：产品 + 国家/组织 + 起止年 → (hs_code, rows)"""
     product = req.product.strip()
     target = req.target.strip()
-    year = req.year.strip()
     reporter = (req.reporter or "中国").strip()
-    if not product or not target or not year:
-        raise HTTPException(status_code=400, detail="product、target、year 不能为空")
+    if not product or not target or not req.start_year:
+        raise HTTPException(status_code=400, detail="product、target、start_year 不能为空")
+
+    years = _years_from_range(req.start_year, req.end_year)
+    if not years:
+        raise HTTPException(status_code=400, detail="年份范围无效（截至年不能早于起始年）")
+
     try:
-        hs, rows = query_trade(product, target, year, reporter=reporter)
+        if len(years) == 1:
+            hs, rows = query_trade(product, target, str(years[0]), reporter=reporter)
+        else:
+            hs, rows, _ = query_trend(product, target, years, reporter=reporter)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return hs, rows
@@ -115,9 +123,10 @@ def export_report(req: TradeExportRequest):
         ai = analyze_market(req.product.strip(), req.target.strip())
     except ValueError:
         ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
-    buf = build_word_report(req.product.strip(), req.target.strip(), req.year.strip(),
+    year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
+    buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai)
-    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{req.year.strip()}-报告.docx"
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.docx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -127,10 +136,11 @@ def export_report(req: TradeExportRequest):
 
 @app.post("/api/trade/export/data")
 def export_data(req: TradeExportRequest):
-    """下载 CSV 原始数据（UN Comtrade 原始记录）"""
+    """下载 CSV 原始数据（UN Comtrade 完整原始记录）"""
     hs, rows = _fetch_trade_data(req)
     buf = build_csv(rows)
-    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{req.year.strip()}-原始数据.csv"
+    year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-原始数据.csv"
     return StreamingResponse(
         buf,
         media_type="text/csv",

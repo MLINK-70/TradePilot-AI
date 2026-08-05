@@ -159,13 +159,24 @@ def build_market_report(product: str, country: str, ai: dict) -> io.BytesIO:
 
 
 def build_csv(rows: list) -> io.BytesIO:
-    """生成 CSV 原始数据（内存流）"""
+    """生成 CSV 原始数据：完整导出 UN Comtrade 返回的每条记录（所有字段）"""
+    if not rows:
+        return io.BytesIO("暂无数据".encode("utf-8-sig"))
+
+    # 取所有记录并集字段（保持顺序），UN 返回啥导啥
+    all_keys: list[str] = []
+    seen = set()
+    for r in rows:
+        if isinstance(r, dict):
+            for k in r.keys():
+                if k not in seen:
+                    seen.add(k)
+                    all_keys.append(k)
+
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["年份", "流向", "HS编码", "国家代码", "贸易金额(美元)", "净重(公斤)"])
+    writer.writerow(all_keys)
     for r in rows:
-        writer.writerow([
-            r.get("refYear"), "出口", r.get("cmdCode"), r.get("partnerCode"),
-            r.get("primaryValue") or 0, r.get("netWgt") or 0,
-        ])
+        if isinstance(r, dict):
+            writer.writerow([r.get(k, "") for k in all_keys])
     return io.BytesIO(buf.getvalue().encode("utf-8-sig"))  # BOM 防 Excel 中文乱码

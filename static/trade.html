@@ -227,7 +227,11 @@
         const resp = await fetch('/api/trade/export/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year), reporter: lastQuery.reporter }),
+          body: JSON.stringify({
+            product: lastQuery.product, target: lastQuery.target,
+            start_year: lastQuery.start_year, end_year: lastQuery.end_year,
+            reporter: lastQuery.reporter,
+          }),
         });
         if (resp.ok) {
           const blob = await resp.blob();
@@ -245,7 +249,11 @@
         const resp = await fetch('/api/trade/export/data', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product: lastQuery.product, target: lastQuery.target, year: String(lastQuery.start_year) }),
+          body: JSON.stringify({
+            product: lastQuery.product, target: lastQuery.target,
+            start_year: lastQuery.start_year, end_year: lastQuery.end_year,
+            reporter: lastQuery.reporter,
+          }),
         });
         if (resp.ok) {
           const blob = await resp.blob();
