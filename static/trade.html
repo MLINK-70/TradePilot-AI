@@ -51,8 +51,11 @@
         </div>
         <div class="form-row">
           <label for="start-year">起始年份</label>
-          <input type="number" id="start-year" placeholder="例如：2020（查询该年至今）" value="2020" min="1990" max="2024" list="year-list" required>
-          <datalist id="year-list"></datalist>
+          <input type="number" id="start-year" placeholder="例如：2020" value="2020" min="1990" max="2024" required>
+        </div>
+        <div class="form-row">
+          <label for="end-year">截至年份</label>
+          <input type="number" id="end-year" placeholder="留空默认到今年" min="1990" max="2024">
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
       </form>
@@ -106,13 +109,6 @@
             opt.value = t.name + (t.is_group ? '（组织聚合）' : '');
             targetList.appendChild(opt);
           });
-
-          const yearList = document.getElementById('year-list');
-          for (let y = 2024; y >= 1990; y--) {
-            const opt = document.createElement('option');
-            opt.value = String(y);
-            yearList.appendChild(opt);
-          }
         } catch (_) {
           // 选项加载失败不阻断手动输入
         }
@@ -123,9 +119,15 @@
         const product = document.getElementById('product').value.trim();
         const target = document.getElementById('target').value.trim();
         const startYear = parseInt(document.getElementById('start-year').value, 10);
+        const endYearRaw = document.getElementById('end-year').value.trim();
+        const endYear = endYearRaw ? parseInt(endYearRaw, 10) : null;
 
         if (!product || !target || !startYear) {
           showStatus('请填写产品、国家/组织和起始年份', 'error');
+          return;
+        }
+        if (endYear !== null && endYear < startYear) {
+          showStatus('截至年份不能早于起始年份', 'error');
           return;
         }
 
@@ -138,7 +140,7 @@
           const resp = await fetch('/api/trade/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product, target, start_year: startYear }),
+            body: JSON.stringify({ product, target, start_year: startYear, end_year: endYear }),
           });
           let data = {};
           try { data = await resp.json(); } catch (_) {}
@@ -148,7 +150,7 @@
             return;
           }
 
-          lastQuery = { product, target, start_year: startYear };
+          lastQuery = { product, target, start_year: startYear, end_year: endYear };
           render(data);
           showStatus('', '');
         } catch (err) {

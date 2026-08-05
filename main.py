@@ -117,15 +117,18 @@ def export_data(req: TradeExportRequest):
 class TradeQueryRequest(BaseModel):
     product: str
     target: str
-    start_year: int  # 起始年：查该年至今；前端也可传单年（同一年）
+    start_year: int          # 起始年
+    end_year: int | None = None  # 截至年（可选，留空默认到最新）
 
 
-def _years_from_start(start_year: int) -> list:
-    """起始年 → 年份列表（起始年至今）"""
+def _years_from_range(start_year: int, end_year: int | None) -> list:
+    """起止年 → 年份列表；end_year 为空默认到最新可用年份"""
     latest = 2024  # UN Comtrade 数据更新至最新可用年份（1-3 月延迟）
-    if start_year > latest:
-        start_year = latest
-    return list(range(start_year, latest + 1))
+    if end_year is None or end_year > latest:
+        end_year = latest
+    if start_year > end_year:
+        return []
+    return list(range(start_year, end_year + 1))
 
 
 @app.get("/api/trade/options")
@@ -142,15 +145,15 @@ def trade_options():
 
 @app.post("/api/trade/query")
 def trade_query(req: TradeQueryRequest):
-    """贸易数据查询：产品 + 国家/组织 + 起始年 → 数据 + 趋势汇总"""
+    """贸易数据查询：产品 + 国家/组织 + 起止年 → 数据 + 趋势汇总"""
     product = req.product.strip()
     target = req.target.strip()
     if not product or not target or not req.start_year:
         raise HTTPException(status_code=400, detail="product、target、start_year 不能为空")
 
-    years = _years_from_start(req.start_year)
+    years = _years_from_range(req.start_year, req.end_year)
     if not years:
-        raise HTTPException(status_code=400, detail=f"起始年无效「{req.start_year}」")
+        raise HTTPException(status_code=400, detail="年份范围无效（截至年不能早于起始年）")
 
     try:
         if len(years) == 1:
@@ -161,7 +164,7 @@ def trade_query(req: TradeQueryRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    logging.info("贸易查询: %s / %s / 起始 %d", product, target, req.start_year)
+    logging.info("贸易查询: %s / %s / %d-%s", product, target, req.start_year, req.end_year or "最新")
     return {
         "hs_code": hs,
         "total_value": sum(r.get("primaryValue") or 0 for r in rows),
