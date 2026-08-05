@@ -65,9 +65,9 @@
 
   <footer>数据由 AI 估算生成，仅供参考，非官方统计</footer>
 
-  <!-- marked + DOMPurify：CDN 加载失败时降级（分别判断，互不覆盖） -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <!-- marked + DOMPurify：本地文件（CDN 会被浏览器追踪防护拦截） -->
+  <script src="marked.min.js"></script>
+  <script src="dompurify.min.js"></script>
   <script>
     // marked 挂了：降级为纯文本渲染（转义 HTML，不破坏 DOMPurify）
     if (typeof marked === 'undefined') {

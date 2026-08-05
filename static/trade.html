@@ -48,7 +48,7 @@
           <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required>
         </div>
         <div class="form-row">
-          <label>出口国</label>
+          <label for="reporter">出口国</label>
           <input type="text" id="reporter" placeholder="默认中国，可改任意国家" value="中国" list="target-list" required>
         </div>
         <div class="form-row">
@@ -57,7 +57,7 @@
           <datalist id="target-list"></datalist>
         </div>
         <div class="form-row">
-          <label>年份范围</label>
+          <label for="start-year">年份范围</label>
           <div class="year-pair">
             <input type="text" id="start-year" placeholder="起始" value="2020" list="year-list" required>
             <span class="year-sep">至</span>
@@ -91,7 +91,7 @@
 
   <footer>数据来源：UN Comtrade 公共 API · 中国为报告国 · 出口流向</footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="echarts.min.js"></script>
   <script>
     (function () {
       'use strict';
@@ -133,7 +133,8 @@
         e.preventDefault();
         const product = document.getElementById('product').value.trim();
         const reporter = document.getElementById('reporter').value.trim();
-        const target = document.getElementById('target').value.trim();
+        // 剥离"（组织聚合）"后缀：显示名带提示，提交名需与后端代码表一致
+        const target = document.getElementById('target').value.trim().replace('（组织聚合）', '');
         const startYear = parseInt(document.getElementById('start-year').value, 10);
         const endYearRaw = document.getElementById('end-year').value.trim();
         const endYear = endYearRaw ? parseInt(endYearRaw, 10) : null;
