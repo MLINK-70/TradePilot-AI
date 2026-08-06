@@ -36,6 +36,16 @@
       width: auto;
     }
     .copy-btn:hover { background: var(--accent-soft); }
+    .company-optional { margin-bottom: 1rem; }
+    .company-optional summary {
+      color: var(--muted);
+      font-size: 0.85rem;
+      cursor: pointer;
+      padding: 0.4rem 0;
+      user-select: none;
+    }
+    .company-optional summary:hover { color: var(--accent); }
+    .company-optional .form-row { margin-top: 0.8rem; }
   </style>
 </head>
 <body>
@@ -73,18 +83,21 @@
             <option value="电商卖家（E-commerce Seller）"></option>
           </datalist>
         </div>
-        <div class="form-row">
-          <label for="company">公司名称</label>
-          <input type="text" id="company" placeholder="例如：SoundTech Ltd.">
-        </div>
-        <div class="form-row">
-          <label for="contact">联系人</label>
-          <input type="text" id="contact" placeholder="例如：John Smith">
-        </div>
-        <div class="form-row">
-          <label for="email">邮箱</label>
-          <input type="text" id="email" placeholder="例如：sales@yourcompany.com">
-        </div>
+        <details class="company-optional">
+          <summary>公司信息（可选，填写后签名用真实信息）</summary>
+          <div class="form-row">
+            <label for="company">公司名称</label>
+            <input type="text" id="company" placeholder="例如：SoundTech Ltd.">
+          </div>
+          <div class="form-row">
+            <label for="contact">联系人</label>
+            <input type="text" id="contact" placeholder="例如：John Smith">
+          </div>
+          <div class="form-row">
+            <label for="email">邮箱</label>
+            <input type="text" id="email" placeholder="例如：sales@yourcompany.com">
+          </div>
+        </details>
         <button type="submit" id="submit-btn">生成开发信</button>
       </form>
       <p id="status" class="status"></p>

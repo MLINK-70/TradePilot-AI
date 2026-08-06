@@ -21,13 +21,17 @@ OUTREACH_SYSTEM = """你是资深外贸业务员。根据产品、目标市场�
 - 结合目标市场特点做本地化表达（如德国重品质、日本重细节）
 - 突出产品卖点（基于提供的信息）
 - 长度适中（正文 150-200 词）
-- 签名必须用提供的公司名称/联系人/邮箱，不编造"""
+- 签名必须用提供的公司信息；若信息是 [Your Company Name] 这类占位符，原样保留不替换、不编造"""
 
 
 def generate_outreach_email(product: str, market: str, customer_type: str,
-                            company: str, contact: str, email: str,
+                            company: str = "", contact: str = "", email: str = "",
                             selling_points: str = "") -> dict:
-    """生成英文开发信 + 中文要点"""
+    """生成英文开发信 + 中文要点（公司信息可选，缺失用占位符不编造）"""
+    # 公司信息缺失时用占位符，禁止 AI 编造
+    company = company or "[Your Company Name]"
+    contact = contact or "[Your Name]"
+    email = email or "[your.email@company.com]"
     user_msg = (
         f"产品: {product}\n"
         f"目标市场: {market}\n"
