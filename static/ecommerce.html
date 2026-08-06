@@ -351,6 +351,24 @@
         }
       });
 
+      // 页面加载时：若从书签工具跳来（#analysis），读取 localStorage 直接展示
+      (function () {
+        if (location.hash === '#analysis') {
+          try {
+            const saved = localStorage.getItem('tp_last_analysis');
+            if (saved) {
+              const data = JSON.parse(saved);
+              document.getElementById('reviews-input').value = (data.reviews || []).join('\n');
+              lastAnalysis = data.analysis || {};
+              if (lastAnalysis.total) {
+                render(lastAnalysis);
+                showStatus('来自书签工具：' + (data.source || '商品页') + ' 的 ' + (data.reviews || []).length + ' 条评论已分析', 'info');
+              }
+            }
+          } catch (_) {}
+        }
+      })();
+
       // 竞品对比
       document.getElementById('compare-btn').addEventListener('click', async () => {
         const prodA = document.getElementById('prod-a').value.trim() || '产品 A';
