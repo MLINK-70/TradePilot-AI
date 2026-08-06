@@ -205,7 +205,8 @@ def trade_query(req: TradeQueryRequest):
     # AI 解读真实贸易数据（失败不阻断查询，前端显示"解读生成失败"）
     analysis = {}
     try:
-        if trend:
+        # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
+        if len(trend) >= 2:
             stats = summarize_stats(trend)  # 程序先算好已核实指标
             analysis = analyze_trade_trend(product, target, req.reporter, trend, stats)
     except ValueError:

@@ -121,14 +121,23 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
     )
     stats_lines = ""
     if stats:
-        stats_lines = (
-            f"\n已核实统计指标（程序精确计算）:\n"
-            f"- 区间: {stats['first_year']}-{stats['last_year']}，期末较期初变化 {stats['change_over_period_pct']:.1f}%\n"
-            f"- 年复合增长率: {stats['cagr_pct']}%\n"
-            f"- 峰值年份: {stats['peak_year']}，谷值年份: {stats['trough_year']}\n"
-            f"- 最大单年波动: {stats['max_swing_year']} 年 {stats['max_swing_pct']}%\n"
-            f"- 单价趋势: " + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in stats.get("unit_prices", []))
-        )
+        lines = []
+        if stats.get("change_over_period_pct") is not None:
+            lines.append(
+                f"- 区间: {stats['first_year']}-{stats['last_year']}，"
+                f"期末较期初变化 {stats['change_over_period_pct']:.1f}%"
+            )
+        if stats.get("cagr_pct") is not None:
+            lines.append(f"- 年复合增长率: {stats['cagr_pct']}%")
+        if stats.get("peak_year"):
+            lines.append(f"- 峰值年份: {stats['peak_year']}，谷值年份: {stats['trough_year']}")
+        if stats.get("max_swing_year") is not None and stats.get("max_swing_pct") is not None:
+            lines.append(f"- 最大单年波动: {stats['max_swing_year']} 年 {stats['max_swing_pct']}%")
+        prices = stats.get("unit_prices") or []
+        if prices:
+            lines.append("- 单价趋势: " + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in prices))
+        if lines:
+            stats_lines = "\n已核实统计指标（程序精确计算）:\n" + "\n".join(lines)
     user_msg = (
         f"产品: {product}\n出口国: {reporter}\n目标市场: {target}\n"
         f"逐年出口数据:\n{data_lines}{stats_lines}\n请输出市场解读（引用指标数值，不自行计算）。"
