@@ -162,6 +162,9 @@
       const statusEl = document.getElementById('status');
       const resultEl = document.getElementById('result');
       let lastEmail = '';
+      let lastFollowup = '';
+      let lastEmailSubject = '';
+      let lastIdea = { product: '', market: '' };
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -210,6 +213,10 @@
             li.textContent = n;
             notes.appendChild(li);
           });
+          lastEmailSubject = data.subject || '';
+          // 从思路中粗提取产品/市场（供跟进用；后端会再拆解）
+          const ideaText = payload.idea;
+          lastIdea = { product: ideaText.slice(0, 20), market: ideaText.includes('德国') ? '德国' : ideaText.includes('美国') ? '美国' : '' };
           lastEmail = [
             'Subject: ' + (data.subject || ''),
             '',
@@ -234,6 +241,74 @@
         try {
           await navigator.clipboard.writeText(lastEmail);
           showStatus('已复制到剪贴板', 'info');
+        } catch (_) {
+          showStatus('复制失败，请手动选择复制', 'error');
+        }
+      });
+
+      document.getElementById('followup-btn').addEventListener('click', async () => {
+        if (!lastEmail) return;
+        const fuBtn = document.getElementById('followup-btn');
+        fuBtn.disabled = true;
+        fuBtn.textContent = '生成中…';
+        try {
+          // 用当前思路的上下文生成跟进（product/market 从 lastIdea 提取）
+          const resp = await fetch('/api/business/followup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product: lastIdea.product || '',
+              market: lastIdea.market || '',
+              customer_type: '经销商',
+              original_subject: lastEmailSubject,
+              company: document.getElementById('company').value.trim(),
+              contact: document.getElementById('contact').value.trim(),
+              email: document.getElementById('email').value.trim(),
+              customer_company: document.getElementById('c-company').value.trim(),
+              customer_contact: document.getElementById('c-contact').value.trim(),
+              customer_title: document.getElementById('c-title').value.trim(),
+            }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '跟进生成失败', 'error');
+            return;
+          }
+          document.getElementById('fu-subject').textContent = 'Subject: ' + (data.subject || '');
+          document.getElementById('fu-greeting').textContent = data.greeting || '';
+          document.getElementById('fu-body').textContent = data.body || '';
+          document.getElementById('fu-signature').textContent = [data.closing, data.signature].filter(Boolean).join('\n');
+          const notes = document.getElementById('fu-notes');
+          notes.innerHTML = '';
+          (data.zh_notes || []).forEach(n => {
+            const li = document.createElement('li');
+            li.textContent = n;
+            notes.appendChild(li);
+          });
+          lastFollowup = [
+            'Subject: ' + (data.subject || ''),
+            '',
+            data.greeting || '',
+            data.body || '',
+            data.closing || '',
+            data.signature || '',
+          ].join('\n');
+          document.getElementById('followup-box').hidden = false;
+          showStatus('跟进邮件已生成', 'info');
+        } catch (_) {
+          showStatus('网络错误，跟进生成失败', 'error');
+        } finally {
+          fuBtn.disabled = false;
+          fuBtn.textContent = '生成跟进邮件';
+        }
+      });
+
+      document.getElementById('fu-copy-btn').addEventListener('click', async () => {
+        if (!lastFollowup) return;
+        try {
+          await navigator.clipboard.writeText(lastFollowup);
+          showStatus('已复制跟进邮件', 'info');
         } catch (_) {
           showStatus('复制失败，请手动选择复制', 'error');
         }
