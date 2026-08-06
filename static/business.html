@@ -155,6 +155,7 @@
           <div class="title">中文要点</div>
           <ul id="zh-notes"></ul>
         </div>
+        <p class="meta" id="trade-source" hidden></p>
         <button class="copy-btn" id="copy-btn">复制全文</button>
         <button class="copy-btn" id="followup-btn">生成跟进邮件</button>
         <button class="copy-btn" id="intro-btn">生成产品介绍 + FAQ</button>
@@ -278,6 +279,14 @@
             product: parsed.product || '',
             market: parsed.market || '',
           };
+          // 展示引用的真实贸易数据（数据来源可溯源）
+          const ts = document.getElementById('trade-source');
+          if (data._trade_data) {
+            ts.textContent = '数据来源: ' + data._trade_data.split('\n')[0];
+            ts.hidden = false;
+          } else {
+            ts.hidden = true;
+          }
           lastEmail = [
             'Subject: ' + (data.subject || ''),
             '',
@@ -441,10 +450,10 @@
       document.getElementById('sim-btn').addEventListener('click', async () => {
         const idea = document.getElementById('idea').value.trim();
         if (!idea) { showStatus('请先填写核心思路（含产品）', 'error'); return; }
-        simProduct = idea.slice(0, 30);
-        // 从思路猜市场
-        simMarket = idea.includes('德国') ? '德国' : idea.includes('美国') ? '美国'
-          : idea.includes('日本') ? '日本' : idea.includes('英国') ? '英国' : '德国';
+        // 优先用后端精确拆解值（lastIdea），为空才回退思路截断
+        simProduct = (lastIdea.product || idea.slice(0, 30)).trim();
+        simMarket = lastIdea.market || (idea.includes('德国') ? '德国' : idea.includes('美国') ? '美国'
+          : idea.includes('日本') ? '日本' : idea.includes('英国') ? '英国' : '德国');
         simType = idea.includes('零售') ? '零售商' : '经销商';
         simHistory = [];
         simLog.innerHTML = '';
