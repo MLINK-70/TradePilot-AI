@@ -1,0 +1,156 @@
+"""ecommerce.py — 跨境电商模块：评论分析引擎
+
+第四版核心：评论文本 → 解析（情感/维度/痛点）→ 聚类（Top 痛点/卖点/建议）
+→ 平台风格 Listing 生成。零 API 依赖（用户粘贴 + 演示数据），合规真实。
+
+复用 llm._chat / _parse_json 底座。
+"""
+import json
+
+from llm import _chat, _parse_json
+
+# 消费电子通用维度
+ASPECTS = ["电池续航", "降噪", "佩戴舒适", "蓝牙连接", "音质", "做工质量", "价格", "物流", "售后", "其他"]
+
+REVIEW_PARSE_SYSTEM = """你是跨境电商评论分析师。分析每条用户评论，提取结构化信息。
+
+输出 JSON：
+{
+  "reviews": [
+    {
+      "text": "评论原文（原样保留）",
+      "sentiment": "positive/negative/neutral",
+      "aspect": "维度（电池续航/降噪/佩戴舒适/蓝牙连接/音质/做工质量/价格/物流/售后/其他）",
+      "pain_point": "抱怨点（负面评论才填，如：续航太短）",
+      "praise_point": "卖点（正面评论才填，如：降噪效果惊艳）"
+    }
+  ]
+}
+
+要求：
+- 逐条分析，不遗漏不合并
+- text 必须与输入完全一致（原样保留，不翻译不改写）
+- sentiment 判断：明确夸奖=positive，明确抱怨=negative，中性描述=neutral
+- aspect 从给定维度中选一个最相关的
+- 一条评论可能同时有 pain_point 和 praise_point（如"降噪好但续航差"）"""
+
+REVIEW_SUMMARY_SYSTEM = """你是资深产品经理。根据评论分析结果（每条评论的 sentiment/aspect/痛点/卖点），输出产品改进洞察。
+
+输出 JSON：
+{
+  "top_pains": [
+    {"pain": "痛点描述（如：续航虚标严重）", "count": 出现次数, "aspect": "维度", "example": "引用原文（必须来自给定评论，不能编造）"}
+  ],
+  "top_praises": [
+    {"praise": "卖点描述（如：降噪效果出色）", "count": 出现次数, "aspect": "维度", "example": "引用原文"}
+  ],
+  "overall_sentiment": "一句话总评（正面/负面/混合）",
+  "improvement_suggestions": ["改进建议1（具体可执行）", "改进建议2"],
+  "zh_summary": "中文总结（面向产品改进方向）"
+}
+
+要求：
+- top_pains 按出现次数排序取前 5，top_praises 取前 5
+- example 必须逐字来自给定评论，禁止编造引用
+- 改进建议具体（如"将电池容量标注改为实测值"），不说空话
+- 所有数字来自统计，不虚增"""
+
+
+def _parse_reviews_batch(reviews: list) -> list:
+    """分批解析评论（每批 10 条，防超长）"""
+    parsed = []
+    for i in range(0, len(reviews), 10):
+        batch = reviews[i:i + 10]
+        content = _chat([
+            {"role": "system", "content": REVIEW_PARSE_SYSTEM},
+            {"role": "user", "content": "评论列表（每行一条）:\n" + "\n".join(f"{j + 1}. {r}" for j, r in enumerate(batch))},
+        ], use_json=True)
+        data = _parse_json(content)
+        parsed.extend(data.get("reviews", []))
+    return parsed
+
+
+def analyze_reviews(reviews: list) -> dict:
+    """评论分析主流程：解析 → 统计 → 聚类"""
+    if not reviews:
+        raise ValueError("评论列表为空")
+
+    # 1. 解析（逐条提取 sentiment/aspect/痛点/卖点）
+    parsed = _parse_reviews_batch(reviews)
+
+    # 2. 程序统计（可溯源，不依赖 AI 算数）
+    sentiments = {"positive": 0, "negative": 0, "neutral": 0}
+    aspect_counts = {}
+    for r in parsed:
+        s = r.get("sentiment", "neutral")
+        sentiments[s] = sentiments.get(s, 0) + 1
+        a = r.get("aspect", "其他")
+        aspect_counts[a] = aspect_counts.get(a, 0) + 1
+
+    # 3. AI 聚类（带原文引用的痛点/卖点）
+    summary_content = _chat([
+        {"role": "system", "content": REVIEW_SUMMARY_SYSTEM},
+        {"role": "user", "content": json.dumps(parsed, ensure_ascii=False)},
+    ], use_json=True)
+    summary = _parse_json(summary_content)
+
+    # 4. 引用真实性校验：example 必须存在于输入评论中（防幻觉）
+    review_texts = set(reviews)
+    for pains in (summary.get("top_pains", []), summary.get("top_praises", [])):
+        for item in pains:
+            ex = item.get("example", "")
+            if ex and ex not in review_texts:
+                item["example"] = "(引用校验失败，已移除)"
+
+    return {
+        "total": len(reviews),
+        "parsed_count": len(parsed),
+        "sentiments": sentiments,
+        "aspect_counts": aspect_counts,
+        "top_pains": summary.get("top_pains", []),
+        "top_praises": summary.get("top_praises", []),
+        "overall_sentiment": summary.get("overall_sentiment", ""),
+        "improvement_suggestions": summary.get("improvement_suggestions", []),
+        "zh_summary": summary.get("zh_summary", ""),
+        "sample_basis": True,  # 基于提供的评论样本
+    }
+
+
+LISTING_SYSTEM = """你是跨境电商 Listing 文案专家。根据产品痛点分析结果和平台特性，生成英文产品 Listing。
+
+输出 JSON：
+{
+  "title": "产品标题（按平台风格）",
+  "bullets": ["卖点1", "卖点2", "卖点3", "卖点4", "卖点5"],
+  "description": "产品描述段落（按平台风格）",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "zh_notes": ["中文要点"]
+}
+
+平台风格：
+- 亚马逊：五点式 bullet（每个卖点一句，埋搜索关键词），描述偏功能参数
+- 速卖通：短促促销风（价格导向，突出性价比），bullet 简短
+- 阿里巴巴国际站：B2B 风（突出规格/认证/起订量/定制能力），面向批量采购
+
+要求：
+- 卖点必须来自给定的 top_praises（用户真实认可的），不编造
+- 结合改进建议暗示产品在改善（如痛点"续航虚标"→ 卖点写"实测续航"）
+- 英文输出，zh_notes 中文解释"""
+
+
+def generate_listing(product: str, platform: str, analysis: dict) -> dict:
+    """基于评论分析结果生成平台风格 Listing"""
+    praises = analysis.get("top_praises", []) or []
+    suggestions = analysis.get("improvement_suggestions", []) or []
+    user_msg = (
+        f"产品: {product}\n"
+        f"平台: {platform}\n"
+        f"用户认可的卖点（来自评论分析）: {json.dumps(praises, ensure_ascii=False)}\n"
+        f"改进方向（来自痛点分析）: {json.dumps(suggestions, ensure_ascii=False)}\n"
+        f"请生成 {platform} 风格的英文 Listing。"
+    )
+    content = _chat([
+        {"role": "system", "content": LISTING_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ], use_json=True)
+    return _parse_json(content)

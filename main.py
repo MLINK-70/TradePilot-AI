@@ -5,6 +5,7 @@
 llm.py / prompts.py 是所有模块共用的底座。
 """
 import logging
+import json
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +18,7 @@ from llm import analyze_market, analyze_trade_trend
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
+from ecommerce import analyze_reviews, generate_listing
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -390,6 +392,63 @@ def business_simulate(req: SimulateRequest):
         raise HTTPException(status_code=502, detail=str(e))
     logging.info("模拟客户: %s / %s", product, market)
     return data
+
+
+class EcommerceAnalyzeRequest(BaseModel):
+    reviews: list = []       # 用户粘贴的评论（每行一条）
+    use_sample: bool = False  # 使用内置演示数据
+
+
+@app.post("/api/ecommerce/analyze")
+def ecommerce_analyze(req: EcommerceAnalyzeRequest):
+    """评论分析：粘贴评论或演示数据 → 痛点/卖点/建议"""
+    reviews = [r.strip() for r in req.reviews if r and r.strip()]
+    if req.use_sample or not reviews:
+        try:
+            with open("data/sample_reviews.json", encoding="utf-8") as f:
+                sample = json.load(f)
+            reviews = sample.get("reviews", [])
+            product_hint = sample.get("product", "")
+        except (FileNotFoundError, json.JSONDecodeError):
+            raise HTTPException(status_code=500, detail="演示数据加载失败")
+    if not reviews:
+        raise HTTPException(status_code=400, detail="请粘贴评论或使用演示数据")
+    try:
+        data = analyze_reviews(reviews)
+        data["product"] = product_hint if "product_hint" in dir() else ""
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("评论分析: %d 条", len(reviews))
+    return data
+
+
+class EcommerceListingRequest(BaseModel):
+    product: str
+    platform: str = "亚马逊"
+    analysis: dict = {}
+
+
+@app.post("/api/ecommerce/listing")
+def ecommerce_listing(req: EcommerceListingRequest):
+    """基于评论分析结果生成平台风格 Listing"""
+    if not req.product.strip() or not req.analysis:
+        raise HTTPException(status_code=400, detail="product 和 analysis 不能为空")
+    try:
+        data = generate_listing(req.product.strip(), req.platform.strip() or "亚马逊", req.analysis)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("Listing 生成: %s / %s", req.product, req.platform)
+    return data
+
+
+@app.get("/api/ecommerce/sample")
+def ecommerce_sample():
+    """返回内置演示数据"""
+    try:
+        with open("data/sample_reviews.json", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        raise HTTPException(status_code=500, detail="演示数据加载失败")
 
 
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，
