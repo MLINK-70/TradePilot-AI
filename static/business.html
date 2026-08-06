@@ -46,6 +46,23 @@
     }
     .company-optional summary:hover { color: var(--accent); }
     .company-optional .form-row { margin-top: 0.8rem; }
+    #idea {
+      flex: 1;
+      padding: 0.62rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--card-2);
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 80px;
+    }
+    #idea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
   </style>
 </head>
 <body>
@@ -66,39 +83,9 @@
     <section class="card">
       <form id="email-form" autocomplete="off">
         <div class="form-row">
-          <label for="product">产品</label>
-          <input type="text" id="product" placeholder="例如：蓝牙耳机（主动降噪，续航40小时）" required>
+          <label for="idea">核心思路</label>
+          <textarea id="idea" rows="3" placeholder="例如：我们的降噪耳机想卖给德国经销商，主打性价比和免费样品，有 CE 认证" required></textarea>
         </div>
-        <div class="form-row">
-          <label for="market">目标市场</label>
-          <input type="text" id="market" placeholder="例如：德国" required>
-        </div>
-        <div class="form-row">
-          <label for="customer-type">客户类型</label>
-          <input type="text" id="customer-type" placeholder="经销商 / 零售商 / 品牌商" value="经销商" list="ctype-list" required>
-          <datalist id="ctype-list">
-            <option value="经销商（Distributor）"></option>
-            <option value="零售商（Retailer）"></option>
-            <option value="品牌商（Brand Owner）"></option>
-            <option value="电商卖家（E-commerce Seller）"></option>
-          </datalist>
-        </div>
-        <div class="form-row">
-          <label for="hook">钩子</label>
-          <input type="text" id="hook" placeholder="吸引回复的钩子" value="免费样品" list="hook-list" required>
-          <datalist id="hook-list">
-            <option value="免费样品"></option>
-            <option value="产品目录"></option>
-            <option value="报价单"></option>
-          </datalist>
-        </div>
-        <details class="company-optional">
-          <summary>信任背书（可选，如出口年限/认证，提升回复率）</summary>
-          <div class="form-row">
-            <label for="credentials">背书信息</label>
-            <input type="text" id="credentials" placeholder="例如：CE/FCC 认证，出口欧盟 8 年">
-          </div>
-        </details>
         <details class="company-optional">
           <summary>收件人信息（可选，填写后称呼更精准）</summary>
           <div class="form-row">
@@ -131,6 +118,7 @@
         </details>
         <button type="submit" id="submit-btn">生成开发信</button>
       </form>
+      </form>
       <p id="status" class="status"></p>
     </section>
 
@@ -145,6 +133,19 @@
           <ul id="zh-notes"></ul>
         </div>
         <button class="copy-btn" id="copy-btn">复制全文</button>
+        <button class="copy-btn" id="followup-btn">生成跟进邮件</button>
+      </div>
+
+      <div class="email-box" id="followup-box" hidden>
+        <div class="email-subject" id="fu-subject"></div>
+        <div class="email-greeting" id="fu-greeting"></div>
+        <div class="email-body" id="fu-body"></div>
+        <div class="email-signature" id="fu-signature"></div>
+        <div class="zh-notes">
+          <div class="title">中文要点</div>
+          <ul id="fu-notes"></ul>
+        </div>
+        <button class="copy-btn" id="fu-copy-btn">复制跟进邮件</button>
       </div>
     </section>
   </main>
@@ -165,31 +166,27 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const payload = {
-          product: document.getElementById('product').value.trim(),
-          market: document.getElementById('market').value.trim(),
-          customer_type: document.getElementById('customer-type').value.trim(),
+          idea: document.getElementById('idea').value.trim(),
           company: document.getElementById('company').value.trim(),
           contact: document.getElementById('contact').value.trim(),
           email: document.getElementById('email').value.trim(),
           customer_company: document.getElementById('c-company').value.trim(),
           customer_contact: document.getElementById('c-contact').value.trim(),
           customer_title: document.getElementById('c-title').value.trim(),
-          hook: document.getElementById('hook').value.trim(),
-          credentials: document.getElementById('credentials').value.trim(),
         };
 
-        if (!payload.product || !payload.market) {
-          showStatus('请填写产品和目标市场', 'error');
+        if (!payload.idea) {
+          showStatus('请填写核心思路', 'error');
           return;
         }
 
         btn.disabled = true;
         btn.textContent = '生成中…';
-        showStatus('正在生成英文开发信，约需 10-20 秒…', 'info');
+        showStatus('正在扩写开发信，约需 10-20 秒…', 'info');
         resultEl.hidden = true;
 
         try {
-          const resp = await fetch('/api/business/outreach', {
+          const resp = await fetch('/api/business/from-idea', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),

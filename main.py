@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from business import generate_outreach_email
+from business import generate_followup_email, generate_outreach_email, generate_outreach_from_idea
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -286,6 +286,69 @@ def business_outreach(req: BusinessEmailRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     logging.info("开发信生成: %s / %s", product, market)
+    return data
+
+
+class BusinessFollowupRequest(BaseModel):
+    product: str
+    market: str
+    customer_type: str = "经销商"
+    original_subject: str = ""
+    company: str = ""
+    contact: str = ""
+    email: str = ""
+    customer_company: str = ""
+    customer_contact: str = ""
+    customer_title: str = ""
+
+
+@app.post("/api/business/followup")
+def business_followup(req: BusinessFollowupRequest):
+    """生成跟进邮件（基于开发信上下文）"""
+    product = req.product.strip()
+    market = req.market.strip()
+    if not product or not market:
+        raise HTTPException(status_code=400, detail="product 和 market 不能为空")
+    try:
+        data = generate_followup_email(
+            product, market, req.customer_type.strip() or "经销商",
+            req.original_subject.strip(),
+            req.company.strip(), req.contact.strip(), req.email.strip(),
+            req.customer_contact.strip(), req.customer_title.strip(),
+            req.customer_company.strip(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("跟进邮件生成: %s / %s", product, market)
+    return data
+
+
+class BusinessIdeaRequest(BaseModel):
+    idea: str
+    company: str = ""
+    contact: str = ""
+    email: str = ""
+    customer_company: str = ""
+    customer_contact: str = ""
+    customer_title: str = ""
+
+
+@app.post("/api/business/from-idea")
+def business_from_idea(req: BusinessIdeaRequest):
+    """核心思路 → 完整开发信（AI 拆解扩写）"""
+    idea = req.idea.strip()
+    if not idea:
+        raise HTTPException(status_code=400, detail="请填写核心思路")
+    try:
+        data = generate_outreach_from_idea(
+            idea,
+            req.company.strip(), req.contact.strip(), req.email.strip(),
+            req.customer_company.strip(), req.customer_contact.strip(),
+            req.customer_title.strip(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("思路扩写: %s", idea[:50])
     return data
 
 
