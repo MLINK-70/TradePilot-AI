@@ -22,15 +22,22 @@ def build_trend_chart(trend: dict) -> io.BytesIO:
     years = list(trend.keys())
     values = [trend[y]["value"] / 1e8 for y in years]  # 亿美元
 
-    fig, ax = plt.subplots(figsize=(8, 3.6))
+    # 宽幅布局，给标注留足空间（tight_layout 防裁切）
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.subplots_adjust(left=0.1, right=0.95, top=0.88, bottom=0.15)
     ax.plot(years, values, marker="o", linewidth=2.2, color="#2e5bff")
     ax.fill_between(years, values, alpha=0.12, color="#2e5bff")
-    ax.set_title("出口贸易金额趋势（亿美元）", fontsize=12)
-    ax.set_xlabel("年份")
-    ax.set_ylabel("亿美元")
+    ax.set_title("出口贸易金额趋势（亿美元）", fontsize=13)
+    ax.set_xlabel("年份", fontsize=11)
+    ax.set_ylabel("亿美元", fontsize=11)
     ax.grid(True, alpha=0.3)
+    # 顶部留 15% 余量，防止峰值标注文字超出绘图区
+    vmin, vmax = ax.get_ylim()
+    ax.set_ylim(vmin, vmax * 1.15)
     for x, y in zip(years, values):
-        ax.annotate(f"{y:.2f}", (x, y), textcoords="offset points", xytext=(0, 8), fontsize=9)
+        # 标注放数据点下方（避免顶部溢出被裁切；统一向下永不出界）
+        ax.annotate(f"{y:.2f}", (x, y), textcoords="offset points",
+                    xytext=(0, -14), fontsize=10, ha="center")
     fig.tight_layout()
 
     buf = io.BytesIO()
