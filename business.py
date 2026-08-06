@@ -206,6 +206,58 @@ def generate_outreach_from_idea(idea: str, company: str = "", contact: str = "",
     return result
 
 
+PRODUCT_INTRO_SYSTEM = """你是资深外贸产品经理。根据用户提供的核心思路（产品信息），生成一份英文**产品介绍**（Product Introduction），用于客户回询时发送/附件/官网展示。
+
+输出 JSON：
+{
+  "product_name": "产品英文名",
+  "overview": "2-3 句产品概述（定位+核心价值）",
+  "key_features": ["卖点1（英文，具体）", "卖点2", "卖点3", "卖点4"],
+  "specs": [{"item": "规格项", "value": "规格值"}],  （4-6 条：如电池/Battery, 续航/Battery Life, 防水/Waterproof, 材质/Material, 认证/Certification）
+  "applications": ["应用场景1", "应用场景2", "应用场景3"],
+  "advantages": "2-3 句差异化优势（对比竞品/性价比）",
+  "zh_summary": "中文一句话总结"
+}
+
+要求：
+- 规格如思路未提供，用行业通用参数合理推断（标注 "TBD" 表示待确认，不编造精确值）
+- 英文输出为主，zh_summary 中文
+- 内容客观，不夸大"""
+
+
+FAQ_SYSTEM = """你是资深外贸业务员。根据核心思路（产品信息），生成英文 **FAQ**（客户常见问题应答），供客户回询时参考。
+
+输出 JSON：
+{
+  "faqs": [
+    {"q": "英文问题", "a": "英文回答（1-2 句）", "zh": "中文要点"}
+  ]
+}
+
+要求：
+- 覆盖 5-6 个外贸高频问题：认证（Certification）、交期（Lead Time）、起订量（MOQ）、付款（Payment Terms）、样品（Samples）、售后（After-sales）
+- 思路中提供了的信息用真实值；未提供的用合理通用表达（如 "Lead time: typically 25-30 days" 标注为参考）
+- 回答简洁专业"""
+
+
+def generate_product_intro(idea: str, product_hint: str = "") -> dict:
+    """核心思路 → 产品介绍 + FAQ"""
+    user_msg = f"核心思路: {idea}\n请生成产品介绍。"
+    intro_content = _chat([
+        {"role": "system", "content": PRODUCT_INTRO_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ], use_json=True)
+    intro = _parse_json(intro_content)
+
+    faq_content = _chat([
+        {"role": "system", "content": FAQ_SYSTEM},
+        {"role": "user", "content": f"核心思路: {idea}\n请生成 FAQ。"},
+    ], use_json=True)
+    faq = _parse_json(faq_content)
+
+    return {"intro": intro, "faqs": faq.get("faqs", [])}
+
+
 def generate_followup_email(product: str, market: str, customer_type: str,
                             original_subject: str,
                             company: str = "", contact: str = "", email: str = "",

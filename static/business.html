@@ -63,6 +63,13 @@
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-soft);
     }
+    .intro-specs { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
+    .intro-specs td { border: 1px solid var(--border); padding: 0.35rem 0.6rem; }
+    .intro-specs td:first-child { width: 40%; color: var(--muted); }
+    .faq-item { margin-bottom: 0.8rem; }
+    .faq-q { font-weight: 600; font-size: 0.92rem; }
+    .faq-a { font-size: 0.9rem; }
+    .faq-zh { font-size: 0.8rem; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -134,9 +141,43 @@
         </div>
         <button class="copy-btn" id="copy-btn">复制全文</button>
         <button class="copy-btn" id="followup-btn">生成跟进邮件</button>
+        <button class="copy-btn" id="intro-btn">生成产品介绍 + FAQ</button>
       </div>
 
       <div class="email-box" id="followup-box" hidden>
+        <div class="email-subject" id="fu-subject"></div>
+        <div class="email-greeting" id="fu-greeting"></div>
+        <div class="email-body" id="fu-body"></div>
+        <div class="email-signature" id="fu-signature"></div>
+        <div class="zh-notes">
+          <div class="title">中文要点</div>
+          <ul id="fu-notes"></ul>
+        </div>
+        <button class="copy-btn" id="fu-copy-btn">复制跟进邮件</button>
+      </div>
+
+      <div class="email-box" id="intro-box" hidden>
+        <div class="email-subject" id="intro-name"></div>
+        <div class="email-body" id="intro-overview"></div>
+        <div class="analysis-section">
+          <div class="analysis-label">核心卖点</div>
+          <ul id="intro-features"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">规格参数</div>
+          <table class="intro-specs"><tbody id="intro-specs"></tbody></table>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">应用场景</div>
+          <ul id="intro-apps"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">FAQ</div>
+          <div id="intro-faqs"></div>
+        </div>
+        <button class="copy-btn" id="intro-copy-btn">复制产品介绍</button>
+      </div>
+    </section>
         <div class="email-subject" id="fu-subject"></div>
         <div class="email-greeting" id="fu-greeting"></div>
         <div class="email-body" id="fu-body"></div>
@@ -311,6 +352,61 @@
           showStatus('已复制跟进邮件', 'info');
         } catch (_) {
           showStatus('复制失败，请手动选择复制', 'error');
+        }
+      });
+
+      document.getElementById('intro-btn').addEventListener('click', async () => {
+        const idea = document.getElementById('idea').value.trim();
+        if (!idea) { showStatus('请先填写核心思路', 'error'); return; }
+        const introBtn = document.getElementById('intro-btn');
+        introBtn.disabled = true;
+        introBtn.textContent = '生成中…';
+        try {
+          const resp = await fetch('/api/business/product-intro', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idea }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '生成失败', 'error');
+            return;
+          }
+          const intro = data.intro || {};
+          document.getElementById('intro-name').textContent = intro.product_name || '';
+          document.getElementById('intro-overview').textContent = intro.overview || '';
+          const feats = document.getElementById('intro-features');
+          feats.innerHTML = '';
+          (intro.key_features || []).forEach(f => { const li = document.createElement('li'); li.textContent = f; feats.appendChild(li); });
+          const specs = document.getElementById('intro-specs');
+          specs.innerHTML = '';
+          (intro.specs || []).forEach(s => {
+            const tr = document.createElement('tr');
+            const td1 = document.createElement('td'); td1.textContent = s.item || '';
+            const td2 = document.createElement('td'); td2.textContent = s.value || '';
+            tr.appendChild(td1); tr.appendChild(td2); specs.appendChild(tr);
+          });
+          const apps = document.getElementById('intro-apps');
+          apps.innerHTML = '';
+          (intro.applications || []).forEach(a => { const li = document.createElement('li'); li.textContent = a; apps.appendChild(li); });
+          const faqs = document.getElementById('intro-faqs');
+          faqs.innerHTML = '';
+          (data.faqs || []).forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'faq-item';
+            const q = document.createElement('div'); q.className = 'faq-q'; q.textContent = 'Q: ' + (f.q || '');
+            const a = document.createElement('div'); a.className = 'faq-a'; a.textContent = 'A: ' + (f.a || '');
+            const z = document.createElement('div'); z.className = 'faq-zh'; z.textContent = '中文: ' + (f.zh || '');
+            div.appendChild(q); div.appendChild(a); div.appendChild(z); faqs.appendChild(div);
+          });
+          document.getElementById('intro-box').hidden = false;
+          showStatus('产品介绍已生成', 'info');
+        } catch (_) {
+          showStatus('网络错误，生成失败', 'error');
+        } finally {
+          introBtn.disabled = false;
+          introBtn.textContent = '生成产品介绍 + FAQ';
         }
       });
 

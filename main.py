@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from business import generate_followup_email, generate_outreach_email, generate_outreach_from_idea
+from business import (generate_followup_email, generate_outreach_email,
+                      generate_outreach_from_idea, generate_product_intro)
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -349,6 +350,20 @@ def business_from_idea(req: BusinessIdeaRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     logging.info("思路扩写: %s", idea[:50])
+    return data
+
+
+@app.post("/api/business/product-intro")
+def business_product_intro(req: BusinessIdeaRequest):
+    """核心思路 → 产品介绍 + FAQ"""
+    idea = req.idea.strip()
+    if not idea:
+        raise HTTPException(status_code=400, detail="请填写核心思路")
+    try:
+        data = generate_product_intro(idea)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("产品介绍生成: %s", idea[:50])
     return data
 
 
