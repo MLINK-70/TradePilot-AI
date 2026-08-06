@@ -345,19 +345,37 @@
         showStatus('书签已生成（短引导版）：把它拖到浏览器书签栏，商品页点击即可分析', 'info');
       });
 
-      // 页面加载时：若从书签工具跳来（#analysis），读取 localStorage 直接展示
+      // 页面加载时：若从书签工具跳来（#reviews=...），读取评论并自动分析
       (function () {
-        if (location.hash === '#analysis') {
+        const m = location.hash.match(/^#reviews=(.*)$/);
+        if (m) {
           try {
-            const saved = localStorage.getItem('tp_last_analysis');
-            if (saved) {
-              const data = JSON.parse(saved);
-              document.getElementById('reviews-input').value = (data.reviews || []).join('\n');
-              lastAnalysis = data.analysis || {};
-              if (lastAnalysis.total) {
-                render(lastAnalysis);
-                showStatus('来自书签工具：' + (data.source || '商品页') + ' 的 ' + (data.reviews || []).length + ' 条评论已分析', 'info');
-              }
+            const data = JSON.parse(decodeURIComponent(m[1]));
+            const reviews = data.reviews || [];
+            document.getElementById('reviews-input').value = reviews.join('\n');
+            if (reviews.length) {
+              showStatus('来自书签工具：' + (data.source || '商品页') + ' 的 ' + reviews.length + ' 条评论，正在分析…', 'info');
+              // 自动触发分析
+              btn.disabled = true;
+              btn.textContent = '分析中…（约 20-40 秒）';
+              resultEl.hidden = true;
+              fetch('/api/ecommerce/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reviews }),
+              })
+                .then(function (resp) { return resp.json(); })
+                .then(function (res) {
+                  if (res.detail) { showStatus(res.detail, 'error'); return; }
+                  lastAnalysis = res;
+                  render(res);
+                  showStatus('来自书签工具：' + reviews.length + ' 条评论已分析', 'info');
+                })
+                .catch(function () { showStatus('分析失败，请重试', 'error'); })
+                .finally(function () {
+                  btn.disabled = false;
+                  btn.textContent = '分析评论';
+                });
             }
           } catch (_) {}
         }

@@ -64,37 +64,24 @@
     return false;
   }
 
-  // 3. 提取 + 直连分析
+  // 3. 提取 + 直接打开结果页（评论通过 URL 传，结果页自己分析）
   const reviews = extract();
   if (!reviews.length) {
     alert('未识别到评论。\n请确认页面已滚动到评论区域，或手动复制评论后粘贴到 TradePilot。');
     return;
   }
 
-  showToast('已提取 ' + reviews.length + ' 条评论，正在发送到 TradePilot 分析…');
+  showToast('已提取 ' + reviews.length + ' 条评论，打开 TradePilot 分析…');
 
-  fetch(TP_BASE + '/api/ecommerce/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reviews: reviews }),
-  })
-    .then(function (resp) {
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      return resp.json();
-    })
-    .then(function (data) {
-      // 把分析结果存到 localStorage，结果页读取
-      localStorage.setItem('tp_last_analysis', JSON.stringify({
-        reviews: reviews,
-        analysis: data,
-        source: document.title,
-        url: location.href,
-      }));
-      window.open(TP_BASE + '/ecommerce.html#analysis', '_blank');
-    })
-    .catch(function (err) {
-      alert('发送失败: ' + err.message + '\n请确认 TradePilot 服务已启动（127.0.0.1:8000）');
-    });
+  // URL 只带评论（短）；结果页读取后自行调用分析 API
+  const payload = {
+    reviews: reviews,
+    source: document.title,
+    url: location.href,
+  };
+  const encoded = encodeURIComponent(JSON.stringify(payload));
+  const full = TP_BASE + '/ecommerce.html#reviews=' + encoded;
+  window.open(full, '_blank');
 
   // 4. 提示浮层
   function showToast(msg) {
