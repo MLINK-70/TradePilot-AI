@@ -113,13 +113,29 @@ IDEA_SYSTEM = """你是资深外贸业务员。用户给出**核心思路**（�
 - 扩写忠实于用户思路，不偏离核心意图
 - 信任背书写进第②段（出口年限/认证等，来自思路或常识）
 - CTA 具体低门槛（如 "Can I send you our catalog?"），不用 "Let's cooperate"
+- **若提供了真实贸易数据，在第②段自然引用 1 句**（如 "our product matches the growing demand for {产品} in {市场}"），增强说服力
 - 签名必须用提供的发件人信息；占位符原样保留不编造"""
+
+
+IDEA_PARSE_SYSTEM = """你是外贸业务信息解析器。从用户的核心思路中提取结构化信息。
+
+输出 JSON：
+{
+  "product": "产品名（如：降噪耳机）",
+  "market": "目标市场（如：德国）",
+  "customer_type": "客户类型（经销商/零售商/品牌商/电商卖家）",
+  "selling_points": ["卖点1", "卖点2"],
+  "hook": "钩子（免费样品/产品目录/报价单）",
+  "credentials": "信任背书（认证/出口年限，没有则空字符串）"
+}
+
+要求：提取思路中明确提到的；缺失的用常识合理推断（客户类型默认经销商，钩子默认免费样品）。"""
 
 
 def generate_outreach_from_idea(idea: str, company: str = "", contact: str = "",
                                 email: str = "", customer_company: str = "",
                                 customer_contact: str = "", customer_title: str = "") -> dict:
-    """核心思路 → 完整开发信（AI 拆解扩写）"""
+    """核心思路 → 完整开发信（AI 拆解 + 真实贸易数据支撑 + 扩写）"""
     company = company or "[Your Company Name]"
     contact = contact or "[Your Name]"
     email = email or "[your.email@company.com]"
@@ -130,20 +146,64 @@ def generate_outreach_from_idea(idea: str, company: str = "", contact: str = "",
         recipient = customer_contact
     elif customer_company:
         recipient = customer_company
+
+    # 第一步：AI 拆解思路 → 结构化（产品/市场等）
+    parse_content = _chat([
+        {"role": "system", "content": IDEA_PARSE_SYSTEM},
+        {"role": "user", "content": f"核心思路: {idea}"},
+    ], use_json=True)
+    parsed = _parse_json(parse_content)
+    product = str(parsed.get("product", "")).strip()
+    market = str(parsed.get("market", "")).strip()
+
+    # 第二步：查真实贸易数据（产品→HS编码→目标市场趋势）
+    trade_line = ""
+    try:
+        from trade import hs_lookup, partner_lookup, query_trend, summarize_trend
+        hs = hs_lookup(product)
+        if hs:
+            pc = partner_lookup(market)
+            if pc:
+                from trade import get_latest_year
+                latest = get_latest_year()
+                _, rows, trend = query_trend(product, market, list(range(latest - 2, latest + 1)))
+                if trend:
+                    years = sorted(trend.keys())
+                    first, last = years[0], years[-1]
+                    v1, v2 = trend[first]["value"], trend[last]["value"]
+                    trade_line = (
+                        f"\n真实贸易数据（UN Comtrade，供引用）:\n"
+                        f"- {product}(HS{hs}) 出口至 {market}，{first}-{last} 年出口额从 "
+                        f"{v1 / 1e8:.1f} 亿美元到 {v2 / 1e8:.1f} 亿美元\n"
+                        f"- 开发信中可引用：\"我们的产品正好匹配贵市场{market}对{product}的持续需求\""
+                    )
+    except Exception:
+        trade_line = ""  # 数据查询失败不阻断开发信生成
+
+    # 第三步：扩写开发信（含真实数据）
+    idea_detail = (
+        f"拆解结果: 产品={product}, 市场={market}, 客户类型={parsed.get('customer_type', '经销商')}, "
+        f"卖点={parsed.get('selling_points', [])}, 钩子={parsed.get('hook', '免费样品')}, "
+        f"背书={parsed.get('credentials', '')}"
+    )
     user_msg = (
         f"用户核心思路: {idea}\n"
+        f"{idea_detail}"
+        f"{trade_line}\n"
         f"收件人: {recipient}\n"
         f"收件人公司: {customer_company or '（未提供）'}\n"
         f"发件公司名称: {company}\n"
         f"发件联系人: {contact}\n"
         f"发件邮箱: {email}\n"
-        f"请拆解思路并扩写成完整英文开发信。"
+        f"请扩写成完整英文开发信；若提供了真实贸易数据，在正文中自然引用（增强说服力）。"
     )
     content = _chat([
         {"role": "system", "content": IDEA_SYSTEM},
         {"role": "user", "content": user_msg},
     ], use_json=True)
-    return _parse_json(content)
+    result = _parse_json(content)
+    result["_trade_data"] = trade_line.strip()  # 附带数据供前端展示来源
+    return result
 
 
 def generate_followup_email(product: str, market: str, customer_type: str,
