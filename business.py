@@ -18,27 +18,40 @@ OUTREACH_SYSTEM = """你是资深外贸业务员。根据产品、目标市场�
 
 要求：
 - 语气专业但不生硬，B2B 风格
+- 称呼用收件人信息：有联系人+职位用 "Dear Mr./Ms. [姓]"，只有公司用 "Dear [Company] Team"，都没提供用 "Dear Purchasing Manager,"
 - 结合目标市场特点做本地化表达（如德国重品质、日本重细节）
 - 突出产品卖点（基于提供的信息）
 - 长度适中（正文 150-200 词）
-- 签名必须用提供的公司信息；若信息是 [Your Company Name] 这类占位符，原样保留不替换、不编造"""
+- 签名必须用提供的发件人信息；若信息是 [Your Company Name] 这类占位符，原样保留不替换、不编造"""
 
 
 def generate_outreach_email(product: str, market: str, customer_type: str,
                             company: str = "", contact: str = "", email: str = "",
-                            selling_points: str = "") -> dict:
-    """生成英文开发信 + 中文要点（公司信息可选，缺失用占位符不编造）"""
-    # 公司信息缺失时用占位符，禁止 AI 编造
+                            selling_points: str = "",
+                            customer_company: str = "", customer_contact: str = "",
+                            customer_title: str = "") -> dict:
+    """生成英文开发信 + 中文要点（发件/收件信息均可选，缺失用占位符不编造）"""
+    # 发件人信息缺失时用占位符，禁止 AI 编造
     company = company or "[Your Company Name]"
     contact = contact or "[Your Name]"
     email = email or "[your.email@company.com]"
+    # 收件人信息（可选，缺失则用通用称呼）
+    recipient = "（未提供）"
+    if customer_contact and customer_title:
+        recipient = f"{customer_contact}（{customer_title}）"
+    elif customer_contact:
+        recipient = customer_contact
+    elif customer_company:
+        recipient = customer_company
     user_msg = (
         f"产品: {product}\n"
         f"目标市场: {market}\n"
         f"客户类型: {customer_type}\n"
-        f"公司名称: {company}\n"
-        f"联系人: {contact}\n"
-        f"邮箱: {email}\n"
+        f"收件人: {recipient}\n"
+        f"收件人公司: {customer_company or '（未提供）'}\n"
+        f"发件公司名称: {company}\n"
+        f"发件联系人: {contact}\n"
+        f"发件邮箱: {email}\n"
         f"产品卖点: {selling_points or '（未提供，按产品常识生成）'}\n"
         f"请生成英文开发信。"
     )

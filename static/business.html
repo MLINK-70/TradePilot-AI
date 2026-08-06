@@ -84,7 +84,22 @@
           </datalist>
         </div>
         <details class="company-optional">
-          <summary>公司信息（可选，填写后签名用真实信息）</summary>
+          <summary>收件人信息（可选，填写后称呼更精准）</summary>
+          <div class="form-row">
+            <label for="c-company">客户公司</label>
+            <input type="text" id="c-company" placeholder="例如：MediaMarkt GmbH">
+          </div>
+          <div class="form-row">
+            <label for="c-contact">客户联系人</label>
+            <input type="text" id="c-contact" placeholder="例如：Hans Müller">
+          </div>
+          <div class="form-row">
+            <label for="c-title">客户职位</label>
+            <input type="text" id="c-title" placeholder="例如：Purchasing Director">
+          </div>
+        </details>
+        <details class="company-optional">
+          <summary>发件人信息（可选，填写后签名用真实信息）</summary>
           <div class="form-row">
             <label for="company">公司名称</label>
             <input type="text" id="company" placeholder="例如：SoundTech Ltd.">
@@ -140,6 +155,9 @@
           company: document.getElementById('company').value.trim(),
           contact: document.getElementById('contact').value.trim(),
           email: document.getElementById('email').value.trim(),
+          customer_company: document.getElementById('c-company').value.trim(),
+          customer_contact: document.getElementById('c-contact').value.trim(),
+          customer_title: document.getElementById('c-title').value.trim(),
         };
 
         if (!payload.product || !payload.market) {
