@@ -15,7 +15,8 @@ from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
 from business import (generate_followup_email, generate_outreach_email,
-                      generate_outreach_from_idea, generate_product_intro)
+                      generate_outreach_from_idea, generate_product_intro,
+                      simulate_customer)
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -364,6 +365,30 @@ def business_product_intro(req: BusinessIdeaRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     logging.info("产品介绍生成: %s", idea[:50])
+    return data
+
+
+class SimulateRequest(BaseModel):
+    product: str
+    market: str
+    customer_type: str = "经销商"
+    user_message: str
+    history: list = []  # [{"role": "user"/"assistant", "content": "..."}]
+
+
+@app.post("/api/business/simulate")
+def business_simulate(req: SimulateRequest):
+    """AI 扮演采购商回复（模拟客户沟通练习）"""
+    product = req.product.strip()
+    market = req.market.strip()
+    if not product or not market or not req.user_message.strip():
+        raise HTTPException(status_code=400, detail="product、market、user_message 不能为空")
+    try:
+        data = simulate_customer(product, market, req.customer_type.strip() or "经销商",
+                                 req.user_message.strip(), req.history or [])
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("模拟客户: %s / %s", product, market)
     return data
 
 

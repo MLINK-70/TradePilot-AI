@@ -70,6 +70,23 @@
     .faq-q { font-weight: 600; font-size: 0.92rem; }
     .faq-a { font-size: 0.9rem; }
     .faq-zh { font-size: 0.8rem; color: var(--muted); }
+    .chat-log { max-height: 320px; overflow-y: auto; margin: 0.8rem 0; }
+    .chat-msg { margin: 0.5rem 0; padding: 0.5rem 0.8rem; border-radius: var(--radius-sm); font-size: 0.9rem; }
+    .chat-msg.customer { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+    .chat-msg.user { background: var(--card-2); border-left: 3px solid var(--gold); }
+    .chat-msg .role { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.2rem; }
+    .chat-msg .coach { font-size: 0.8rem; color: var(--teal); margin-top: 0.3rem; }
+    .chat-input { display: flex; gap: 0.5rem; }
+    .chat-input input {
+      flex: 1;
+      padding: 0.55rem 0.8rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--card-2);
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    .chat-input .copy-btn { width: auto; margin: 0; }
   </style>
 </head>
 <body>
@@ -142,6 +159,7 @@
         <button class="copy-btn" id="copy-btn">复制全文</button>
         <button class="copy-btn" id="followup-btn">生成跟进邮件</button>
         <button class="copy-btn" id="intro-btn">生成产品介绍 + FAQ</button>
+        <button class="copy-btn" id="sim-btn">模拟客户练习</button>
       </div>
 
       <div class="email-box" id="followup-box" hidden>
@@ -176,6 +194,17 @@
           <div id="intro-faqs"></div>
         </div>
         <button class="copy-btn" id="intro-copy-btn">复制产品介绍</button>
+      </div>
+
+      <div class="email-box" id="sim-box" hidden>
+        <div class="email-subject">模拟客户练习</div>
+        <p class="meta" id="sim-setup"></p>
+        <div class="chat-log" id="sim-log"></div>
+        <div class="chat-input">
+          <input type="text" id="sim-input" placeholder="输入你的回复（英文或中文）…">
+          <button class="copy-btn" id="sim-send">发送</button>
+        </div>
+        <p class="meta">教练：每轮 AI 会点评你的表现，教你下轮怎么应对</p>
       </div>
     </section>
         <div class="email-subject" id="fu-subject"></div>
@@ -409,6 +438,90 @@
           introBtn.textContent = '生成产品介绍 + FAQ';
         }
       });
+
+      // ===== 模拟客户练习 =====
+      const simBox = document.getElementById('sim-box');
+      const simLog = document.getElementById('sim-log');
+      let simHistory = [];
+      let simProduct = '';
+      let simMarket = '';
+      let simType = '';
+
+      document.getElementById('sim-btn').addEventListener('click', async () => {
+        const idea = document.getElementById('idea').value.trim();
+        if (!idea) { showStatus('请先填写核心思路（含产品）', 'error'); return; }
+        simProduct = idea.slice(0, 30);
+        // 从思路猜市场
+        simMarket = idea.includes('德国') ? '德国' : idea.includes('美国') ? '美国'
+          : idea.includes('日本') ? '日本' : idea.includes('英国') ? '英国' : '德国';
+        simType = idea.includes('零售') ? '零售商' : '经销商';
+        simHistory = [];
+        simLog.innerHTML = '';
+        document.getElementById('sim-setup').textContent =
+          '场景：你是 ' + simMarket + ' ' + simType + ' 的采购商，正在评估 ' + simProduct + ' 供应商。开始你的开发信/回复。';
+        simBox.hidden = false;
+        showStatus('模拟客户已开始，输入你的第一句话', 'info');
+      });
+
+      document.getElementById('sim-send').addEventListener('click', sendSim);
+      document.getElementById('sim-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendSim();
+      });
+
+      async function sendSim() {
+        const input = document.getElementById('sim-input');
+        const msg = input.value.trim();
+        if (!msg) return;
+        input.value = '';
+
+        addChatMsg('user', '你', msg);
+        simHistory.push({ role: 'user', content: msg });
+
+        const sendBtn = document.getElementById('sim-send');
+        sendBtn.disabled = true;
+        sendBtn.textContent = '思考中…';
+        try {
+          const resp = await fetch('/api/business/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product: simProduct, market: simMarket, customer_type: simType,
+              user_message: msg, history: simHistory.slice(0, -1),
+            }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '回复失败', 'error');
+            return;
+          }
+          addChatMsg('customer', simMarket + '采购商', data.reply || '', data.coach || '');
+          simHistory.push({ role: 'assistant', content: data.reply || '' });
+        } catch (_) {
+          showStatus('网络错误，请重试', 'error');
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.textContent = '发送';
+        }
+      }
+
+      function addChatMsg(kind, role, text, coach) {
+        const div = document.createElement('div');
+        div.className = 'chat-msg ' + kind;
+        const r = document.createElement('div');
+        r.className = 'role';
+        r.textContent = role;
+        div.appendChild(r);
+        div.appendChild(document.createTextNode(text));
+        if (coach) {
+          const c = document.createElement('div');
+          c.className = 'coach';
+          c.textContent = '教练: ' + coach;
+          div.appendChild(c);
+        }
+        simLog.appendChild(div);
+        simLog.scrollTop = simLog.scrollHeight;
+      }
 
       function showStatus(text, type) {
         statusEl.textContent = text;

@@ -258,6 +258,54 @@ def generate_product_intro(idea: str, product_hint: str = "") -> dict:
     return {"intro": intro, "faqs": faq.get("faqs", [])}
 
 
+SIMULATE_SYSTEM = """你是 {market} 的 {customer_type}（采购商），正在与一家 {product} 供应商沟通。扮演一个真实、专业的海外采购商。
+
+**人设**（基于市场特点）：
+- {market} 采购商：{market_trait}（如德国重品质认证、美国重价格交期、日本重细节服务）
+- 你收到供应商的开发信/回复，正在评估是否合作
+
+**行为要求**：
+1. 回复要真实：可能询价、问认证、讨价还价、要求样品，也可能礼貌拒绝或拖延
+2. 语气专业，符合该市场采购商的风格（德国正式、美国直接、日本客气）
+3. 每次回复 2-4 句，聚焦一个关注点（不要一次问完所有问题）
+4. 关注点从市场特质中选：认证/价格/交期/MOQ/样品/售后
+
+输出 JSON（字段）：
+- reply: 英文回复（采购商口吻，2-4 句）
+- zh_translation: 中文翻译
+- concern: 本次关注的要点（如：价格/认证/交期）
+- coach: 中文教练点评（用户这轮表现：说得好/该改进，下轮怎么应对）"""
+
+
+def simulate_customer(product: str, market: str, customer_type: str,
+                      user_message: str, history: list = None) -> dict:
+    """AI 扮演采购商回复（模拟客户沟通练习）"""
+    market_traits = {
+        "德国": "德国采购商重视品质与认证（CE/RoHS），对价格敏感度中等，谈判直接但礼貌",
+        "美国": "美国采购商重视价格和交期，回复直接，喜欢快速推进",
+        "日本": "日本采购商重视细节和长期关系，回复客气但要求严格",
+        "英国": "英国采购商重视专业和合规，沟通正式",
+        "法国": "法国采购商重视品质和品牌，对细节要求高",
+        "东南亚": "东南亚采购商重视价格和样品，决策链短",
+        "中东": "中东采购商重视关系和报价，喜欢讨价还价",
+    }
+    trait = market_traits.get(market, "重视品质与价格平衡")
+
+    system = SIMULATE_SYSTEM.format(
+        market=market, customer_type=customer_type,
+        product=product, market_trait=trait,
+    )
+
+    messages = [{"role": "system", "content": system}]
+    # 历史对话（用户+AI 交替）
+    for h in (history or [])[-6:]:
+        messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    content = _chat(messages, use_json=True)
+    return _parse_json(content)
+
+
 def generate_followup_email(product: str, market: str, customer_type: str,
                             original_subject: str,
                             company: str = "", contact: str = "", email: str = "",
