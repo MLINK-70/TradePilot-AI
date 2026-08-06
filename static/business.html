@@ -142,7 +142,6 @@
         </details>
         <button type="submit" id="submit-btn">生成开发信</button>
       </form>
-      </form>
       <p id="status" class="status"></p>
     </section>
 
@@ -205,17 +204,6 @@
           <button class="copy-btn" id="sim-send">发送</button>
         </div>
         <p class="meta">教练：每轮 AI 会点评你的表现，教你下轮怎么应对</p>
-      </div>
-    </section>
-        <div class="email-subject" id="fu-subject"></div>
-        <div class="email-greeting" id="fu-greeting"></div>
-        <div class="email-body" id="fu-body"></div>
-        <div class="email-signature" id="fu-signature"></div>
-        <div class="zh-notes">
-          <div class="title">中文要点</div>
-          <ul id="fu-notes"></ul>
-        </div>
-        <button class="copy-btn" id="fu-copy-btn">复制跟进邮件</button>
       </div>
     </section>
   </main>
@@ -284,9 +272,12 @@
             notes.appendChild(li);
           });
           lastEmailSubject = data.subject || '';
-          // 从思路中粗提取产品/市场（供跟进用；后端会再拆解）
-          const ideaText = payload.idea;
-          lastIdea = { product: ideaText.slice(0, 20), market: ideaText.includes('德国') ? '德国' : ideaText.includes('美国') ? '美国' : '' };
+          // 用后端 AI 精确拆解的产品/市场（不再截断思路文本）
+          const parsed = data._parsed || {};
+          lastIdea = {
+            product: parsed.product || '',
+            market: parsed.market || '',
+          };
           lastEmail = [
             'Subject: ' + (data.subject || ''),
             '',

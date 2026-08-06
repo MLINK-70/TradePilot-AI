@@ -45,13 +45,13 @@ def generate_outreach_email(product: str, market: str, customer_type: str,
         recipient = customer_contact
     elif customer_company:
         recipient = customer_company
-    # 钩子映射
+    # 钩子映射（未匹配时回退免费样品，避免中文/未知值进英文邮件）
     hook_map = {
         "免费样品": "Free sample for your testing",
         "产品目录": "Send you our full product catalog",
         "报价单": "Send you our competitive quotation",
     }
-    hook_en = hook_map.get(hook, hook)
+    hook_en = hook_map.get(hook, "Free sample for your testing")
     user_msg = (
         f"产品: {product}\n"
         f"目标市场: {market}\n"
@@ -203,6 +203,7 @@ def generate_outreach_from_idea(idea: str, company: str = "", contact: str = "",
     ], use_json=True)
     result = _parse_json(content)
     result["_trade_data"] = trade_line.strip()  # 附带数据供前端展示来源
+    result["_parsed"] = {"product": product, "market": market}  # 精确拆解值供前端复用
     return result
 
 
@@ -297,9 +298,12 @@ def simulate_customer(product: str, market: str, customer_type: str,
     )
 
     messages = [{"role": "system", "content": system}]
-    # 历史对话（用户+AI 交替）
+    # 历史对话（用户+AI 交替）；role 白名单校验，防注入
     for h in (history or [])[-6:]:
-        messages.append({"role": h["role"], "content": h["content"]})
+        role = h.get("role") if isinstance(h, dict) else None
+        if role not in ("user", "assistant"):
+            continue  # 丢弃非法 role（如伪造的 system）
+        messages.append({"role": role, "content": str(h.get("content", ""))[:2000]})
     messages.append({"role": "user", "content": user_message})
 
     content = _chat(messages, use_json=True)
