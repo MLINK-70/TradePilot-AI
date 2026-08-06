@@ -71,6 +71,14 @@
         </div>
       </form>
       <p id="status" class="status"></p>
+      <details class="company-optional">
+        <summary>一键复制评论工具（书签）</summary>
+        <p class="meta" style="margin-top:0.4rem;">
+          在任意电商商品页（淘宝/速卖通/Amazon 等），点这个书签，自动整理当前页面的评论并复制。
+          使用：把下方按钮拖到浏览器书签栏（或右键复制链接存为书签），然后在商品页点击。
+        </p>
+        <button type="button" id="bookmarklet-btn" class="btn-inline" style="margin-top:0.5rem;">📌 拖我到书签栏</button>
+      </details>
     </section>
 
     <section id="result" hidden>
@@ -319,6 +327,27 @@
         } finally {
           lb.disabled = false;
           lb.textContent = '生成 Listing';
+        }
+      });
+
+      // 书签工具：加载 bookmarklet.js → 生成可拖拽书签
+      document.getElementById('bookmarklet-btn').addEventListener('click', async () => {
+        try {
+          const resp = await fetch('/bookmarklet.js');
+          const code = await resp.text();
+          const href = 'javascript:' + encodeURIComponent(code.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim());
+          const a = document.createElement('a');
+          a.href = href;
+          a.textContent = 'TradePilot 评论复制';
+          a.style.cssText = 'display:block;margin-top:0.5rem;color:var(--accent);text-decoration:none;';
+          a.title = '拖到书签栏';
+          // 替换按钮位置为可拖拽链接
+          const btn = document.getElementById('bookmarklet-btn');
+          btn.style.display = 'none';
+          btn.parentElement.appendChild(a);
+          showStatus('书签已生成：把它拖到浏览器书签栏，商品页点击即可提取评论', 'info');
+        } catch (_) {
+          showStatus('书签加载失败', 'error');
         }
       });
 
