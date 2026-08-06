@@ -330,25 +330,19 @@
         }
       });
 
-      // 书签工具：加载 bookmarklet.js → 生成可拖拽书签
+      // 书签工具：生成短引导书签（加载外部脚本，永不截断，更新自动生效）
       document.getElementById('bookmarklet-btn').addEventListener('click', async () => {
-        try {
-          const resp = await fetch('/bookmarklet.js');
-          const code = await resp.text();
-          const href = 'javascript:' + encodeURIComponent(code.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim());
-          const a = document.createElement('a');
-          a.href = href;
-          a.textContent = 'TradePilot 评论复制';
-          a.style.cssText = 'display:block;margin-top:0.5rem;color:var(--accent);text-decoration:none;';
-          a.title = '拖到书签栏';
-          // 替换按钮位置为可拖拽链接
-          const btn = document.getElementById('bookmarklet-btn');
-          btn.style.display = 'none';
-          btn.parentElement.appendChild(a);
-          showStatus('书签已生成：把它拖到浏览器书签栏，商品页点击即可提取评论', 'info');
-        } catch (_) {
-          showStatus('书签加载失败', 'error');
-        }
+        const loader = "(function(){var s=document.createElement('script');s.src='http://127.0.0.1:8000/bookmarklet.js';document.body.appendChild(s)})()";
+        const href = 'javascript:' + encodeURIComponent(loader);
+        const a = document.createElement('a');
+        a.href = href;
+        a.textContent = 'TradePilot 评论分析';
+        a.style.cssText = 'display:block;margin-top:0.5rem;color:var(--accent);text-decoration:none;';
+        a.title = '拖到书签栏';
+        const btn = document.getElementById('bookmarklet-btn');
+        btn.style.display = 'none';
+        btn.parentElement.appendChild(a);
+        showStatus('书签已生成（短引导版）：把它拖到浏览器书签栏，商品页点击即可分析', 'info');
       });
 
       // 页面加载时：若从书签工具跳来（#analysis），读取 localStorage 直接展示
