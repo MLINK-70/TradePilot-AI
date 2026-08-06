@@ -102,6 +102,22 @@
       </div>
 
       <div class="chart-box">
+        <h3 class="analysis-title">竞品对比</h3>
+        <div class="form-row">
+          <label for="prod-a">产品 A</label>
+          <input type="text" id="prod-a" placeholder="例如：A 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        </div>
+        <textarea id="reviews-a" placeholder="粘贴产品 A 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
+        <div class="form-row">
+          <label for="prod-b">产品 B</label>
+          <input type="text" id="prod-b" placeholder="例如：B 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        </div>
+        <textarea id="reviews-b" placeholder="粘贴产品 B 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
+        <button type="button" id="compare-btn" class="btn-inline">对比分析</button>
+        <div id="compare-result" class="listing-box" hidden></div>
+      </div>
+
+      <div class="chart-box">
         <h3 class="analysis-title">生成平台 Listing</h3>
         <div class="btn-row-inline">
           <select id="platform-select" class="year-pair" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
@@ -143,11 +159,20 @@
         }
       });
 
+      // 粘贴时提示识别到的评论数（去空行/编号/星级后）
+      document.getElementById('reviews-input').addEventListener('input', () => {
+        const v = document.getElementById('reviews-input').value;
+        const lines = v.split('\n').map(s => s.trim()).filter(s => s && !/^[★☆]{1,5}\s*$/.test(s));
+        if (lines.length > 0) {
+          showStatus('已识别 ' + lines.length + ' 条评论，点击分析', 'info');
+        }
+      });
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const raw = document.getElementById('reviews-input').value;
-        const reviews = raw.split('\n').map(s => s.trim()).filter(Boolean);
-
+        // 前端先清洗（去编号/星级/广告行/空行/重复）
+        const reviews = (raw.split('\n').map(s => s.trim()).filter(Boolean));
         if (!reviews.length) {
           showStatus('请粘贴评论或使用演示数据', 'error');
           return;
@@ -155,7 +180,7 @@
 
         btn.disabled = true;
         btn.textContent = '分析中…（约 20-40 秒）';
-        showStatus('正在分析评论…', 'info');
+        showStatus('正在分析 ' + reviews.length + ' 条评论…', 'info');
         resultEl.hidden = true;
 
         try {
@@ -294,6 +319,58 @@
         } finally {
           lb.disabled = false;
           lb.textContent = '生成 Listing';
+        }
+      });
+
+      // 竞品对比
+      document.getElementById('compare-btn').addEventListener('click', async () => {
+        const prodA = document.getElementById('prod-a').value.trim() || '产品 A';
+        const prodB = document.getElementById('prod-b').value.trim() || '产品 B';
+        const reviewsA = document.getElementById('reviews-a').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const reviewsB = document.getElementById('reviews-b').value.split('\n').map(s => s.trim()).filter(Boolean);
+        if (!reviewsA.length || !reviewsB.length) {
+          showStatus('请粘贴两组评论（A 和 B）', 'error');
+          return;
+        }
+        const cb = document.getElementById('compare-btn');
+        cb.disabled = true;
+        cb.textContent = '对比中…（约 40-60 秒）';
+        try {
+          const resp = await fetch('/api/ecommerce/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_a: prodA, reviews_a: reviewsA, product_b: prodB, reviews_b: reviewsB }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '对比失败', 'error');
+            return;
+          }
+          const box = document.getElementById('compare-result');
+          box.innerHTML = '';
+          const add = (label, text) => {
+            const p = document.createElement('p');
+            p.innerHTML = '<strong>' + label + ':</strong> ' + (text || '');
+            box.appendChild(p);
+          };
+          add(prodA + ' 核心痛点', data.a_pains);
+          add(prodB + ' 核心痛点', data.b_pains);
+          add(prodA + ' 优势', data.a_strengths);
+          add(prodB + ' 优势', data.b_strengths);
+          add('核心差异', data.difference);
+          add('竞争策略', data.strategy);
+          const zh = document.createElement('p');
+          zh.className = 'meta';
+          zh.textContent = '总结: ' + (data.zh_summary || '');
+          box.appendChild(zh);
+          box.hidden = false;
+          showStatus('对比完成', 'info');
+        } catch (_) {
+          showStatus('网络错误，对比失败', 'error');
+        } finally {
+          cb.disabled = false;
+          cb.textContent = '对比分析';
         }
       });
 

@@ -18,7 +18,7 @@ from llm import analyze_market, analyze_trade_trend
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
-from ecommerce import analyze_reviews, generate_listing
+from ecommerce import analyze_reviews, compare_products, generate_listing
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -449,6 +449,32 @@ def ecommerce_sample():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         raise HTTPException(status_code=500, detail="演示数据加载失败")
+
+
+class EcommerceCompareRequest(BaseModel):
+    product_a: str
+    reviews_a: list = []
+    product_b: str
+    reviews_b: list = []
+
+
+@app.post("/api/ecommerce/compare")
+def ecommerce_compare(req: EcommerceCompareRequest):
+    """竞品对比：两组评论 → 差异化洞察"""
+    reviews_a = [r.strip() for r in req.reviews_a if r and r.strip()]
+    reviews_b = [r.strip() for r in req.reviews_b if r and r.strip()]
+    if not reviews_a or not reviews_b:
+        raise HTTPException(status_code=400, detail="两组评论都不能为空")
+    try:
+        analysis_a = analyze_reviews(reviews_a)
+        analysis_b = analyze_reviews(reviews_b)
+        result = compare_products(analysis_a, analysis_b)
+        result["_product_a"] = req.product_a.strip()
+        result["_product_b"] = req.product_b.strip()
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("竞品对比: %s vs %s", req.product_a, req.product_b)
+    return result
 
 
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，

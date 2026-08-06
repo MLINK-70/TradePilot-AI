@@ -116,6 +116,78 @@ def analyze_reviews(reviews: list) -> dict:
     }
 
 
+def clean_pasted_text(raw: str) -> list:
+    """清洗粘贴的评论文本 → 逐条评论列表
+
+    处理：去掉编号（1. 2. 3.）、去空行、去平台广告行/星级行、
+    按换行拆分、去重。
+    """
+    import re
+
+    lines = raw.split("\n")
+    cleaned = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # 去掉行首编号（1. / 1、 / 1) / [1]）
+        line = re.sub(r"^\[\d+\]\s*", "", line)
+        line = re.sub(r"^\d+[.、)\s]\s*", "", line)
+        # 去星级行（如 ★★★★★ 或 ★★★★☆ 或 ★ 4.5）
+        if re.match(r"^[★☆]{1,5}\s*$", line):
+            continue
+        if re.match(r"^★+\s*\d", line):
+            continue
+        # 去疑似广告行（"查看全部"等）
+        if line in ("查看全部", "查看更多", "展开", "回复", "赞"):
+            continue
+        cleaned.append(line)
+    # 去重（保持顺序）
+    seen = set()
+    result = []
+    for c in cleaned:
+        if c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
+
+
+COMPARE_SYSTEM = """你是跨境电商产品分析师。对比两个产品的评论痛点分析结果，找出差异化。
+
+输出 JSON：
+{
+  "a_pains": "产品 A 的核心痛点（一句话，引用数据）",
+  "b_pains": "产品 B 的核心痛点（一句话，引用数据）",
+  "a_strengths": "产品 A 相对 B 的优势",
+  "b_strengths": "产品 B 相对 A 的优势",
+  "difference": "两者用户抱怨点的核心差异（2-3 句）",
+  "strategy": "竞争策略建议（1-2 句，针对卖家）",
+  "zh_summary": "中文总结"
+}
+
+要求：只基于给定的两组分析结果，不编造。"""
+
+
+def compare_products(analysis_a: dict, analysis_b: dict) -> dict:
+    """竞品对比：两组评论分析 → 差异化洞察"""
+    content = _chat([
+        {"role": "system", "content": COMPARE_SYSTEM},
+        {"role": "user", "content": (
+            "产品 A 分析:\n" + json.dumps({
+                "top_pains": analysis_a.get("top_pains", []),
+                "top_praises": analysis_a.get("top_praises", []),
+                "zh_summary": analysis_a.get("zh_summary", ""),
+            }, ensure_ascii=False) +
+            "\n\n产品 B 分析:\n" + json.dumps({
+                "top_pains": analysis_b.get("top_pains", []),
+                "top_praises": analysis_b.get("top_praises", []),
+                "zh_summary": analysis_b.get("zh_summary", ""),
+            }, ensure_ascii=False)
+        )},
+    ], use_json=True)
+    return _parse_json(content)
+
+
 LISTING_SYSTEM = """你是跨境电商 Listing 文案专家。根据产品痛点分析结果和平台特性，生成英文产品 Listing。
 
 输出 JSON：
