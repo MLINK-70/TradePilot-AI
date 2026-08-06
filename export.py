@@ -42,7 +42,7 @@ def build_trend_chart(trend: dict) -> io.BytesIO:
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
                       rows: list, ai: dict, hs_description: str = "") -> io.BytesIO:
-    """生成 Word 分析报告（docxtpl 模板渲染 + 图表嵌入）"""
+    """生成 Word 分析报告（docxtpl 模板渲染 + 图表嵌入 + python-docx 表格）"""
     from docxtpl import DocxTemplate
 
     total_value = sum(r.get("primaryValue") or 0 for r in rows)
@@ -55,40 +55,20 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
 
-    # 模板数据
+    # 模板数据（封面/图/AI 文本；表格用 python-docx 渲染后追加）
     context = {
         "meta_line": f"{product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}",
-        "trend_image": None,  # 下面用 docxtpl 的 InlineImage
-        "overview_table": None,
-        "data_table": None,
+        "trend_image": None,
         "analysis_text": None,
     }
 
     tpl = DocxTemplate("templates/report_template_v2.docx")
 
-    # 图片：InlineImage（必须在 render 前创建）
     if chart_buf:
         from docxtpl import InlineImage
         from docx.shared import Cm as CmW
         context["trend_image"] = InlineImage(tpl, chart_buf, width=CmW(15))
 
-    # 数据表（markdown 风格表格，docxtpl 用 RichText 渲染普通文本表格）
-    ov_rows = [
-        ("指标", "数值", "单位"),
-        ("贸易金额", f"{total_value:,.0f}", "美元"),
-        ("净重", f"{total_wgt:,.0f}", "公斤"),
-    ]
-    context["overview_table"] = "\n".join(" | ".join(r) for r in ov_rows)
-
-    data_rows = [("年份", "流向", "HS编码", "金额(美元)", "净重(公斤)")]
-    for r in rows:
-        data_rows.append((
-            str(r.get("refYear")), "出口", str(r.get("cmdCode")),
-            f"{r.get('primaryValue') or 0:,.0f}", f"{r.get('netWgt') or 0:,.0f}",
-        ))
-    context["data_table"] = "\n".join(" | ".join(r) for r in data_rows)
-
-    # AI 分析
     ms = ai.get("market_size") or {}
     gt = ai.get("growth_trend") or {}
     risks = "；".join(f"{r.get('type')}（{r.get('level')}）: {r.get('description')}" for r in (ai.get("risks") or []))
@@ -99,9 +79,38 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         f"AI 总结: {ai.get('summary', '')}"
     )
 
+    # 渲染模板 → 拿到 Document 对象（docxtpl 渲染后通过 tpl.docx 访问）
     tpl.render(context)
+    doc = tpl.docx
+
+    # python-docx 追加：数据总览表
+    doc.add_heading("二、数据总览", level=1)
+    tbl = doc.add_table(rows=3, cols=3)
+    tbl.style = "Light Grid Accent 1"
+    hdr = tbl.rows[0].cells
+    hdr[0].text, hdr[1].text, hdr[2].text = "指标", "数值", "单位"
+    tbl.rows[1].cells[0].text = "贸易金额"
+    tbl.rows[1].cells[1].text = f"{total_value:,.0f}"
+    tbl.rows[1].cells[2].text = "美元"
+    tbl.rows[2].cells[0].text = "净重"
+    tbl.rows[2].cells[1].text = f"{total_wgt:,.0f}"
+    tbl.rows[2].cells[2].text = "公斤"
+
+    # 原始数据表
+    doc.add_heading("三、原始数据（UN Comtrade）", level=1)
+    raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
+    raw_tbl.style = "Light Grid Accent 1"
+    for j, head in enumerate(["年份", "流向", "HS编码", "金额(美元)", "净重(公斤)"]):
+        raw_tbl.rows[0].cells[j].text = head
+    for i, r in enumerate(rows, 1):
+        raw_tbl.rows[i].cells[0].text = str(r.get("refYear"))
+        raw_tbl.rows[i].cells[1].text = "出口"
+        raw_tbl.rows[i].cells[2].text = str(r.get("cmdCode"))
+        raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
+        raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
+
     buf = io.BytesIO()
-    tpl.save(buf)
+    doc.save(buf)
     buf.seek(0)
     return buf
 
