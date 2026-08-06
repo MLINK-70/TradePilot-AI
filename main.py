@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
+from business import generate_outreach_email
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -244,6 +245,35 @@ def trade_query(req: TradeQueryRequest):
             for r in rows
         ],
     }
+
+
+class BusinessEmailRequest(BaseModel):
+    product: str
+    market: str
+    customer_type: str = "经销商"
+    company: str = ""
+    contact: str = ""
+    email: str = ""
+    selling_points: str = ""
+
+
+@app.post("/api/business/outreach")
+def business_outreach(req: BusinessEmailRequest):
+    """生成英文开发信 + 中文要点"""
+    product = req.product.strip()
+    market = req.market.strip()
+    if not product or not market:
+        raise HTTPException(status_code=400, detail="product 和 market 不能为空")
+    try:
+        data = generate_outreach_email(
+            product, market, req.customer_type.strip() or "经销商",
+            req.company.strip(), req.contact.strip(), req.email.strip(),
+            req.selling_points.strip(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("开发信生成: %s / %s", product, market)
+    return data
 
 
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，

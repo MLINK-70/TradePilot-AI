@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 外贸开发信</title>
+  <link rel="stylesheet" href="style.css?v=6">
+  <style>
+    .email-box {
+      margin-top: 1.4rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.6rem 2rem;
+    }
+    .email-subject { font-weight: 700; font-size: 1.05rem; color: var(--accent); margin-bottom: 0.8rem; }
+    .email-greeting { margin-bottom: 0.8rem; }
+    .email-body { white-space: pre-wrap; line-height: 1.8; margin-bottom: 1rem; }
+    .email-signature { color: var(--muted); }
+    .zh-notes {
+      margin-top: 1.2rem;
+      padding-top: 1rem;
+      border-top: 1px dashed var(--border);
+    }
+    .zh-notes .title { color: var(--gold); font-size: 0.85rem; margin-bottom: 0.4rem; font-weight: 600; }
+    .zh-notes li { margin: 0.25rem 0; font-size: 0.9rem; }
+    .copy-btn {
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--accent);
+      font-size: 0.85rem;
+      cursor: pointer;
+      width: auto;
+    }
+    .copy-btn:hover { background: var(--accent-soft); }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="hero">
+    <span class="eyebrow">Business Outreach · AI Cold Email</span>
+    <h1>TradePilot AI</h1>
+    <p class="subtitle">外贸开发信生成（英文 + 中文要点）</p>
+    <div class="route-line"><span></span></div>
+    <nav class="tabs">
+      <a href="/">市场分析</a>
+      <a href="/trade.html">贸易数据</a>
+      <a href="/business.html" class="active">开发信</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <form id="email-form" autocomplete="off">
+        <div class="form-row">
+          <label for="product">产品</label>
+          <input type="text" id="product" placeholder="例如：蓝牙耳机（主动降噪，续航40小时）" required>
+        </div>
+        <div class="form-row">
+          <label for="market">目标市场</label>
+          <input type="text" id="market" placeholder="例如：德国" required>
+        </div>
+        <div class="form-row">
+          <label for="customer-type">客户类型</label>
+          <input type="text" id="customer-type" placeholder="经销商 / 零售商 / 品牌商" value="经销商" list="ctype-list" required>
+          <datalist id="ctype-list">
+            <option value="经销商（Distributor）"></option>
+            <option value="零售商（Retailer）"></option>
+            <option value="品牌商（Brand Owner）"></option>
+            <option value="电商卖家（E-commerce Seller）"></option>
+          </datalist>
+        </div>
+        <div class="form-row">
+          <label for="company">公司名称</label>
+          <input type="text" id="company" placeholder="例如：SoundTech Ltd.">
+        </div>
+        <div class="form-row">
+          <label for="contact">联系人</label>
+          <input type="text" id="contact" placeholder="例如：John Smith">
+        </div>
+        <div class="form-row">
+          <label for="email">邮箱</label>
+          <input type="text" id="email" placeholder="例如：sales@yourcompany.com">
+        </div>
+        <button type="submit" id="submit-btn">生成开发信</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="result" hidden>
+      <div class="email-box">
+        <div class="email-subject" id="email-subject"></div>
+        <div class="email-greeting" id="email-greeting"></div>
+        <div class="email-body" id="email-body"></div>
+        <div class="email-signature" id="email-signature"></div>
+        <div class="zh-notes">
+          <div class="title">中文要点</div>
+          <ul id="zh-notes"></ul>
+        </div>
+        <button class="copy-btn" id="copy-btn">复制全文</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>AI 生成内容仅供参考，发送前请核对信息</footer>
+
+  <script src="theme.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const form = document.getElementById('email-form');
+      const btn = document.getElementById('submit-btn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      let lastEmail = '';
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+          product: document.getElementById('product').value.trim(),
+          market: document.getElementById('market').value.trim(),
+          customer_type: document.getElementById('customer-type').value.trim(),
+          company: document.getElementById('company').value.trim(),
+          contact: document.getElementById('contact').value.trim(),
+          email: document.getElementById('email').value.trim(),
+        };
+
+        if (!payload.product || !payload.market) {
+          showStatus('请填写产品和目标市场', 'error');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '生成中…';
+        showStatus('正在生成英文开发信，约需 10-20 秒…', 'info');
+        resultEl.hidden = true;
+
+        try {
+          const resp = await fetch('/api/business/outreach', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+
+          if (!resp.ok) {
+            showStatus(data.detail || '生成失败，请稍后重试', 'error');
+            return;
+          }
+
+          document.getElementById('email-subject').textContent = 'Subject: ' + (data.subject || '');
+          document.getElementById('email-greeting').textContent = data.greeting || '';
+          document.getElementById('email-body').textContent = data.body || '';
+          document.getElementById('email-signature').textContent = [data.closing, data.signature].filter(Boolean).join('\n');
+          const notes = document.getElementById('zh-notes');
+          notes.innerHTML = '';
+          (data.zh_notes || []).forEach(n => {
+            const li = document.createElement('li');
+            li.textContent = n;
+            notes.appendChild(li);
+          });
+          lastEmail = [
+            'Subject: ' + (data.subject || ''),
+            '',
+            data.greeting || '',
+            data.body || '',
+            data.closing || '',
+            data.signature || '',
+          ].join('\n');
+
+          resultEl.hidden = false;
+          showStatus('', '');
+        } catch (err) {
+          showStatus('网络错误，请确认后端服务已启动', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '生成开发信';
+        }
+      });
+
+      document.getElementById('copy-btn').addEventListener('click', async () => {
+        if (!lastEmail) return;
+        try {
+          await navigator.clipboard.writeText(lastEmail);
+          showStatus('已复制到剪贴板', 'info');
+        } catch (_) {
+          showStatus('复制失败，请手动选择复制', 'error');
+        }
+      });
+
+      function showStatus(text, type) {
+        statusEl.textContent = text;
+        statusEl.className = 'status ' + type;
+      }
+    })();
+  </script>
+</body>
+</html>
