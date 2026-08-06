@@ -3,6 +3,7 @@
 从 gen_export_demo.py 验证过的逻辑抽取，供 API 路由复用。
 """
 import csv
+import datetime
 import io
 
 import matplotlib
@@ -64,7 +65,7 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
             lines.append(f"• 期末较期初变化: {stats['change_over_period_pct']:.1f}%（{y_range}）")
     if analysis.get("overview"):
         lines.append(f"• AI 总结: {analysis['overview']}")
-    lines.append(f"• 数据来源: UN Comtrade 公共 API，报告生成于 {__import__('datetime').date.today().isoformat()}")
+    lines.append(f"• 数据来源: UN Comtrade 公共 API，报告生成于 {datetime.date.today().isoformat()}")
     return "\n".join(lines) if lines else f"（{product} → {target} {year}，暂无摘要数据）"
 
 

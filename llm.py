@@ -112,11 +112,20 @@ TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供�
 5. 所有内容中文输出"""
 
 
+# 手动缓存（trend/stats 是 dict 不可哈希，lru_cache 无法直接用）
+_trade_trend_cache: dict = {}
+
+
 def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None) -> dict:
     """AI 解读贸易趋势：trend 为逐年数据，stats 为程序算好的统计指标
 
     AI 只负责解读（引用已核实指标），不负责算数——杜绝 AI 算术错误/幻觉。
+    手动缓存：相同查询（产品/目标/出口国/数据区间）不重复消耗 token。
     """
+    cache_key = (product, target, reporter, tuple(trend.keys()))
+    if cache_key in _trade_trend_cache:
+        return _trade_trend_cache[cache_key]
+
     data_lines = "\n".join(
         f"{y}: {v['value']:,.0f} 美元 / {v['weight']:,.0f} 公斤" for y, v in trend.items()
     )
@@ -147,4 +156,6 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
         {"role": "system", "content": TRADE_TREND_SYSTEM},
         {"role": "user", "content": user_msg},
     ], use_json=True)
-    return _parse_json(content)
+    result = _parse_json(content)
+    _trade_trend_cache[cache_key] = result  # 缓存结果，避免重复烧 token
+    return result

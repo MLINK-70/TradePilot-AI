@@ -6,6 +6,7 @@
 - 免费版限流严格（429），必须缓存
 - 欧盟组代码 97 / 东盟 948，字母代码无效
 """
+import logging
 import sys
 import time
 
@@ -106,7 +107,8 @@ def get_latest_year() -> int:
         return int(cached[0]["year"])
 
     this_year = datetime.date.today().year
-    for y in range(this_year, this_year - 3, -1):
+    # 探测范围 6 年（数据更新滞后时也能找到最新可用年份）
+    for y in range(this_year, this_year - 6, -1):
         try:
             params = {
                 "reporterCode": "156",
@@ -124,10 +126,12 @@ def get_latest_year() -> int:
             )
             if resp.status_code == 200 and resp.json().get("count", 0) > 0:
                 save_cache(meta_key, "0", "0", "X", [{"year": y}], "META")
+                logging.info("最新可用年份探测: %d", y)
                 return y
         except Exception:
             continue
         time.sleep(1)
+    logging.warning("最新年份探测失败，回退 2024")
     return 2024  # 兜底
 
 

@@ -179,13 +179,14 @@ def _years_from_range(start_year: int, end_year: int | None) -> list:
 
 @app.get("/api/trade/options")
 def trade_options():
-    """返回前端下拉选项：产品（HS映射）+ 国家/组织（含分组标记）"""
+    """返回前端下拉选项：产品（HS映射）+ 国家/组织（含分组标记）+ 最新年份"""
     return {
         "products": sorted(HS_MAP.keys()),
         "targets": [
             {"name": name, "code": code, "is_group": code in GROUP_MEMBERS}
             for name, code in sorted(AREA_MAP.items())
         ],
+        "latest_year": get_latest_year(),
     }
 
 

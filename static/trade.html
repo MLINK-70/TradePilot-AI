@@ -154,7 +154,8 @@
           });
 
           const yearList = document.getElementById('year-list');
-          for (let y = 2024; y >= 1990; y--) {
+          const latestYear = data.latest_year || 2024;
+          for (let y = latestYear; y >= latestYear - 10; y--) {
             const opt = document.createElement('option');
             opt.value = String(y);
             yearList.appendChild(opt);
