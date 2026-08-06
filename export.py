@@ -40,8 +40,26 @@ def build_trend_chart(trend: dict) -> io.BytesIO:
     return buf
 
 
+def build_executive_summary(product: str, target: str, year: str, stats: dict,
+                            analysis: dict, total_value: float) -> str:
+    """生成执行摘要（报告开头）：关键数字 + AI 一句话总结"""
+    lines = []
+    if stats:
+        lines.append(f"• 总出口额: {total_value / 1e8:.2f} 亿美元")
+        if stats.get("cagr_pct") is not None:
+            lines.append(f"• 年复合增长率: {stats['cagr_pct']}%")
+        if stats.get("peak_year"):
+            lines.append(f"• 峰值年份: {stats['peak_year']}")
+        if stats.get("change_over_period_pct") is not None:
+            lines.append(f"• 期末较期初变化: {stats['change_over_period_pct']:.1f}%")
+    if analysis.get("overview"):
+        lines.append(f"• AI 总结: {analysis['overview']}")
+    return "\n".join(lines) if lines else f"（{product} → {target} {year}，暂无摘要数据）"
+
+
 def build_word_report(product: str, target: str, year: str, hs_code: str,
-                      rows: list, ai: dict, hs_description: str = "") -> io.BytesIO:
+                      rows: list, ai: dict, hs_description: str = "",
+                      stats: dict | None = None, analysis: dict | None = None) -> io.BytesIO:
     """生成 Word 分析报告（docxtpl 模板渲染 + 图表嵌入 + python-docx 表格）"""
     from docxtpl import DocxTemplate
 
@@ -55,25 +73,34 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
 
-    # 模板数据（封面 + 趋势图；其余章节 python-docx 顺序追加）
+    # 模板数据（封面 + meta；全部章节 python-docx 顺序追加）
     context = {
         "meta_line": f"{product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}",
-        "trend_image": None,
     }
 
     tpl = DocxTemplate("templates/report_template_v2.docx")
-
-    if chart_buf:
-        from docxtpl import InlineImage
-        from docx.shared import Cm as CmW
-        context["trend_image"] = InlineImage(tpl, chart_buf, width=CmW(15))
-
-    # 渲染模板 → 拿到 Document 对象
     tpl.render(context)
     doc = tpl.docx
 
-    # 二、数据总览表
-    doc.add_heading("二、数据总览", level=1)
+    # 一、执行摘要
+    doc.add_heading("一、执行摘要", level=1)
+    summary_text = build_executive_summary(
+        product, target, year,
+        stats or {}, analysis or {},
+        total_value,
+    )
+    for line in summary_text.split("\n"):
+        doc.add_paragraph(line)
+
+    # 二、出口趋势（图表 PNG 直接嵌入）
+    doc.add_heading("二、出口趋势", level=1)
+    if chart_buf:
+        doc.add_picture(chart_buf, width=Cm(15))
+    else:
+        doc.add_paragraph("（单年数据，无趋势图）")
+
+    # 三、数据总览表
+    doc.add_heading("三、数据总览", level=1)
     tbl = doc.add_table(rows=3, cols=3)
     tbl.style = "Light Grid Accent 1"
     hdr = tbl.rows[0].cells
@@ -85,8 +112,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     tbl.rows[2].cells[1].text = f"{total_wgt:,.0f}"
     tbl.rows[2].cells[2].text = "公斤"
 
-    # 三、原始数据表
-    doc.add_heading("三、原始数据（UN Comtrade）", level=1)
+    # 四、原始数据表
+    doc.add_heading("四、原始数据（UN Comtrade）", level=1)
     raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
     raw_tbl.style = "Light Grid Accent 1"
     for j, head in enumerate(["年份", "流向", "HS编码", "金额(美元)", "净重(公斤)"]):
@@ -98,8 +125,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
         raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
 
-    # 四、AI 市场分析（分小节）
-    doc.add_heading("四、AI 市场分析", level=1)
+    # 五、AI 市场分析（分小节）
+    doc.add_heading("五、AI 市场分析", level=1)
     ms = ai.get("market_size") or {}
     gt = ai.get("growth_trend") or {}
     risks = ai.get("risks") or []

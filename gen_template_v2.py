@@ -55,12 +55,8 @@ mr.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
 
 doc.add_paragraph()
 
-# 一、出口趋势（图坑）
-doc.add_heading("一、出口趋势", level=1)
-doc.add_paragraph("{{ trend_image }}")
-
-# 二、三、四：由 python-docx 在渲染后按顺序追加（模板只负责封面和趋势图，
-# 避免模板/后插内容顺序错乱）
+# 全部章节（执行摘要/趋势图/表格/AI分析）由 python-docx 在渲染后顺序追加，
+# 模板只负责封面 + 统一样式，保证章节顺序可控
 
 doc.add_paragraph()
 f = doc.add_paragraph()

@@ -105,10 +105,11 @@ TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供�
   "overview": "2-3 句话总结整体趋势（升/降/波动）",
   "highlights": ["亮点1（引用给定指标的具体数值）", "亮点2"],
   "risks": ["风险1（如增速放缓、波动加大）", "风险2"],
-  "suggestion": "1 句行动建议（针对出口商/卖家）"
+  "suggestion": "1 句可执行的行动建议"
 }
 3. 必须直接引用给定的指标数值，禁止自行计算或编造任何数字
-4. 所有内容中文输出"""
+4. **建议必须具体可执行**：结合数据给出明确方向（如"针对 2022 年出口额下降 16.8%，建议优化 X 产品线或开拓 Y 市场"），禁止"提升产品附加值""加强市场开拓"这类空话
+5. 所有内容中文输出"""
 
 
 def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None) -> dict:

@@ -118,15 +118,25 @@ def _download_headers(filename: str) -> dict:
 
 @app.post("/api/trade/export/report")
 def export_report(req: TradeExportRequest):
-    """下载 Word 分析报告（数据总览 + 原始数据 + AI 分析）"""
+    """下载 Word 分析报告（执行摘要 + 趋势图 + 数据 + AI 分析）"""
     hs, rows = _fetch_trade_data(req)
     try:
         ai = analyze_market(req.product.strip(), req.target.strip())
     except ValueError:
         ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
+    # 统计指标 + AI 趋势解读（供执行摘要引用）
+    trend = summarize_trend(rows)
+    stats = summarize_stats(trend) if len(trend) >= 2 else {}
+    analysis = {}
+    try:
+        if len(trend) >= 2:
+            analysis = analyze_trade_trend(req.product.strip(), req.target.strip(),
+                                           req.reporter, trend, stats)
+    except ValueError:
+        pass
     year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
-                            hs, rows, ai, get_hs_description(hs))
+                            hs, rows, ai, get_hs_description(hs), stats, analysis)
     filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.docx"
     return StreamingResponse(
         buf,
