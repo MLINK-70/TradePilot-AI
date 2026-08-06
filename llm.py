@@ -10,6 +10,49 @@ from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from prompts import SYSTEM_PROMPT, build_user_prompt
 
 
+def _chat(messages: list, use_json: bool = True) -> str:
+    """通用 DeepSeek 请求：直连 + 重试 + 超时兜底，返回文本内容"""
+    if not DEEPSEEK_API_KEY:
+        raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
+
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+        "temperature": 0.7,
+    }
+    if use_json:
+        payload["response_format"] = {"type": "json_object"}
+
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                    "Connection": "close",
+                },
+                json=payload,
+                timeout=60,
+                proxies={"http": None, "https": None},  # 强制直连
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout as e:
+            if attempt == 1:
+                raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
+            logging.warning("DeepSeek 请求超时，3 秒后自动重试: %s", e)
+            time.sleep(3)
+        except requests.exceptions.HTTPError as e:
+            code = e.response.status_code if e.response is not None else "?"
+            raise ValueError(f"DeepSeek API 返回错误：{code}，可能是余额不足或 Key 无效")
+        except requests.exceptions.RequestException as e:
+            if attempt == 1:
+                raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
+            logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
+            time.sleep(3)
+
+
 def _parse_json(content: str) -> dict:
     """把 DeepSeek 返回的文本解析为 JSON 对象。
 
@@ -49,45 +92,36 @@ def analyze_market(product: str, country: str) -> dict:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_user_prompt(product, country)},
     ]
+    content = _chat(messages, use_json=True)
+    return _parse_json(content)
 
-    # DeepSeek 是国内 API，强制直连不走代理（否则梯子 TUN 模式
-    # 会劫持流量导致并发时 "Response ended prematurely"）
-    for attempt in range(2):
-        try:
-            resp = requests.post(
-                f"{DEEPSEEK_BASE_URL}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                    "Content-Type": "application/json",
-                    "Connection": "close",
-                },
-                json={
-                    "model": DEEPSEEK_MODEL,
-                    "messages": messages,
-                    "temperature": 0.7,
-                    "response_format": {"type": "json_object"},  # 强制 JSON 输出
-                },
-                timeout=60,
-                proxies={"http": None, "https": None},  # 强制直连
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            break
-        except requests.exceptions.Timeout as e:
-            # 超时可能是瞬时抖动，重试一次
-            if attempt == 1:
-                raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
-            logging.warning("DeepSeek 请求超时，3 秒后自动重试: %s", e)
-            time.sleep(3)
-        except requests.exceptions.HTTPError as e:
-            # 401/402 等错误重试无意义，立即报错（从异常取状态码，不依赖 resp）
-            code = e.response.status_code if e.response is not None else "?"
-            raise ValueError(f"DeepSeek API 返回错误：{code}，可能是余额不足或 Key 无效")
-        except requests.exceptions.RequestException as e:
-            # 网络错误可能是瞬时抖动，重试一次
-            if attempt == 1:
-                raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
-            logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
-            time.sleep(3)
 
+TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供的真实出口贸易数据（来自 UN Comtrade），输出一份简明的市场解读。
+
+输出要求：
+1. 只输出合法 JSON 对象
+2. 结构如下：
+{
+  "overview": "2-3 句话总结整体趋势（升/降/波动）",
+  "highlights": ["亮点1（结合具体年份和数值）", "亮点2"],
+  "risks": ["风险1（如增速放缓、波动加大）", "风险2"],
+  "suggestion": "1 句行动建议（针对出口商/卖家）"
+}
+3. 必须基于给定数据说话，禁止编造数据；数据不足时在 overview 中说明
+4. 所有内容中文输出"""
+
+
+def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict) -> dict:
+    """AI 解读贸易趋势数据：trend = {year: {"value": 金额, "weight": 净重}}"""
+    data_lines = "\n".join(
+        f"{y}: {v['value']:,.0f} 美元 / {v['weight']:,.0f} 公斤" for y, v in trend.items()
+    )
+    user_msg = (
+        f"产品: {product}\n出口国: {reporter}\n目标市场: {target}\n"
+        f"逐年出口数据:\n{data_lines}\n请输出市场解读。"
+    )
+    content = _chat([
+        {"role": "system", "content": TRADE_TREND_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ], use_json=True)
     return _parse_json(content)

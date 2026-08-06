@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from llm import analyze_market
+from llm import analyze_market, analyze_trade_trend
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -201,6 +201,15 @@ def trade_query(req: TradeQueryRequest):
         raise HTTPException(status_code=502, detail=str(e))
 
     logging.info("贸易查询: %s→%s / %s / %d-%s", req.reporter, target, product, req.start_year, req.end_year or "最新")
+
+    # AI 解读真实贸易数据（失败不阻断查询，前端显示"解读生成失败"）
+    analysis = {}
+    try:
+        if trend:
+            analysis = analyze_trade_trend(product, target, req.reporter, trend)
+    except ValueError:
+        pass
+
     return {
         "hs_code": hs,
         "hs_description": get_hs_description(hs),  # HS 编码品名解释
@@ -208,6 +217,7 @@ def trade_query(req: TradeQueryRequest):
         "total_weight": sum(r.get("netWgt") or 0 for r in rows),
         "record_count": len(rows),
         "trend": [{"year": y, "value": v["value"], "weight": v["weight"]} for y, v in trend.items()],
+        "analysis": analysis,  # AI 市场解读
         "rows": [
             {
                 "year": r.get("refYear"),

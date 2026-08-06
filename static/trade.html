@@ -28,6 +28,12 @@
     .year-pair { flex: 1; display: flex; align-items: center; gap: 0.6rem; }
     .year-pair input { flex: 1; }
     .year-sep { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
+    .analysis-title { color: var(--accent); font-size: 1rem; margin-bottom: 0.5rem; }
+    .analysis-overview { color: var(--text); font-size: 0.92rem; line-height: 1.7; }
+    .analysis-section { margin-top: 0.8rem; }
+    .analysis-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.2rem; }
+    .analysis-section ul { padding-left: 1.2rem; color: var(--text); font-size: 0.9rem; }
+    .analysis-section li { margin: 0.15rem 0; }
   </style>
 </head>
 <body>
@@ -83,6 +89,23 @@
       <div class="chart-box">
         <div id="trend-chart"></div>
         <p class="meta" id="chart-meta"></p>
+      </div>
+
+      <div class="chart-box" id="analysis-box" hidden>
+        <h3 class="analysis-title">AI 市场解读</h3>
+        <p class="analysis-overview" id="analysis-overview"></p>
+        <div class="analysis-section">
+          <div class="analysis-label">亮点</div>
+          <ul id="analysis-highlights"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">风险</div>
+          <ul id="analysis-risks"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">建议</div>
+          <p id="analysis-suggestion"></p>
+        </div>
       </div>
 
       <div class="download-row">
@@ -197,6 +220,23 @@
           'HS' + data.hs_code + ' · ' + (data.hs_description || '品名待确认') +
           '<br>' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
           ' · 数据来源 UN Comtrade';
+
+        // AI 解读
+        const ab = document.getElementById('analysis-box');
+        const a = data.analysis || {};
+        if (a.overview) {
+          document.getElementById('analysis-overview').textContent = a.overview;
+          const hl = document.getElementById('analysis-highlights');
+          hl.innerHTML = '';
+          (a.highlights || []).forEach(h => { const li = document.createElement('li'); li.textContent = h; hl.appendChild(li); });
+          const rk = document.getElementById('analysis-risks');
+          rk.innerHTML = '';
+          (a.risks || []).forEach(r => { const li = document.createElement('li'); li.textContent = r; rk.appendChild(li); });
+          document.getElementById('analysis-suggestion').textContent = a.suggestion || '';
+          ab.hidden = false;
+        } else {
+          ab.hidden = true;
+        }
 
         const years = data.trend.map(t => t.year);
         const values = data.trend.map(t => t.value);
