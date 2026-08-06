@@ -301,6 +301,63 @@ def summarize_trend(rows: list) -> dict:
     return {y: v for y, v in sorted(by_year.items())}
 
 
+def summarize_stats(trend: dict) -> dict:
+    """程序精确计算趋势统计指标（供 AI 解读引用，杜绝 AI 自己算错）
+
+    返回：总量、年均增速、峰值/谷值年份、首末变化、最大单年波动、单价趋势
+    """
+    years = sorted(trend.keys())
+    if not years:
+        return {}
+
+    first_y, last_y = years[0], years[-1]
+    first_v = trend[first_y]["value"]
+    last_v = trend[last_y]["value"]
+    total = sum(v["value"] for v in trend.values())
+
+    # 年复合增长率 CAGR = (last/first)^(1/n) - 1
+    n = len(years) - 1
+    cagr = ((last_v / first_v) ** (1 / n) - 1) * 100 if n > 0 and first_v else None
+
+    # 峰值/谷值
+    peak_y = max(trend, key=lambda y: trend[y]["value"])
+    trough_y = min(trend, key=lambda y: trend[y]["value"])
+
+    # 最大单年波动（相邻年变化率最大）
+    max_chg = 0.0
+    max_chg_year = None
+    for i in range(1, len(years)):
+        prev, cur = trend[years[i - 1]]["value"], trend[years[i]]["value"]
+        if prev:
+            chg = (cur - prev) / prev * 100
+            if abs(chg) > abs(max_chg):
+                max_chg = chg
+                max_chg_year = years[i]
+
+    # 单价趋势（金额/净重）
+    unit_prices = []
+    for y in years:
+        w = trend[y].get("weight") or 0
+        if w > 0:
+            unit_prices.append({"year": y, "price": trend[y]["value"] / w})
+
+    return {
+        "years": years,
+        "total_value": total,
+        "first_year": first_y,
+        "last_year": last_y,
+        "first_value": first_v,
+        "last_value": last_v,
+        "change_over_period_pct": (last_v - first_v) / first_v * 100 if first_v else None,
+        "cagr_pct": round(cagr, 2) if cagr is not None else None,
+        "peak_year": peak_y,
+        "trough_year": trough_y,
+        "max_swing_year": max_chg_year,
+        "max_swing_pct": round(max_chg, 2) if max_chg_year else None,
+        "unit_prices": unit_prices,
+    }
+
+
 def _parse_years(arg: str) -> list:
     """解析年份参数：'2022' / '2020-2022' / '2018,2020,2022'"""
     arg = arg.strip()

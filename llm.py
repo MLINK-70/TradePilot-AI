@@ -96,29 +96,42 @@ def analyze_market(product: str, country: str) -> dict:
     return _parse_json(content)
 
 
-TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供的真实出口贸易数据（来自 UN Comtrade），输出一份简明的市场解读。
+TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供的**已核实统计指标**（程序精确计算，来自 UN Comtrade 数据），输出一份简明的市场解读。
 
 输出要求：
 1. 只输出合法 JSON 对象
 2. 结构如下：
 {
   "overview": "2-3 句话总结整体趋势（升/降/波动）",
-  "highlights": ["亮点1（结合具体年份和数值）", "亮点2"],
+  "highlights": ["亮点1（引用给定指标的具体数值）", "亮点2"],
   "risks": ["风险1（如增速放缓、波动加大）", "风险2"],
   "suggestion": "1 句行动建议（针对出口商/卖家）"
 }
-3. 必须基于给定数据说话，禁止编造数据；数据不足时在 overview 中说明
+3. 必须直接引用给定的指标数值，禁止自行计算或编造任何数字
 4. 所有内容中文输出"""
 
 
-def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict) -> dict:
-    """AI 解读贸易趋势数据：trend = {year: {"value": 金额, "weight": 净重}}"""
+def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None) -> dict:
+    """AI 解读贸易趋势：trend 为逐年数据，stats 为程序算好的统计指标
+
+    AI 只负责解读（引用已核实指标），不负责算数——杜绝 AI 算术错误/幻觉。
+    """
     data_lines = "\n".join(
         f"{y}: {v['value']:,.0f} 美元 / {v['weight']:,.0f} 公斤" for y, v in trend.items()
     )
+    stats_lines = ""
+    if stats:
+        stats_lines = (
+            f"\n已核实统计指标（程序精确计算）:\n"
+            f"- 区间: {stats['first_year']}-{stats['last_year']}，期末较期初变化 {stats['change_over_period_pct']:.1f}%\n"
+            f"- 年复合增长率: {stats['cagr_pct']}%\n"
+            f"- 峰值年份: {stats['peak_year']}，谷值年份: {stats['trough_year']}\n"
+            f"- 最大单年波动: {stats['max_swing_year']} 年 {stats['max_swing_pct']}%\n"
+            f"- 单价趋势: " + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in stats.get("unit_prices", []))
+        )
     user_msg = (
         f"产品: {product}\n出口国: {reporter}\n目标市场: {target}\n"
-        f"逐年出口数据:\n{data_lines}\n请输出市场解读。"
+        f"逐年出口数据:\n{data_lines}{stats_lines}\n请输出市场解读（引用指标数值，不自行计算）。"
     )
     content = _chat([
         {"role": "system", "content": TRADE_TREND_SYSTEM},

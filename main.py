@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_trend
+from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
 
@@ -206,7 +206,8 @@ def trade_query(req: TradeQueryRequest):
     analysis = {}
     try:
         if trend:
-            analysis = analyze_trade_trend(product, target, req.reporter, trend)
+            stats = summarize_stats(trend)  # 程序先算好已核实指标
+            analysis = analyze_trade_trend(product, target, req.reporter, trend, stats)
     except ValueError:
         pass
 
