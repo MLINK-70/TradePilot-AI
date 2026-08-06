@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 跨境电商</title>
+  <link rel="stylesheet" href="style.css?v=7">
+  <style>
+    #reviews-input {
+      flex: 1;
+      padding: 0.62rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--card-2);
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 140px;
+    }
+    #reviews-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .btn-inline {
+      width: auto;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--accent);
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .btn-inline:hover { background: var(--accent-soft); }
+    .btn-row-inline { display: flex; gap: 0.6rem; margin-top: 0.6rem; }
+    .pain-table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
+    .pain-table th, .pain-table td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
+    .pain-table th { background: var(--card-2); color: var(--muted); }
+    .listing-box { margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--border); }
+    .listing-title { font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; }
+    .listing-bullets li { margin: 0.2rem 0; }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="hero">
+    <span class="eyebrow">E-commerce · Review Intelligence</span>
+    <h1>TradePilot AI</h1>
+    <p class="subtitle">评论分析 · 用户痛点 · 平台 Listing</p>
+    <div class="route-line"><span></span></div>
+    <nav class="tabs">
+      <a href="/">市场分析</a>
+      <a href="/trade.html">贸易数据</a>
+      <a href="/business.html">开发信</a>
+      <a href="/ecommerce.html" class="active">跨境电商</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <form id="review-form" autocomplete="off">
+        <div class="form-row">
+          <label for="reviews-input">评论粘贴</label>
+          <textarea id="reviews-input" placeholder="粘贴评论文本，每行一条…（或点下方按钮用演示数据）"></textarea>
+        </div>
+        <div class="btn-row-inline">
+          <button type="submit" id="submit-btn" class="btn-primary">分析评论</button>
+          <button type="button" id="sample-btn" class="btn-inline">使用演示数据</button>
+        </div>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="result" hidden>
+      <div class="stats">
+        <div class="stat"><div class="num" id="stat-total">—</div><div class="lbl">评论总数</div></div>
+        <div class="stat"><div class="num" id="stat-pos">—</div><div class="lbl">正面</div></div>
+        <div class="stat"><div class="num" id="stat-neg">—</div><div class="lbl">负面</div></div>
+        <div class="stat"><div class="num" id="stat-neu">—</div><div class="lbl">中性</div></div>
+      </div>
+
+      <div class="chart-box">
+        <div id="aspect-chart"></div>
+      </div>
+
+      <div class="chart-box">
+        <h3 class="analysis-title">Top 痛点</h3>
+        <table class="pain-table" id="pains-table"></table>
+      </div>
+
+      <div class="chart-box">
+        <h3 class="analysis-title">Top 卖点</h3>
+        <table class="pain-table" id="praises-table"></table>
+      </div>
+
+      <div class="chart-box">
+        <h3 class="analysis-title">改进建议</h3>
+        <ul id="suggestions-list"></ul>
+        <p class="meta" id="zh-summary"></p>
+      </div>
+
+      <div class="chart-box">
+        <h3 class="analysis-title">生成平台 Listing</h3>
+        <div class="btn-row-inline">
+          <select id="platform-select" class="year-pair" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+            <option value="亚马逊">亚马逊（五点式）</option>
+            <option value="速卖通">速卖通（促销风）</option>
+            <option value="阿里巴巴国际站">阿里巴巴国际站（B2B）</option>
+          </select>
+          <button type="button" id="listing-btn" class="btn-inline">生成 Listing</button>
+        </div>
+        <div id="listing-result" class="listing-box" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>分析基于提供的评论样本 · 数据来源为用户输入/演示数据</footer>
+
+  <script src="echarts.min.js"></script>
+  <script src="theme.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const form = document.getElementById('review-form');
+      const btn = document.getElementById('submit-btn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      let chart = null;
+      let lastAnalysis = null;
+
+      // 演示数据
+      document.getElementById('sample-btn').addEventListener('click', async () => {
+        try {
+          const resp = await fetch('/api/ecommerce/sample');
+          const data = await resp.json();
+          document.getElementById('reviews-input').value = (data.reviews || []).join('\n');
+          showStatus('已载入演示数据（' + (data.reviews || []).length + ' 条），点击分析', 'info');
+        } catch (_) {
+          showStatus('演示数据加载失败', 'error');
+        }
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const raw = document.getElementById('reviews-input').value;
+        const reviews = raw.split('\n').map(s => s.trim()).filter(Boolean);
+
+        if (!reviews.length) {
+          showStatus('请粘贴评论或使用演示数据', 'error');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '分析中…（约 20-40 秒）';
+        showStatus('正在分析评论…', 'info');
+        resultEl.hidden = true;
+
+        try {
+          const resp = await fetch('/api/ecommerce/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviews }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '分析失败', 'error');
+            return;
+          }
+          lastAnalysis = data;
+          render(data);
+          showStatus('', '');
+        } catch (_) {
+          showStatus('网络错误，请确认后端服务已启动', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '分析评论';
+        }
+      });
+
+      function render(data) {
+        document.getElementById('stat-total').textContent = data.total;
+        document.getElementById('stat-pos').textContent = (data.sentiments || {}).positive || 0;
+        document.getElementById('stat-neg').textContent = (data.sentiments || {}).negative || 0;
+        document.getElementById('stat-neu').textContent = (data.sentiments || {}).neutral || 0;
+
+        // ECharts 维度分布
+        const aspects = Object.keys(data.aspect_counts || {});
+        const counts = aspects.map(a => data.aspect_counts[a]);
+        if (chart) chart.dispose();
+        const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        chart = echarts.init(document.getElementById('aspect-chart'));
+        chart.setOption({
+          backgroundColor: 'transparent',
+          tooltip: { trigger: 'axis' },
+          grid: { left: 90, right: 30, top: 20, bottom: 40 },
+          xAxis: { type: 'value', axisLabel: { color: dark ? '#8b9bb8' : '#64748b' } },
+          yAxis: {
+            type: 'category', data: aspects,
+            axisLabel: { color: dark ? '#8b9bb8' : '#64748b' },
+          },
+          series: [{
+            type: 'bar',
+            data: counts,
+            itemStyle: { color: dark ? '#4f8cff' : '#2e5bff' },
+            label: { show: true, position: 'right' },
+          }],
+        });
+
+        // 痛点表格
+        fillTable('pains-table', ['痛点', '次数', '维度', '示例原文'], data.top_pains || [],
+          p => [p.pain, p.count, p.aspect, p.example]);
+        fillTable('praises-table', ['卖点', '次数', '维度', '示例原文'], data.top_praises || [],
+          p => [p.praise, p.count, p.aspect, p.example]);
+
+        // 建议
+        const sug = document.getElementById('suggestions-list');
+        sug.innerHTML = '';
+        (data.improvement_suggestions || []).forEach(s => {
+          const li = document.createElement('li'); li.textContent = s; sug.appendChild(li);
+        });
+        const zh = document.getElementById('zh-summary');
+        zh.textContent = 'AI 总结: ' + (data.zh_summary || '');
+        document.getElementById('listing-result').hidden = true;
+
+        resultEl.hidden = false;
+      }
+
+      function fillTable(id, headers, rows, mapper) {
+        const tbl = document.getElementById(id);
+        tbl.innerHTML = '';
+        const thead = document.createElement('thead');
+        const hr = document.createElement('tr');
+        headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+        thead.appendChild(hr);
+        tbl.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        rows.forEach(r => {
+          const tr = document.createElement('tr');
+          mapper(r).forEach(v => { const td = document.createElement('td'); td.textContent = v || ''; tr.appendChild(td); });
+          tbody.appendChild(tr);
+        });
+        tbl.appendChild(tbody);
+      }
+
+      // Listing 生成
+      document.getElementById('listing-btn').addEventListener('click', async () => {
+        if (!lastAnalysis) { showStatus('请先分析评论', 'error'); return; }
+        const platform = document.getElementById('platform-select').value;
+        const product = (lastAnalysis.product || '产品').trim();
+        const lb = document.getElementById('listing-btn');
+        lb.disabled = true;
+        lb.textContent = '生成中…';
+        try {
+          const resp = await fetch('/api/ecommerce/listing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product, platform, analysis: lastAnalysis }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            showStatus(data.detail || '生成失败', 'error');
+            return;
+          }
+          const box = document.getElementById('listing-result');
+          box.innerHTML = '';
+          const title = document.createElement('div');
+          title.className = 'listing-title';
+          title.textContent = '标题: ' + (data.title || '');
+          box.appendChild(title);
+          const bl = document.createElement('ul');
+          bl.className = 'listing-bullets';
+          (data.bullets || []).forEach(b => { const li = document.createElement('li'); li.textContent = b; bl.appendChild(li); });
+          box.appendChild(bl);
+          const desc = document.createElement('p');
+          desc.textContent = '描述: ' + (data.description || '');
+          box.appendChild(desc);
+          const kw = document.createElement('p');
+          kw.className = 'meta';
+          kw.textContent = '关键词: ' + (data.keywords || []).join(' / ');
+          box.appendChild(kw);
+          const zn = document.createElement('p');
+          zn.className = 'meta';
+          zn.textContent = '说明: ' + (data.zh_notes || []).join('；');
+          box.appendChild(zn);
+          box.hidden = false;
+          showStatus('Listing 已生成', 'info');
+        } catch (_) {
+          showStatus('网络错误，生成失败', 'error');
+        } finally {
+          lb.disabled = false;
+          lb.textContent = '生成 Listing';
+        }
+      });
+
+      function showStatus(text, type) {
+        statusEl.textContent = text;
+        statusEl.className = 'status ' + type;
+      }
+    })();
+  </script>
+</body>
+</html>
