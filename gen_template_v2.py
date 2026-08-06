@@ -59,11 +59,8 @@ doc.add_paragraph()
 doc.add_heading("一、出口趋势", level=1)
 doc.add_paragraph("{{ trend_image }}")
 
-# 二、数据总览 / 三、原始数据：由 python-docx 在渲染后追加（docxtpl 表格循环语法坑多）
-
-# 四、AI 市场分析
-doc.add_heading("四、AI 市场分析", level=1)
-doc.add_paragraph("{{ analysis_text }}")
+# 二、三、四：由 python-docx 在渲染后按顺序追加（模板只负责封面和趋势图，
+# 避免模板/后插内容顺序错乱）
 
 doc.add_paragraph()
 f = doc.add_paragraph()

@@ -55,11 +55,10 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
 
-    # 模板数据（封面/图/AI 文本；表格用 python-docx 渲染后追加）
+    # 模板数据（封面 + 趋势图；其余章节 python-docx 顺序追加）
     context = {
         "meta_line": f"{product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}",
         "trend_image": None,
-        "analysis_text": None,
     }
 
     tpl = DocxTemplate("templates/report_template_v2.docx")
@@ -69,21 +68,11 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         from docx.shared import Cm as CmW
         context["trend_image"] = InlineImage(tpl, chart_buf, width=CmW(15))
 
-    ms = ai.get("market_size") or {}
-    gt = ai.get("growth_trend") or {}
-    risks = "；".join(f"{r.get('type')}（{r.get('level')}）: {r.get('description')}" for r in (ai.get("risks") or []))
-    context["analysis_text"] = (
-        f"市场规模: {ms.get('value', '')}（{ms.get('year', '')}年估算）\n"
-        f"增长趋势: CAGR {gt.get('cagr', '')}，{gt.get('forecast_years', '')}，{gt.get('description', '')}\n"
-        f"风险分析: {risks or '无'}\n"
-        f"AI 总结: {ai.get('summary', '')}"
-    )
-
-    # 渲染模板 → 拿到 Document 对象（docxtpl 渲染后通过 tpl.docx 访问）
+    # 渲染模板 → 拿到 Document 对象
     tpl.render(context)
     doc = tpl.docx
 
-    # python-docx 追加：数据总览表
+    # 二、数据总览表
     doc.add_heading("二、数据总览", level=1)
     tbl = doc.add_table(rows=3, cols=3)
     tbl.style = "Light Grid Accent 1"
@@ -96,7 +85,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     tbl.rows[2].cells[1].text = f"{total_wgt:,.0f}"
     tbl.rows[2].cells[2].text = "公斤"
 
-    # 原始数据表
+    # 三、原始数据表
     doc.add_heading("三、原始数据（UN Comtrade）", level=1)
     raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
     raw_tbl.style = "Light Grid Accent 1"
@@ -108,6 +97,27 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         raw_tbl.rows[i].cells[2].text = str(r.get("cmdCode"))
         raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
         raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
+
+    # 四、AI 市场分析（分小节）
+    doc.add_heading("四、AI 市场分析", level=1)
+    ms = ai.get("market_size") or {}
+    gt = ai.get("growth_trend") or {}
+    risks = ai.get("risks") or []
+    up = ai.get("user_profile") or {}
+    doc.add_heading("市场规模", level=2)
+    doc.add_paragraph(f"{ms.get('value', '未知')}（{ms.get('year', '')}年估算）")
+    doc.add_heading("增长趋势", level=2)
+    doc.add_paragraph(f"CAGR {gt.get('cagr', '未知')}，{gt.get('forecast_years', '')}")
+    if gt.get("description"):
+        doc.add_paragraph(gt.get("description", ""))
+    doc.add_heading("用户画像", level=2)
+    doc.add_paragraph(f"年龄区间: {up.get('age_range', '')} | 收入水平: {up.get('income_level', '')}")
+    doc.add_heading("风险分析", level=2)
+    for r in risks:
+        if isinstance(r, dict):
+            doc.add_paragraph(f"• {r.get('type')}（{r.get('level')}）: {r.get('description')}", style="List Bullet")
+    doc.add_heading("AI 总结", level=2)
+    doc.add_paragraph(ai.get("summary", ""))
 
     buf = io.BytesIO()
     doc.save(buf)
