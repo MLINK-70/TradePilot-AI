@@ -60,6 +60,18 @@
 
   <main>
     <section class="card">
+      <form id="ebay-form" autocomplete="off">
+        <div class="form-row">
+          <label for="ebay-url">eBay 链接</label>
+          <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        </div>
+        <button type="submit" id="ebay-submit" class="btn-primary">分析 eBay 商品</button>
+      </form>
+      <p id="ebay-status" class="status"></p>
+      <div id="ebay-result" class="listing-box" hidden></div>
+    </section>
+
+    <section class="card">
       <form id="review-form" autocomplete="off">
         <div class="form-row">
           <label for="reviews-input">评论粘贴</label>
@@ -380,6 +392,65 @@
           } catch (_) {}
         }
       })();
+
+      // eBay 商品分析
+      document.getElementById('ebay-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const url = document.getElementById('ebay-url').value.trim();
+        if (!url) { showStatus('请粘贴 eBay 商品链接', 'error'); return; }
+        const eb = document.getElementById('ebay-submit');
+        eb.disabled = true;
+        eb.textContent = '分析中…';
+        const es = document.getElementById('ebay-status');
+        es.textContent = '正在查询 eBay 商品…';
+        es.className = 'status info';
+        try {
+          const resp = await fetch('/api/ebay/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            es.textContent = data.detail || '查询失败';
+            es.className = 'status error';
+            return;
+          }
+          const box = document.getElementById('ebay-result');
+          box.innerHTML = '';
+          const item = data.item || {};
+          const add = (label, text) => {
+            const p = document.createElement('p');
+            const strong = document.createElement('strong');
+            strong.textContent = label + ': ';
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(text || ''));
+            box.appendChild(p);
+          };
+          add('商品', item.title);
+          add('价格', (item.price || '') + ' ' + (item.currency || ''));
+          add('成色', item.condition);
+          add('卖家', item.seller + '（评分 ' + item.seller_feedback + '）');
+          const an = data.analysis || {};
+          add('评估', an.assessment);
+          add('价格定位', an.price_position);
+          add('卖家可信度', an.seller_trust);
+          add('建议', an.suggestion);
+          const zh = document.createElement('p');
+          zh.className = 'meta';
+          zh.textContent = '总结: ' + (an.zh_summary || '');
+          box.appendChild(zh);
+          box.hidden = false;
+          es.textContent = '';
+        } catch (_) {
+          es.textContent = '网络错误，查询失败';
+          es.className = 'status error';
+        } finally {
+          eb.disabled = false;
+          eb.textContent = '分析 eBay 商品';
+        }
+      });
 
       // 竞品对比
       document.getElementById('compare-btn').addEventListener('click', async () => {

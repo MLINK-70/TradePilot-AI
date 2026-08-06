@@ -19,6 +19,8 @@ from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
 from ecommerce import analyze_reviews, compare_products, generate_listing
+from ebay import analyze_item, get_oauth_token, parse_ebay_url
+from config import EBAY_APP_ID, EBAY_CLIENT_SECRET
 from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -450,6 +452,30 @@ def ecommerce_sample():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         raise HTTPException(status_code=500, detail="演示数据加载失败")
+
+
+class EbayAnalyzeRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/ebay/analyze")
+def ebay_analyze(req: EbayAnalyzeRequest):
+    """eBay 商品链接 → 商品信息 + AI 分析"""
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请提供 eBay 商品链接")
+    item_id = parse_ebay_url(url)
+    if not item_id:
+        raise HTTPException(status_code=400, detail="无法从链接提取 eBay 商品 ID")
+    if not EBAY_APP_ID or not EBAY_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="eBay 密钥未配置（需 App ID + Client Secret，见 config.py 说明）")
+    try:
+        token = get_oauth_token(EBAY_APP_ID, EBAY_CLIENT_SECRET)
+        data = analyze_item(item_id, token)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"eBay 查询失败: {e}")
+    logging.info("eBay 分析: %s", item_id)
+    return data
 
 
 class EcommerceCompareRequest(BaseModel):

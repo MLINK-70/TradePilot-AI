@@ -31,7 +31,8 @@ def get_oauth_token(app_id: str, client_secret: str) -> str:
             "Authorization": f"Basic {auth}",
             "Content-Type": "application/x-www-form-urlencoded",
         },
-        data={"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"},
+        data={"grant_type": "client_credentials",
+              "scope": "https://api.ebay.com/oauth/api_scope/buy.item.retrieve"},
         timeout=30,
     )
     resp.raise_for_status()
