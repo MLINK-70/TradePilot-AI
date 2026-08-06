@@ -1,10 +1,10 @@
-# TradePilot AI — 跨境市场分析平台
+# TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 AI 市场分析与业务辅助平台。输入产品名与目标国家，一键生成结构化市场调研报告（市场规模 / 增长趋势 / 热门品牌 / 用户画像 / 风险分析 / AI 总结）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（评论分析 / 竞品对比 / 平台 Listing 生成）。
 
-**技术栈**：Python · FastAPI · 原生 HTML/JS · DeepSeek API
+**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API
 
-> ⚠️ **数据声明**：报告中的市场数据由大模型估算生成，仅供参考，非官方统计数据。
+> ⚠️ **数据声明**：市场分析报告中的市场规模等数据由大模型估算；贸易数据来自 UN Comtrade 官方 API（真实数据）；评论分析基于用户提供的评论样本。
 
 ---
 
@@ -71,19 +71,35 @@
 ## 目录结构
 
 ```
-├── main.py          # FastAPI 入口：路由 + Markdown 报告渲染（含 null 兜底）
-├── config.py        # 读取 .env 配置（API Key / 模型）
-├── llm.py           # DeepSeek 调用层：强制直连、自动重试、JSON 解析
+├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）
+├── config.py        # 读取 .env 配置（DeepSeek / eBay 密钥）
+├── llm.py           # DeepSeek 调用层：直连、重试、JSON 解析、AI 解读
 ├── prompts.py       # 系统提示词（6 字段 JSON 协议，产品核心价值）
-├── static/          # 前端（原生 HTML/JS，marked.js 渲染 + CDN 降级容错）
-│   ├── index.html
-│   ├── app.js
-│   └── style.css
+├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标
+├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
+├── ecommerce.py     # 跨境电商模块：评论分析 / 竞品对比 / Listing
+├── ebay.py          # eBay 商品分析（OAuth + Browse API）
+├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
+├── database.py      # SQLite 缓存层（trade_cache / query_log）
+├── countries.py     # 完整国家清单（159 项 + 组织代码）
+├── hs_descriptions.py # HS 编码品名描述
+├── data/
+│   └── sample_reviews.json  # 演示评论数据
+├── templates/
+│   └── report_template_v2.docx  # Word 报告模板
+├── static/          # 前端（四个页面 + 主题切换 + 书签工具）
+│   ├── index.html       # 市场分析
+│   ├── trade.html       # 贸易数据
+│   ├── business.html    # 开发信
+│   ├── ecommerce.html   # 跨境电商
+│   ├── bookmarklet.js   # 一键复制评论书签工具
+│   ├── theme.js         # 双主题切换（☀️/🌙）
+│   └── style.css        # 设计系统（亮色/暗色）
 ├── requirements.txt
 └── .env             # 密钥（已被 .gitignore 排除，不提交）
 ```
 
-**分层设计**：`config → llm → main` 单向依赖，`llm.py` / `prompts.py` 是所有模块共用的底座，后续新模块复用，无需改动。
+**分层设计**：`config → llm → main → 业务模块（trade/business/ecommerce/ebay）`，`llm.py` / `prompts.py` 是所有模块共用的底座。
 
 ---
 
@@ -91,10 +107,10 @@
 
 | 阶段 | 模块 | 内容 |
 | --- | --- | --- |
-| ✅ 第一版（已完成） | 市场分析 Research | 产品 + 国家 → 市场分析报告 |
-| 第二版（进行中） | 贸易数据 Trade | HS 编码 / 产品名 → 中国出口情况 + 主要出口国 + 趋势图（接入真实数据源） |
-| 第三版 | 外贸业务 Business | 开发信 / 跟进邮件 / 产品介绍 / 客户画像 |
-| 第四版 | 跨境电商 E-commerce | Amazon 评论分析 → 用户痛点总结 |
+| ✅ 已完成 | 市场分析 Research | 产品 + 国家 → 结构化市场报告（6 字段） |
+| ✅ 已完成 | 贸易数据 Trade | HS 编码 → 中国出口数据 + 趋势图 + AI 解读 + Word/CSV 导出 |
+| ✅ 已完成 | 外贸业务 Business | 英文开发信（含真实数据引用）/ 跟进邮件 / 产品介绍+FAQ / AI 模拟客户 |
+| ✅ 已完成 | 跨境电商 E-commerce | 评论分析 → 痛点报告 + 竞品对比 + 平台 Listing + 一键书签 |
 | 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
 
 **演进方式**：新模块上线时新建 `routers/` 目录，`main.py` 退化为"组装 app + include_router"；AI 调用底座（`llm.py` / `prompts.py`）保持不变。
