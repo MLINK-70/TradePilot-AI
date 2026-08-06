@@ -219,6 +219,9 @@ def trade_query(req: TradeQueryRequest):
         if len(trend) >= 2:
             stats = summarize_stats(trend)  # 程序先算好已核实指标
             analysis = analyze_trade_trend(product, target, req.reporter, trend, stats)
+            # Citation：解读数据区间（数字可溯源）
+            if stats:
+                analysis["_data_range"] = f"{stats['first_year']}-{stats['last_year']}"
     except ValueError:
         pass
 

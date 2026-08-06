@@ -106,6 +106,7 @@
           <div class="analysis-label">建议</div>
           <p id="analysis-suggestion"></p>
         </div>
+        <p class="meta" id="analysis-source"></p>
       </div>
 
       <div class="download-row">
@@ -233,6 +234,9 @@
           rk.innerHTML = '';
           (a.risks || []).forEach(r => { const li = document.createElement('li'); li.textContent = r; rk.appendChild(li); });
           document.getElementById('analysis-suggestion').textContent = a.suggestion || '';
+          // Citation：数据来源标注
+          const src = document.getElementById('analysis-source');
+          src.textContent = '数据区间 ' + (a._data_range || '') + ' · UN Comtrade 公共 API';
           ab.hidden = false;
         } else {
           ab.hidden = true;

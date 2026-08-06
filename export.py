@@ -49,18 +49,21 @@ def build_trend_chart(trend: dict) -> io.BytesIO:
 
 def build_executive_summary(product: str, target: str, year: str, stats: dict,
                             analysis: dict, total_value: float) -> str:
-    """生成执行摘要（报告开头）：关键数字 + AI 一句话总结"""
+    """生成执行摘要（报告开头）：关键数字 + AI 一句话总结 + 数据来源标注"""
     lines = []
     if stats:
-        lines.append(f"• 总出口额: {total_value / 1e8:.2f} 亿美元")
+        # 数据区间（Citation：数字可溯源）
+        y_range = f"{stats['first_year']}-{stats['last_year']}" if stats.get("first_year") else year
+        lines.append(f"• 总出口额: {total_value / 1e8:.2f} 亿美元（{y_range}，UN Comtrade）")
         if stats.get("cagr_pct") is not None:
-            lines.append(f"• 年复合增长率: {stats['cagr_pct']}%")
+            lines.append(f"• 年复合增长率: {stats['cagr_pct']}%（{y_range}）")
         if stats.get("peak_year"):
-            lines.append(f"• 峰值年份: {stats['peak_year']}")
+            lines.append(f"• 峰值年份: {stats['peak_year']}（{y_range} 区间内）")
         if stats.get("change_over_period_pct") is not None:
-            lines.append(f"• 期末较期初变化: {stats['change_over_period_pct']:.1f}%")
+            lines.append(f"• 期末较期初变化: {stats['change_over_period_pct']:.1f}%（{y_range}）")
     if analysis.get("overview"):
         lines.append(f"• AI 总结: {analysis['overview']}")
+    lines.append(f"• 数据来源: UN Comtrade 公共 API，报告生成于 {__import__('datetime').date.today().isoformat()}")
     return "\n".join(lines) if lines else f"（{product} → {target} {year}，暂无摘要数据）"
 
 
