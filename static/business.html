@@ -83,6 +83,22 @@
             <option value="电商卖家（E-commerce Seller）"></option>
           </datalist>
         </div>
+        <div class="form-row">
+          <label for="hook">钩子</label>
+          <input type="text" id="hook" placeholder="吸引回复的钩子" value="免费样品" list="hook-list" required>
+          <datalist id="hook-list">
+            <option value="免费样品"></option>
+            <option value="产品目录"></option>
+            <option value="报价单"></option>
+          </datalist>
+        </div>
+        <details class="company-optional">
+          <summary>信任背书（可选，如出口年限/认证，提升回复率）</summary>
+          <div class="form-row">
+            <label for="credentials">背书信息</label>
+            <input type="text" id="credentials" placeholder="例如：CE/FCC 认证，出口欧盟 8 年">
+          </div>
+        </details>
         <details class="company-optional">
           <summary>收件人信息（可选，填写后称呼更精准）</summary>
           <div class="form-row">
@@ -158,6 +174,8 @@
           customer_company: document.getElementById('c-company').value.trim(),
           customer_contact: document.getElementById('c-contact').value.trim(),
           customer_title: document.getElementById('c-title').value.trim(),
+          hook: document.getElementById('hook').value.trim(),
+          credentials: document.getElementById('credentials').value.trim(),
         };
 
         if (!payload.product || !payload.market) {

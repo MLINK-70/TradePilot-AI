@@ -263,6 +263,8 @@ class BusinessEmailRequest(BaseModel):
     customer_company: str = ""
     customer_contact: str = ""
     customer_title: str = ""
+    hook: str = "免费样品"
+    credentials: str = ""
 
 
 @app.post("/api/business/outreach")
@@ -279,6 +281,7 @@ def business_outreach(req: BusinessEmailRequest):
             req.selling_points.strip(),
             req.customer_company.strip(), req.customer_contact.strip(),
             req.customer_title.strip(),
+            req.hook.strip() or "免费样品", req.credentials.strip(),
         )
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
