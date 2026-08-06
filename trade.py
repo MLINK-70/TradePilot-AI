@@ -167,6 +167,7 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
         "flowCode": flow_code,
         "maxRecords": 500,
     }
+    last_error = None
     for attempt in range(3):
         try:
             resp = requests.get(
@@ -177,6 +178,7 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 proxies={"http": None, "https": None},  # 强制直连（防梯子劫持）
             )
             if resp.status_code == 429:
+                last_error = f"429 限流（第 {attempt + 1} 次）"
                 wait = 2 * (attempt + 1)
                 print(f"[限流] 429，{wait} 秒后重试...")
                 time.sleep(wait)
@@ -194,11 +196,14 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
             return data
         except requests.exceptions.RequestException as e:
+            last_error = str(e)
             if attempt == 2:
                 raise ValueError(f"UN Comtrade 查询失败：{e}")
             print(f"[网络] {e}，2 秒后重试...")
             time.sleep(2)
-    return []
+    # 3 次重试全失败（如持续 429）：抛异常而非静默返回空，
+    # 防止单国误报 0 / 组织聚合写入残缺缓存
+    raise ValueError(f"UN Comtrade 查询失败：{last_error}（重试 3 次仍失败）")
 
 
 def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "中国") -> list:
@@ -233,8 +238,8 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
     if failed:
         print(f"[警告] {len(failed)} 国查询失败: {', '.join(failed)}")
 
-    # 空结果不缓存：429 或成员全失败时缓存 []，后续查询永远拿到 0
-    if all_rows:
+    # 有失败国时聚合数据残缺，不写缓存（防止残缺结果被永久缓存）
+    if all_rows and not failed:
         save_cache(cmd_code, group_code, period, "X", all_rows, reporter_code)
     return all_rows
 

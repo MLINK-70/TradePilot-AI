@@ -29,6 +29,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],  # 跨源下载时前端能读到文件名
 )
 
 
@@ -135,7 +136,9 @@ def export_report(req: TradeExportRequest):
                                            req.reporter, trend, stats)
     except ValueError:
         pass
-    year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
+    # 年份标签：end_year 为空时解析出实际年份范围（默认到最新），避免只显示起始年误导
+    years_actual = _years_from_range(req.start_year, req.end_year)
+    year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis)
     filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.docx"
@@ -151,7 +154,9 @@ def export_data(req: TradeExportRequest):
     """下载 CSV 原始数据（UN Comtrade 完整原始记录）"""
     hs, rows = _fetch_trade_data(req)
     buf = build_csv(rows)
-    year_label = f"{req.start_year}-{req.end_year}" if req.end_year else str(req.start_year)
+    # 年份标签：end_year 为空时解析出实际年份范围（默认到最新），避免只显示起始年误导
+    years_actual = _years_from_range(req.start_year, req.end_year)
+    year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
     filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-原始数据.csv"
     return StreamingResponse(
         buf,
