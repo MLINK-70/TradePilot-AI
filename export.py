@@ -5,9 +5,39 @@
 import csv
 import io
 
+import matplotlib
+matplotlib.use("Agg")  # 无界面后端，服务器环境必需
+import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# 中文字体（Windows）
+plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
+plt.rcParams["axes.unicode_minus"] = False
+
+
+def build_trend_chart(trend: dict) -> io.BytesIO:
+    """生成趋势折线图 PNG（内存流），供 Word 报告嵌入"""
+    years = list(trend.keys())
+    values = [trend[y]["value"] / 1e8 for y in years]  # 亿美元
+
+    fig, ax = plt.subplots(figsize=(8, 3.6))
+    ax.plot(years, values, marker="o", linewidth=2.2, color="#2e5bff")
+    ax.fill_between(years, values, alpha=0.12, color="#2e5bff")
+    ax.set_title("出口贸易金额趋势（亿美元）", fontsize=12)
+    ax.set_xlabel("年份")
+    ax.set_ylabel("亿美元")
+    ax.grid(True, alpha=0.3)
+    for x, y in zip(years, values):
+        ax.annotate(f"{y:.2f}", (x, y), textcoords="offset points", xytext=(0, 8), fontsize=9)
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
@@ -43,8 +73,17 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     tbl.rows[2].cells[1].text = f"{total_wgt:,.0f}"
     tbl.rows[2].cells[2].text = "公斤"
 
-    # 二、原始数据表
-    doc.add_heading("二、原始数据（UN Comtrade）", level=1)
+    # 一.5、趋势图（matplotlib 生成 PNG 嵌入）
+    doc.add_heading("二、出口趋势", level=1)
+    trend_map = {r.get("refYear"): {"value": r.get("primaryValue") or 0} for r in rows}
+    if len(trend_map) >= 2:
+        chart_buf = build_trend_chart(trend_map)
+        doc.add_picture(chart_buf, width=Cm(15))
+    else:
+        doc.add_paragraph("（单年数据，无趋势图）")
+
+    # 三、原始数据表
+    doc.add_heading("三、原始数据（UN Comtrade）", level=1)
     raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
     raw_tbl.style = "Light Grid Accent 1"
     for j, head in enumerate(["年份", "流向", "HS编码", "金额(美元)", "净重(公斤)"]):
@@ -56,8 +95,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
         raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
 
-    # 三、AI 市场分析
-    doc.add_heading("三、AI 市场分析", level=1)
+    # 四、AI 市场分析
+    doc.add_heading("四、AI 市场分析", level=1)
     doc.add_heading("市场规模", level=2)
     ms = ai.get("market_size") or {}
     doc.add_paragraph(f"{ms.get('value', '')}（{ms.get('year', '')}年估算）")
