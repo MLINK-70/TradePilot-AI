@@ -40,9 +40,22 @@ def get_oauth_token(app_id: str, client_secret: str) -> str:
 
 
 def parse_ebay_url(url: str) -> str | None:
-    """从 eBay 链接提取 item ID（支持 /itm/ 和 /p/ 格式）"""
+    """从 eBay 链接提取 item ID
+
+    支持格式：
+    - /itm/123456789012（标准）
+    - /itm/Product-Name/123456789012（带标题）
+    - /p/1234567890（产品页）
+    - /itm/123456789012?hash=...（带查询参数）
+    注意：ebay.us 短链接不含 item ID，无法解析（提示用户用完整链接）。
+    """
+    # 优先匹配 /itm/ 或 /p/ 后的数字（可能带标题前缀）
     m = re.search(r"/(?:itm|p)/(?:[^/]+/)?(\d{10,13})", url)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # 兼容 itm 在查询参数中的情况（如 ?item=123456789012）
+    m2 = re.search(r"[?&]item[=:](\d{10,13})", url)
+    return m2.group(1) if m2 else None
 
 
 def fetch_item(item_id: str, access_token: str) -> dict:
