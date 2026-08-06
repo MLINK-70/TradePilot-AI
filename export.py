@@ -52,8 +52,9 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
     """生成执行摘要（报告开头）：关键数字 + AI 一句话总结 + 数据来源标注"""
     lines = []
     if stats:
-        # 数据区间（Citation：数字可溯源）
-        y_range = f"{stats['first_year']}-{stats['last_year']}" if stats.get("first_year") else year
+        # 数据区间（Citation：数字可溯源）；单年显示"X年"，多年显示"X-Y"
+        fy, ly = stats.get("first_year"), stats.get("last_year")
+        y_range = f"{fy}-{ly}" if fy and ly and fy != ly else (f"{fy}年" if fy else year)
         lines.append(f"• 总出口额: {total_value / 1e8:.2f} 亿美元（{y_range}，UN Comtrade）")
         if stats.get("cagr_pct") is not None:
             lines.append(f"• 年复合增长率: {stats['cagr_pct']}%（{y_range}）")
