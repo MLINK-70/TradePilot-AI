@@ -403,6 +403,7 @@ class EcommerceAnalyzeRequest(BaseModel):
 def ecommerce_analyze(req: EcommerceAnalyzeRequest):
     """评论分析：粘贴评论或演示数据 → 痛点/卖点/建议"""
     reviews = [r.strip() for r in req.reviews if r and r.strip()]
+    product_hint = ""
     if req.use_sample or not reviews:
         try:
             with open("data/sample_reviews.json", encoding="utf-8") as f:
@@ -415,7 +416,7 @@ def ecommerce_analyze(req: EcommerceAnalyzeRequest):
         raise HTTPException(status_code=400, detail="请粘贴评论或使用演示数据")
     try:
         data = analyze_reviews(reviews)
-        data["product"] = product_hint if "product_hint" in dir() else ""
+        data["product"] = product_hint
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     logging.info("评论分析: %d 条", len(reviews))

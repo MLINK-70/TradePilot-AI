@@ -1,12 +1,15 @@
 /* TradePilot 评论提取工具（bookmarklet）
  *
  * 用法：在任意电商商品页点击书签，自动提取当前页面评论，
- * 直接发送到本地 TradePilot 分析，新标签页打开结果。
+ * 通过 URL 传给 TradePilot 结果页自动分析。
  *
  * 合规说明：只提取页面当前已显示的内容（用户可见的），
  * 不翻页、不自动抓取、不突破限制。
  *
  * 前提：本地 TradePilot 服务已启动（http://127.0.0.1:8000）
+ * 注意：在 HTTPS 电商页（如 https://www.amazon.com）加载 http:// 脚本会被
+ * 浏览器混合内容安全机制拦截（Mixed Content）——这是浏览器安全底线，无解。
+ * 此时请改用"手动复制评论 → 粘贴到 TradePilot"方式。
  */
 (function () {
   'use strict';

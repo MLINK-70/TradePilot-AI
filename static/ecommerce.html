@@ -410,7 +410,10 @@
           box.innerHTML = '';
           const add = (label, text) => {
             const p = document.createElement('p');
-            p.innerHTML = '<strong>' + label + ':</strong> ' + (text || '');
+            const strong = document.createElement('strong');
+            strong.textContent = label + ': ';
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(text || ''));
             box.appendChild(p);
           };
           add(prodA + ' 核心痛点', data.a_pains);

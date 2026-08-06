@@ -1,8 +1,13 @@
 """ebay.py — eBay 商品分析模块
 
 eBay Browse API（官方免费）：商品链接 → 商品信息/价格/评分/卖家。
-需要 eBay 开发者 App ID（用户注册后填入 config）。
 
+**鉴权说明（重要）**：Browse API 需要 **OAuth 2.0 access token**
+（client_credentials 流程），不是把 App ID 直接当 Bearer token。
+流程：App ID + Client Secret → POST https://api.ebay.com/identity/v1/oauth2/token
+→ 拿 access_token（有效期 2 小时）→ 才能调 Browse API。
+
+需要：用户注册 eBay 开发者账号拿到 App ID + Client Secret（审核通过后）。
 注意：eBay 是国外服务，调用需要梯子（与 DeepSeek 相反）。
 """
 import json
@@ -13,6 +18,24 @@ import requests
 from llm import _chat, _parse_json
 
 EBAY_API_BASE = "https://api.ebay.com/buy/browse/v1"
+EBAY_OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+
+
+def get_oauth_token(app_id: str, client_secret: str) -> str:
+    """获取 OAuth access token（client_credentials 流程，有效期 2 小时）"""
+    import base64
+    auth = base64.b64encode(f"{app_id}:{client_secret}".encode()).decode()
+    resp = requests.post(
+        EBAY_OAUTH_URL,
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
 
 
 def parse_ebay_url(url: str) -> str | None:
@@ -21,14 +44,14 @@ def parse_ebay_url(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def fetch_item(item_id: str, app_id: str) -> dict:
-    """调用 eBay Browse API 获取商品信息"""
+def fetch_item(item_id: str, access_token: str) -> dict:
+    """调用 eBay Browse API 获取商品信息（access_token 来自 get_oauth_token）"""
     resp = requests.get(
         f"{EBAY_API_BASE}/item/{item_id}",
         headers={
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
             "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS",
-            "Authorization": f"Bearer {app_id}",
+            "Authorization": f"Bearer {access_token}",
         },
         timeout=30,
     )
@@ -36,9 +59,9 @@ def fetch_item(item_id: str, app_id: str) -> dict:
     return resp.json()
 
 
-def analyze_item(item_id: str, app_id: str) -> dict:
+def analyze_item(item_id: str, access_token: str) -> dict:
     """拉取 eBay 商品并生成分析"""
-    item = fetch_item(item_id, app_id)
+    item = fetch_item(item_id, access_token)
 
     # 提取商品信息
     info = {

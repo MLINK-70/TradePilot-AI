@@ -6,6 +6,7 @@
 复用 llm._chat / _parse_json 底座。
 """
 import json
+import re
 
 from llm import _chat, _parse_json
 
@@ -74,6 +75,9 @@ def analyze_reviews(reviews: list) -> dict:
     """评论分析主流程：解析 → 统计 → 聚类"""
     if not reviews:
         raise ValueError("评论列表为空")
+    # 防资源滥用：单次最多 100 条（10 批解析，约 10 次 API 调用）
+    if len(reviews) > 100:
+        raise ValueError(f"评论数量过多（{len(reviews)} 条），单次最多支持 100 条")
 
     # 1. 解析（逐条提取 sentiment/aspect/痛点/卖点）
     parsed = _parse_reviews_batch(reviews)
@@ -94,12 +98,15 @@ def analyze_reviews(reviews: list) -> dict:
     ], use_json=True)
     summary = _parse_json(summary_content)
 
-    # 4. 引用真实性校验：example 必须存在于输入评论中（防幻觉）
-    review_texts = set(reviews)
+    # 4. 引用真实性校验：宽松匹配（去空白/标点后比对），防幻觉但容忍轻微改写
+    def _normalize(s):
+        return re.sub(r"[\s，。！？,.!?;；:：'\"“”‘’\-]", "", str(s))
+
+    normalized_reviews = {_normalize(r) for r in reviews}
     for pains in (summary.get("top_pains", []), summary.get("top_praises", [])):
         for item in pains:
             ex = item.get("example", "")
-            if ex and ex not in review_texts:
+            if ex and _normalize(ex) not in normalized_reviews:
                 item["example"] = "(引用校验失败，已移除)"
 
     return {
@@ -122,17 +129,15 @@ def clean_pasted_text(raw: str) -> list:
     处理：去掉编号（1. 2. 3.）、去空行、去平台广告行/星级行、
     按换行拆分、去重。
     """
-    import re
-
     lines = raw.split("\n")
     cleaned = []
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        # 去掉行首编号（1. / 1、 / 1) / [1]）
+        # 去掉行首编号（1. / 1、 / 1) / [1]）——只匹配"数字+标点"，避免误删"10 很好用"这类评论
         line = re.sub(r"^\[\d+\]\s*", "", line)
-        line = re.sub(r"^\d+[.、)\s]\s*", "", line)
+        line = re.sub(r"^\d+[.、)]\s*", "", line)
         # 去星级行（如 ★★★★★ 或 ★★★★☆ 或 ★ 4.5）
         if re.match(r"^[★☆]{1,5}\s*$", line):
             continue
