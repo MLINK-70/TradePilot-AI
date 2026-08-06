@@ -42,75 +42,66 @@ def build_trend_chart(trend: dict) -> io.BytesIO:
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
                       rows: list, ai: dict, hs_description: str = "") -> io.BytesIO:
-    """生成 Word 分析报告（内存流，供 FastAPI 返回下载）"""
+    """生成 Word 分析报告（docxtpl 模板渲染 + 图表嵌入）"""
+    from docxtpl import DocxTemplate
+
     total_value = sum(r.get("primaryValue") or 0 for r in rows)
     total_wgt = sum(r.get("netWgt") or 0 for r in rows)
-
-    doc = Document()
-    style = doc.styles["Normal"]
-    style.font.name = "微软雅黑"
-    style.font.size = Pt(10.5)
-
-    h = doc.add_heading(f"{product} 中国出口 {target} 贸易分析报告", level=0)
-    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    meta = doc.add_paragraph()
     hs_desc = f"（{hs_description}）" if hs_description else ""
-    meta.add_run(f"查询: 产品 {product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}\n")
-    meta.add_run("数据来源: UN Comtrade 公共 API\n")
-    meta.add_run("声明: 贸易数据为 UN 官方汇总; AI 分析由大模型生成，仅供参考")
-    meta.runs[0].bold = True
 
-    # 一、贸易数据总览
-    doc.add_heading("一、贸易数据总览", level=1)
-    tbl = doc.add_table(rows=3, cols=3)
-    tbl.style = "Light Grid Accent 1"
-    tbl.rows[0].cells[0].text, tbl.rows[0].cells[1].text, tbl.rows[0].cells[2].text = "指标", "数值", "单位"
-    tbl.rows[1].cells[0].text = "贸易金额"
-    tbl.rows[1].cells[1].text = f"{total_value:,.0f}"
-    tbl.rows[1].cells[2].text = "美元"
-    tbl.rows[2].cells[0].text = "净重"
-    tbl.rows[2].cells[1].text = f"{total_wgt:,.0f}"
-    tbl.rows[2].cells[2].text = "公斤"
-
-    # 一.5、趋势图（matplotlib 生成 PNG 嵌入）
-    doc.add_heading("二、出口趋势", level=1)
+    # 趋势图 PNG（≥2 年才生成）
+    chart_buf = None
     trend_map = {r.get("refYear"): {"value": r.get("primaryValue") or 0} for r in rows}
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
-        doc.add_picture(chart_buf, width=Cm(15))
-    else:
-        doc.add_paragraph("（单年数据，无趋势图）")
 
-    # 三、原始数据表
-    doc.add_heading("三、原始数据（UN Comtrade）", level=1)
-    raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
-    raw_tbl.style = "Light Grid Accent 1"
-    for j, head in enumerate(["年份", "流向", "HS编码", "金额(美元)", "净重(公斤)"]):
-        raw_tbl.rows[0].cells[j].text = head
-    for i, r in enumerate(rows, 1):
-        raw_tbl.rows[i].cells[0].text = str(r.get("refYear"))
-        raw_tbl.rows[i].cells[1].text = "出口"
-        raw_tbl.rows[i].cells[2].text = str(r.get("cmdCode"))
-        raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
-        raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
+    # 模板数据
+    context = {
+        "meta_line": f"{product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}",
+        "trend_image": None,  # 下面用 docxtpl 的 InlineImage
+        "overview_table": None,
+        "data_table": None,
+        "analysis_text": None,
+    }
 
-    # 四、AI 市场分析
-    doc.add_heading("四、AI 市场分析", level=1)
-    doc.add_heading("市场规模", level=2)
+    tpl = DocxTemplate("templates/report_template_v2.docx")
+
+    # 图片：InlineImage（必须在 render 前创建）
+    if chart_buf:
+        from docxtpl import InlineImage
+        from docx.shared import Cm as CmW
+        context["trend_image"] = InlineImage(tpl, chart_buf, width=CmW(15))
+
+    # 数据表（markdown 风格表格，docxtpl 用 RichText 渲染普通文本表格）
+    ov_rows = [
+        ("指标", "数值", "单位"),
+        ("贸易金额", f"{total_value:,.0f}", "美元"),
+        ("净重", f"{total_wgt:,.0f}", "公斤"),
+    ]
+    context["overview_table"] = "\n".join(" | ".join(r) for r in ov_rows)
+
+    data_rows = [("年份", "流向", "HS编码", "金额(美元)", "净重(公斤)")]
+    for r in rows:
+        data_rows.append((
+            str(r.get("refYear")), "出口", str(r.get("cmdCode")),
+            f"{r.get('primaryValue') or 0:,.0f}", f"{r.get('netWgt') or 0:,.0f}",
+        ))
+    context["data_table"] = "\n".join(" | ".join(r) for r in data_rows)
+
+    # AI 分析
     ms = ai.get("market_size") or {}
-    doc.add_paragraph(f"{ms.get('value', '')}（{ms.get('year', '')}年估算）")
-    doc.add_heading("增长趋势", level=2)
     gt = ai.get("growth_trend") or {}
-    doc.add_paragraph(f"CAGR {gt.get('cagr', '')}，{gt.get('forecast_years', '')}，{gt.get('description', '')}")
-    doc.add_heading("风险分析", level=2)
-    for r in ai.get("risks") or []:
-        doc.add_paragraph(f"• {r.get('type')}（{r.get('level')}）: {r.get('description')}", style="List Bullet")
-    doc.add_heading("AI 总结", level=2)
-    doc.add_paragraph(ai.get("summary", ""))
+    risks = "；".join(f"{r.get('type')}（{r.get('level')}）: {r.get('description')}" for r in (ai.get("risks") or []))
+    context["analysis_text"] = (
+        f"市场规模: {ms.get('value', '')}（{ms.get('year', '')}年估算）\n"
+        f"增长趋势: CAGR {gt.get('cagr', '')}，{gt.get('forecast_years', '')}，{gt.get('description', '')}\n"
+        f"风险分析: {risks or '无'}\n"
+        f"AI 总结: {ai.get('summary', '')}"
+    )
 
+    tpl.render(context)
     buf = io.BytesIO()
-    doc.save(buf)
+    tpl.save(buf)
     buf.seek(0)
     return buf
 
