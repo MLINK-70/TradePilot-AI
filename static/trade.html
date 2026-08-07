@@ -360,7 +360,8 @@
         function hlNum(text) {
           const div = document.createElement('div');
           div.textContent = text || '';
-          div.innerHTML = div.innerHTML.replace(/([-+]?\d[\d,\.]*%?)/g, '<mark class="num-hl">$1</mark>');
+          // 数字整体匹配（含小数/千分位/可选%），避免"2024.5"被拆断
+          div.innerHTML = div.innerHTML.replace(/([-+]?\d[\d,]*(?:\.\d+)?%?)/g, '<mark class="num-hl">$1</mark>');
           return div.innerHTML;
         }
         if (a.overview) {

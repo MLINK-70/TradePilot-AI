@@ -500,10 +500,8 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         return results[:top_n]
     except Exception:
         return []
-    """出口目的地排名：目标市场（如欧盟）内部各国进口该产品排名
 
-    返回 {destinations: [{country, value, share}], available: bool}
-    """
+
 def get_destination_ranking(product: str, target: str, year: str,
                             reporter: str = "中国") -> dict:
     """出口目的地排名：目标市场（如欧盟）内部各国进口该产品排名
