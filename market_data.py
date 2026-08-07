@@ -88,20 +88,35 @@ def get_market_context(country: str) -> dict:
     return result
 
 
-# ===== 预留：注册 Key 后启用 =====
-def get_oec(product_hs: str, country: str) -> dict:
-    """OEC 产品贸易结构（需 OEC_API_KEY）"""
-    from config import OEC_API_KEY
-    if not OEC_API_KEY:
-        return {}
-    # TODO: 注册 Key 后实现
-    return {}
-
-
+# ===== Tavily 行业动态（注册 Key 后启用）=====
 def get_news(product: str, market: str) -> dict:
-    """行业新闻（需 NEWS_API_KEY）"""
-    from config import NEWS_API_KEY
-    if not NEWS_API_KEY:
-        return {}
-    # TODO: 注册 Key 后实现
-    return {}
+    """Tavily 搜索：产品+市场 相关新闻（行业动态证据链）
+
+    返回：{headlines: [{title, url}], available: bool}
+    """
+    from config import TAVILY_API_KEY
+    if not TAVILY_API_KEY:
+        return {"available": False}
+
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": TAVILY_API_KEY,
+                "query": f"{product} market {market}",
+                "max_results": 5,
+                "search_depth": "basic",
+            },
+            timeout=20,
+            proxies={"http": None, "https": None},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        headlines = [
+            {"title": r.get("title", ""), "url": r.get("url", "")}
+            for r in data.get("results", [])[:5]
+        ]
+        return {"available": bool(headlines), "headlines": headlines}
+    except Exception as e:
+        logging.warning("Tavily 搜索失败 %s/%s: %s", product, market, e)
+        return {"available": False}

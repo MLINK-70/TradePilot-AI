@@ -13,3 +13,7 @@ DEEPSEEK_MODEL = "deepseek-chat"
 # 获取：https://developer.ebay.com 注册后创建应用，审核通过后拿 App ID + Client Secret
 EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
 EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
+
+# Tavily 搜索 API（行业动态数据源）
+# 获取：https://app.tavily.com 注册后拿 API Key
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")

@@ -85,6 +85,28 @@
       reportEl.hidden = false;
       lastQuery = { product, country };
       dlBtn.hidden = false;
+
+      // 行业动态（Tavily 搜索）
+      const newsBox = document.getElementById('news-box');
+      const newsList = document.getElementById('news-list');
+      const headlines = (data.news && data.news.headlines) || [];
+      if (headlines.length) {
+        newsList.innerHTML = '';
+        headlines.forEach(h => {
+          const li = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = h.url || '#';
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = h.title || '';
+          a.style.color = 'var(--accent)';
+          li.appendChild(a);
+          newsList.appendChild(li);
+        });
+        newsBox.hidden = false;
+      } else {
+        newsBox.hidden = true;
+      }
       showStatus('', '');
     } catch (err) {
       showStatus('网络错误，请确认后端服务已启动', 'error');

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from market_data import get_market_context
+from market_data import get_market_context, get_news
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
@@ -64,8 +64,12 @@ def analyze(req: AnalyzeRequest):
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    # 行业动态（Tavily 搜索，失败不阻断）
+    news = get_news(product, country)
+    data["_news"] = news if news.get("available") else {}
+
     logging.info("分析完成: %s / %s", product, country)
-    return {"report": markdown_report(product, country, data)}
+    return {"report": markdown_report(product, country, data), "news": data.get("_news")}
 
 
 @app.post("/api/analyze/export")
