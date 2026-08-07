@@ -82,6 +82,28 @@ def _parse_json(content: str) -> dict:
 _market_cache: dict = {}
 
 
+def _market_cache_key(product: str, country: str,
+                      market_context: dict | None,
+                      trade_evidence: dict | None,
+                      competitiveness: dict | None,
+                      background: dict | None) -> tuple:
+    """缓存 key：产品+国家+证据链签名（证据链变化时缓存失效重算）"""
+    def _sig(d):
+        if not d:
+            return None
+        if "trend" in d:  # trade_evidence
+            return ("trade", tuple(sorted(d.get("trend", {}).items())))
+        if "tc" in d:     # competitiveness
+            return ("tc", d.get("tc"))
+        if "summary" in d:  # background
+            return ("bg", str(d.get("summary", ""))[:80])
+        if "gdp" in d:    # market_context
+            return ("ctx", d.get("gdp"), d.get("gdp_per_capita"))
+        return None
+    return (product, country, _sig(market_context), _sig(trade_evidence),
+            _sig(competitiveness), _sig(background))
+
+
 def analyze_market(product: str, country: str, market_context: dict | None = None,
                    trade_evidence: dict | None = None,
                    competitiveness: dict | None = None,
@@ -99,7 +121,8 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     if not cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY"):
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
 
-    cache_key = (product, country)
+    cache_key = _market_cache_key(product, country, market_context, trade_evidence,
+                                  competitiveness, background)
     if cache_key in _market_cache:
         return _market_cache[cache_key]
 
