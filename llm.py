@@ -101,7 +101,8 @@ def _market_cache_key(product: str, country: str,
         if "top_brands" in d:  # landscape
             return ("land", tuple(sorted((b.get("name", ""), b.get("share", "")) for b in d.get("top_brands", []))))
         if "gdp" in d:    # market_context
-            return ("ctx", d.get("gdp"), d.get("gdp_per_capita"))
+            return ("ctx", d.get("gdp"), d.get("gdp_per_capita"),
+                    d.get("population"), d.get("internet"))
         return None
     return (product, country, _sig(market_context), _sig(trade_evidence),
             _sig(competitiveness), _sig(background), _sig(landscape))

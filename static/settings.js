@@ -57,6 +57,13 @@
       if (s.DEEPSEEK_API_KEY) document.getElementById('set-deepseek').placeholder = '已配置（留空保持不变）';
       if (s.TAVILY_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
       if (s.EBAY_APP_ID) document.getElementById('set-ebay-id').placeholder = '已配置（留空保持不变）';
+      // 提示：未配置 Tavily 时哪些功能不可用
+      if (!s.TAVILY_API_KEY) {
+        status.style.color = 'var(--gold)';
+        status.textContent = '未配置 Tavily：行业动态/宏观背景/竞争格局将不可用';
+      } else {
+        status.textContent = '';
+      }
     } catch (_) {}
     status.textContent = '';
     mask.style.display = 'block';
