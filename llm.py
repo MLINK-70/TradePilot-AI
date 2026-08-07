@@ -81,13 +81,17 @@ def _parse_json(content: str) -> dict:
 _market_cache: dict = {}
 
 
-def analyze_market(product: str, country: str, market_context: dict | None = None) -> dict:
+def analyze_market(product: str, country: str, market_context: dict | None = None,
+                   trade_evidence: dict | None = None,
+                   competitiveness: dict | None = None) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
     失败时抛 ValueError，由 main.py 统一转成 502。
     手动缓存：相同 (产品, 国家) 直接命中，不重复消耗 API token。
-    market_context: World Bank 市场环境数据（可选），注入提示词增强可信度。
+    market_context: World Bank 市场环境数据（可选）
+    trade_evidence: 真实贸易数据（UN Comtrade，可选）
+    competitiveness: 竞争力指标 TC（可选）
     """
     if not DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
@@ -97,18 +101,37 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
         return _market_cache[cache_key]
 
     user_prompt = build_user_prompt(product, country)
+    evidence_lines = []
+
+    # 贸易数据（UN Comtrade 真实出口额）
+    if trade_evidence and trade_evidence.get("trend"):
+        trend = trade_evidence["trend"]
+        years = sorted(trend.keys())
+        trend_str = "、".join(f"{y}年 {trend[y]} 亿美元" for y in years)
+        evidence_lines.append(f"【真实贸易数据（UN Comtrade）】{product} 出口至 {country}：{trend_str}")
+
+    # 市场环境（World Bank）
     if market_context and market_context.get("available"):
-        env_lines = []
+        env = []
         if market_context.get("gdp"):
-            env_lines.append(f"GDP: {market_context['gdp'] / 1e12:.2f} 万亿美元")
+            env.append(f"GDP {market_context['gdp'] / 1e12:.2f} 万亿美元")
         if market_context.get("population"):
-            env_lines.append(f"人口: {market_context['population'] / 1e8:.2f} 亿")
+            env.append(f"人口 {market_context['population'] / 1e8:.2f} 亿")
         if market_context.get("gdp_per_capita"):
-            env_lines.append(f"人均 GDP: {market_context['gdp_per_capita']:,.0f} 美元")
-        if market_context.get("internet") is not None:
-            env_lines.append(f"互联网普及率: {market_context['internet']:.1f}%")
-        if env_lines:
-            user_prompt += "\n【市场环境数据（World Bank 官方）】\n" + "\n".join(env_lines)
+            env.append(f"人均 GDP {market_context['gdp_per_capita']:,.0f} 美元")
+        if env:
+            evidence_lines.append("【市场环境（World Bank）】" + "，".join(env))
+
+    # 竞争力指标
+    if competitiveness and competitiveness.get("available") and competitiveness.get("tc") is not None:
+        evidence_lines.append(
+            f"【竞争力指标】贸易竞争力指数 TC={competitiveness['tc']}（出口 "
+            f"{competitiveness.get('export_value', 0) / 1e8:.2f} 亿 vs 进口 "
+            f"{competitiveness.get('import_value', 0) / 1e8:.2f} 亿美元）"
+        )
+
+    if evidence_lines:
+        user_prompt += "\n\n【以下为真实数据，请基于这些数据生成分析，引用具体数值支撑结论】\n" + "\n".join(evidence_lines)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

@@ -60,18 +60,42 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
     try:
-        # 注入 World Bank 市场环境数据（失败不阻断）
+        # 聚合真实数据证据链：经济环境 + 贸易数据 + 竞争力（失败不阻断）
         market_ctx = get_market_context(country)
-        data = analyze_market(product, country, market_ctx)
+        trade_evidence = {}
+        competitiveness = {}
+        try:
+            # 贸易数据：产品 HS 编码 → 目标市场真实出口数据（近3年）
+            hs, rows, trend = query_trend(product, country, list(range(get_latest_year() - 2, get_latest_year() + 1)))
+            if trend:
+                trade_evidence = {
+                    "hs_code": hs,
+                    "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                    "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+                }
+            # 竞争力：最新年份 TC
+            if len(rows):
+                competitiveness = get_competitiveness(product, country, str(get_latest_year()))
+        except Exception:
+            pass
+
+        data = analyze_market(product, country, market_ctx, trade_evidence, competitiveness)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
     # 行业动态（Tavily 搜索，失败不阻断）
     news = get_news(product, country)
     data["_news"] = news if news.get("available") else {}
+    data["_trade"] = trade_evidence if trade_evidence else {}
+    data["_competitiveness"] = competitiveness if competitiveness.get("available") else {}
 
     logging.info("分析完成: %s / %s", product, country)
-    return {"report": markdown_report(product, country, data), "news": data.get("_news")}
+    return {
+        "report": markdown_report(product, country, data),
+        "news": data.get("_news"),
+        "trade": data.get("_trade"),
+        "competitiveness": data.get("_competitiveness"),
+    }
 
 
 @app.post("/api/analyze/export")

@@ -107,6 +107,31 @@
       } else {
         newsBox.hidden = true;
       }
+
+      // 数据依据（真实贸易数据 + 竞争力指标）
+      const evBox = document.getElementById('evidence-box');
+      const evTrade = document.getElementById('evidence-trade');
+      const evComp = document.getElementById('evidence-comp');
+      const trade = data.trade || {};
+      const comp = data.competitiveness || {};
+      let hasEvidence = false;
+      if (trade.trend) {
+        const years = Object.keys(trade.trend).sort();
+        const trendStr = years.map(y => y + '年 ' + trade.trend[y] + ' 亿美元').join('，');
+        evTrade.textContent = '贸易数据（UN Comtrade）: HS' + trade.hs_code + ' 出口额 ' + trendStr;
+        hasEvidence = true;
+      } else {
+        evTrade.textContent = '';
+      }
+      if (comp.tc != null) {
+        evComp.textContent = '竞争力指标: TC = ' + comp.tc + '（出口 ' +
+          (comp.export_value / 1e8).toFixed(2) + ' 亿 vs 进口 ' +
+          (comp.import_value / 1e8).toFixed(2) + ' 亿美元）';
+        hasEvidence = true;
+      } else {
+        evComp.textContent = '';
+      }
+      evBox.hidden = !hasEvidence;
       showStatus('', '');
     } catch (err) {
       showStatus('网络错误，请确认后端服务已启动', 'error');
