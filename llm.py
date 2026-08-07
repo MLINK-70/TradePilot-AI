@@ -201,7 +201,7 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     return result
 
 
-TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供的**已核实统计指标**（程序精确计算，来自 UN Comtrade 数据），输出一份简明的市场解读。
+TRADE_TREND_SYSTEM = """你是资深国际贸易分析师兼出海品牌策略顾问。根据提供的**已核实统计指标**（程序精确计算，来自 UN Comtrade 数据）和**竞争格局**（龙头品牌/份额/变动原因/产业链），输出一份有洞察的市场解读和**可落地的入局策略**。
 
 输出要求：
 1. 只输出合法 JSON 对象
@@ -210,12 +210,29 @@ TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供�
   "overview": "2-3 句话总结整体趋势（升/降/波动），引用数据时标注年份区间，如「2020-2022 年间，出口额从 X 增至 Y」",
   "highlights": ["亮点1（引用具体数值+年份，如「2021 年出口额达 7.97 亿美元，为区间峰值」）", "亮点2"],
   "risks": ["风险1（引用具体年份+数值）", "风险2"],
-  "suggestion": "1 句可执行的行动建议"
+  "suggestion": "1 句可执行的行动建议",
+  "entry_strategy": {
+    "positioning": "目标定位：建议切入哪个细分市场/客群（如「避开苹果主导的高端，切 50-100 美元的中端通勤降噪」），基于竞争格局给出理由",
+    "differentiation": "差异化方向：与现有龙头品牌如何差异化（功能/价格/渠道/认证/服务，2-3 句），引用竞争格局中的品牌",
+    "pricing": "定价与渠道策略：建议价位段和渠道打法（线上/线下/区域分销），1-2 句",
+    "opportunity": "市场机会点：结合变动原因和产业链，指出空白机会（如「国产芯片降本后中低端性价比空间」）",
+    "actions": ["行动1（具体可执行，如「先以 OEM 切入德国中端市场，再推自有品牌」）", "行动2", "行动3"]
+  },
+  "advantage_categories": [
+    {"category": "优势品类（如「高端监听耳机」）", "strength": "优势点（如「声学调校/工艺精度/工程师文化」）", "brands": "代表品牌（如「森海塞尔/拜亚动力」）", "relevance": "对目标市场的机会（如「中国高端 HiFi 人群增长」）"}
+  ]
 }
 3. 必须直接引用给定的指标数值，禁止自行计算或编造任何数字
 4. **建议必须具体可执行**：结合数据给出明确方向（如"针对 2022 年出口额下降 16.8%，建议优化 X 产品线或开拓 Y 市场"），禁止"提升产品附加值""加强市场开拓"这类空话
 5. 若提供了【市场环境数据】（GDP/人口/人均），在 overview 或 highlights 中引用 1 句（如"该国人均 GDP 6 万美元，消费力支撑中高端产品"），增强结论可信度
-6. 所有内容中文输出"""
+6. 若提供了【竞争格局】（龙头品牌/份额/变动原因/产业链），在 risks、suggestion 或 entry_strategy 中引用（如"龙头品牌苹果占 25% 份额，国产芯片突破降本是入局机会"），让解读有产业逻辑
+7. **entry_strategy 的视角必须跟随出口国（reporter）**：站在「出口国品牌」的角度，分析如何进入目标市场（target）：
+   - 若出口国是中国：以中国品牌视角（如小米/华为/中国供应链降本优势）
+   - 若出口国是德国：以德国品牌视角（如森海塞尔/拜亚动力/声学工艺优势）
+   - 若出口国是日本：以日本品牌视角（如索尼/松下/精密制造优势）
+   - 渠道和策略要基于**目标市场**（如进入中国用天猫/京东/线下体验店，进入德国用 Amazon.de/MediaMarkt），**结合出口国品牌的自身优势**（声学底蕴/工艺/本土渠道/文化认同）做差异化，不套模板
+8. **advantage_categories 必须列出「出口国」在该品类的 3-4 个优势品类**：每个品类说明优势点（工艺/技术/品牌传统/供应链）、代表品牌（基于竞争格局或行业常识，标注明来源）、以及该品类在**目标市场**的机会点
+9. 所有内容中文输出"""
 
 
 # 手动缓存（trend/stats 是 dict 不可哈希，lru_cache 无法直接用）
@@ -223,12 +240,13 @@ _trade_trend_cache: dict = {}
 
 
 def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None,
-                        market_context: dict | None = None) -> dict:
+                        market_context: dict | None = None, landscape: dict | None = None) -> dict:
     """AI 解读贸易趋势：trend 为逐年数据，stats 为程序算好的统计指标
 
     AI 只负责解读（引用已核实指标），不负责算数——杜绝 AI 算术错误/幻觉。
     手动缓存：相同查询（产品/目标/出口国/数据区间）不重复消耗 token。
     market_context: World Bank 市场环境（可选），双证据链支撑结论。
+    landscape: 竞争格局（龙头品牌/变动原因/产业链，可选），深化解读。
     """
     cache_key = (product, target, reporter, tuple(trend.keys()))
     if cache_key in _trade_trend_cache:
@@ -269,10 +287,28 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
         if env:
             market_lines = "\n市场环境（World Bank 官方）: " + "，".join(env)
 
+    # 竞争格局注入：龙头品牌/份额/变动原因/产业链
+    landscape_lines = ""
+    if landscape:
+        parts = []
+        brands = landscape.get("top_brands") or []
+        if brands:
+            parts.append("龙头品牌: " + "；".join(
+                f"{b.get('name', '')}（{b.get('share', '')}）" for b in brands[:5]))
+        shifts = landscape.get("shift_reasons") or []
+        if shifts:
+            parts.append("格局变动原因: " + "；".join(shifts[:3]))
+        if landscape.get("chain_insight"):
+            parts.append("产业链洞察: " + landscape["chain_insight"])
+        if landscape.get("key_insight"):
+            parts.append("核心洞察: " + landscape["key_insight"])
+        if parts:
+            landscape_lines = "\n竞争格局（Tavily 行业检索）:\n" + "\n".join(parts)
+
     user_msg = (
         f"产品: {product}\n出口国: {reporter}\n目标市场: {target}\n"
-        f"逐年出口数据:\n{data_lines}{stats_lines}{market_lines}\n"
-        f"请输出市场解读（引用指标数值和市场环境数据支撑结论，不自行计算）。"
+        f"逐年出口数据:\n{data_lines}{stats_lines}{market_lines}{landscape_lines}\n"
+        f"请输出市场解读（引用指标数值、市场环境和竞争格局数据支撑结论，不自行计算）。"
     )
     content = _chat([
         {"role": "system", "content": TRADE_TREND_SYSTEM},

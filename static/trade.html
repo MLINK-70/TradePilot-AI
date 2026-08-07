@@ -2,57 +2,77 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 贸易数据</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=14">
   <style>
-    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
-    .tabs a {
-      padding: 0.4rem 1.2rem;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-    }
-    .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
-    .chart-box { margin-top: 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+    .chart-box { margin-top: 1.5rem; background: var(--card); border: var(--line-w) solid var(--border); border-radius: var(--radius); padding: 1rem; }
     #trend-chart { width: 100%; height: 360px; }
     .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
     .download-row { display: flex; gap: 0.8rem; margin-top: 1rem; }
     .download-row button { flex: 1; }
-    .stats { display: flex; gap: 1rem; margin-top: 1rem; }
-    .stat { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem; text-align: center; }
-    .stat .num { font-size: 1.3rem; font-weight: bold; color: var(--accent); }
-    .stat .lbl { color: var(--muted); font-size: 0.8rem; }
-    .year-pair { flex: 1; display: flex; align-items: center; gap: 0.6rem; }
-    .year-pair input { flex: 1; }
-    .year-sep { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
-    .analysis-title { color: var(--accent); font-size: 1rem; margin-bottom: 0.5rem; }
+    .analysis-title { color: var(--navy-deep); font-family: var(--serif); font-size: 1.05rem; margin-bottom: 0.5rem; }
     .pain-table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
     .pain-table th, .pain-table td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
     .pain-table th { background: var(--card-2); color: var(--muted); }
     .pain-table td:first-child { white-space: nowrap; }
     .analysis-overview { color: var(--text); font-size: 0.92rem; line-height: 1.7; }
+    .num-hl {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      padding: 0 0.2rem;
+      border-radius: 3px;
+      font-variant-numeric: tabular-nums;
+    }
     .analysis-section { margin-top: 0.8rem; }
     .analysis-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.2rem; }
     .analysis-section ul { padding-left: 1.2rem; color: var(--text); font-size: 0.9rem; }
     .analysis-section li { margin: 0.15rem 0; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
+    .kpi {
+      background: var(--card);
+      border: var(--line-w) solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 0.9rem 1rem;
+    }
+    .kpi:nth-child(2) { border-left-color: var(--gold); }
+    .kpi:nth-child(3) { border-left-color: var(--navy); }
+    .kpi:nth-child(4) { border-left-color: var(--teal); }
+    .kpi-v {
+      font-family: var(--serif);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--navy-deep);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.3;
+    }
+    .kpi-l { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
+    .kpi-tag { font-size: 0.58rem; color: var(--muted); letter-spacing: 0.05em; margin-top: 0.2rem; }
+    @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
-  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/">市场分析</a>
+    <a href="/trade.html" class="active">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html">开发信</a>
+  </nav>
   <header class="hero">
     <span class="eyebrow">UN Comtrade · Export Intelligence</span>
     <h1>TradePilot AI</h1>
     <p class="subtitle">贸易数据查询（出口流向 · 趋势 · 原始数据）</p>
     <div class="route-line"><span></span></div>
-    <nav class="tabs">
-      <a href="/">市场分析</a>
-      <a href="/trade.html" class="active">贸易数据</a>
-      <a href="/ecommerce.html">跨境电商</a>
-      <a href="/business.html">开发信</a>
-    </nav>
   </header>
 
   <main>
@@ -92,6 +112,17 @@
         <div class="stat"><div class="num" id="stat-count">—</div><div class="lbl">数据记录数</div></div>
       </div>
 
+      <!-- 关键指标（程序精确计算，行业报告式） -->
+      <div class="chart-box" id="kpi-box" hidden>
+        <h3 class="analysis-title">关键指标</h3>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-v" id="kpi-cagr">—</div><div class="kpi-l">年复合增长率 CAGR</div><div class="kpi-tag">程序精确计算</div></div>
+          <div class="kpi"><div class="kpi-v" id="kpi-peak">—</div><div class="kpi-l">峰值年份</div><div class="kpi-tag">UN COMTRADE</div></div>
+          <div class="kpi"><div class="kpi-v" id="kpi-swing">—</div><div class="kpi-l">最大单年波动</div><div class="kpi-tag">程序精确计算</div></div>
+          <div class="kpi"><div class="kpi-v" id="kpi-price">—</div><div class="kpi-l">最新单价</div><div class="kpi-tag">美元/公斤</div></div>
+        </div>
+      </div>
+
       <div class="chart-box">
         <div id="trend-chart"></div>
         <p class="meta" id="chart-meta"></p>
@@ -115,12 +146,55 @@
         <p class="meta" id="analysis-source"></p>
         <p class="meta" id="analysis-market" hidden></p>
         <p class="meta" id="competitiveness" hidden></p>
+
+        <!-- 入局策略（跟随出口国视角） -->
+        <div id="entry-box" hidden>
+          <div class="analysis-section">
+            <div class="analysis-label">入局定位</div>
+            <p id="entry-position" class="analysis-overview"></p>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-label">差异化方向</div>
+            <p id="entry-diff" class="analysis-overview"></p>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-label">定价与渠道</div>
+            <p id="entry-price" class="analysis-overview"></p>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-label">市场机会点</div>
+            <p id="entry-opp" class="analysis-overview"></p>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-label">优势品类（出口国）</div>
+            <table class="pain-table" id="adv-table"></table>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-label">行动建议</div>
+            <ul id="entry-actions"></ul>
+          </div>
+        </div>
       </div>
 
       <div class="chart-box" id="competitor-box" hidden>
-        <h3 class="analysis-title">竞争对手出口对比</h3>
+        <h3 class="analysis-title">竞争对手出口对比（全球出口大国 → 对{target}出口）</h3>
         <table class="pain-table" id="competitor-table"></table>
-        <p class="meta">同产品各出口国对目标市场的出口额（UN Comtrade）</p>
+        <p class="meta" id="competitor-meta"></p>
+      </div>
+
+      <!-- 竞争格局：龙头品牌 + 变动原因 + 产业链（行业报告式） -->
+      <div class="chart-box" id="landscape-box" hidden>
+        <h3 class="analysis-title">竞争格局</h3>
+        <table class="pain-table" id="landscape-table"></table>
+        <div class="analysis-section">
+          <div class="analysis-label">格局变动原因</div>
+          <ul id="landscape-shifts"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">产业链洞察</div>
+          <p id="landscape-chain" class="analysis-overview"></p>
+        </div>
+        <p class="meta" id="landscape-source"></p>
       </div>
 
       <div class="chart-box" id="destination-box" hidden>
@@ -138,9 +212,9 @@
 
   <footer>数据来源：UN Comtrade 公共 API · 出口流向数据</footer>
 
-  <script src="echarts.min.js"></script>
-  <script src="theme.js"></script>
-  <script src="settings.js?v=8"></script>
+  <script src="echarts.min.js?v=14"></script>
+  <script src="theme.js?v=14"></script>
+  <script src="settings.js?v=14"></script>
   <script>
     (function () {
       'use strict';
@@ -157,8 +231,8 @@
       // 图表配色跟随系统主题（暗色/亮色）
       function chartColors() {
         return window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? { axis: '#8b9bb8', line: '#1e2b47', accent: '#4f8cff', area: 'rgba(79,140,255,0.15)' }
-          : { axis: '#64748b', line: '#dde4ee', accent: '#2e5bff', area: 'rgba(46,91,255,0.12)' };
+          ? { axis: '#9aa8ba', line: '#2a3d55', accent: '#e06a4c', area: 'rgba(224,106,76,0.18)' }
+          : { axis: '#7a715f', line: '#e3dccd', accent: '#c4452c', area: 'rgba(196,69,44,0.12)' };
       }
 
       // 页面加载时拉取下拉选项
@@ -235,6 +309,23 @@
         }
       });
 
+      function fillTable(id, headers, rows, mapper) {
+        const tbl = document.getElementById(id);
+        tbl.innerHTML = '';
+        const thead = document.createElement('thead');
+        const hr = document.createElement('tr');
+        headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+        thead.appendChild(hr);
+        tbl.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        rows.forEach(r => {
+          const tr = document.createElement('tr');
+          mapper(r).forEach(v => { const td = document.createElement('td'); td.textContent = v || ''; tr.appendChild(td); });
+          tbody.appendChild(tr);
+        });
+        tbl.appendChild(tbody);
+      }
+
       function render(data) {
         document.getElementById('stat-total').textContent = data.total_value.toLocaleString('zh-CN');
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
@@ -244,18 +335,67 @@
           '<br>' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
           ' · 数据来源 UN Comtrade';
 
+        // 关键指标（程序精确计算，行业报告式）
+        const stats = data.stats || {};
+        const kpiBox = document.getElementById('kpi-box');
+        if (stats.cagr_pct != null || stats.peak_year) {
+          document.getElementById('kpi-cagr').textContent =
+            (stats.cagr_pct != null ? (stats.cagr_pct >= 0 ? '+' : '') + stats.cagr_pct + '%' : '—');
+          document.getElementById('kpi-peak').textContent = stats.peak_year || '—';
+          document.getElementById('kpi-swing').textContent =
+            stats.max_swing_year ? (stats.max_swing_pct >= 0 ? '+' : '') + stats.max_swing_pct + '%（' + stats.max_swing_year + '年）' : '—';
+          const ups = stats.unit_prices || [];
+          const latestPrice = ups.length ? ups[ups.length - 1].price : null;
+          document.getElementById('kpi-price').textContent =
+            latestPrice != null ? '$' + latestPrice.toFixed(2) : '—';
+          kpiBox.hidden = false;
+        } else {
+          kpiBox.hidden = true;
+        }
+
         // AI 解读
         const ab = document.getElementById('analysis-box');
         const a = data.analysis || {};
+        // 数字高亮：把解读里的数字（含%、亿、年等）标成醒目色
+        function hlNum(text) {
+          const div = document.createElement('div');
+          div.textContent = text || '';
+          div.innerHTML = div.innerHTML.replace(/([-+]?\d[\d,\.]*%?)/g, '<mark class="num-hl">$1</mark>');
+          return div.innerHTML;
+        }
         if (a.overview) {
-          document.getElementById('analysis-overview').textContent = a.overview;
+          document.getElementById('analysis-overview').innerHTML = hlNum(a.overview);
           const hl = document.getElementById('analysis-highlights');
           hl.innerHTML = '';
-          (a.highlights || []).forEach(h => { const li = document.createElement('li'); li.textContent = h; hl.appendChild(li); });
+          (a.highlights || []).forEach(h => { const li = document.createElement('li'); li.innerHTML = hlNum(h); hl.appendChild(li); });
           const rk = document.getElementById('analysis-risks');
           rk.innerHTML = '';
-          (a.risks || []).forEach(r => { const li = document.createElement('li'); li.textContent = r; rk.appendChild(li); });
+          (a.risks || []).forEach(r => { const li = document.createElement('li'); li.innerHTML = hlNum(r); rk.appendChild(li); });
           document.getElementById('analysis-suggestion').textContent = a.suggestion || '';
+          // 入局策略（跟随出口国视角）
+          const entryBox = document.getElementById('entry-box');
+          const es = a.entry_strategy || {};
+          if (es.positioning || es.actions) {
+            document.getElementById('entry-position').textContent = es.positioning || '';
+            document.getElementById('entry-diff').textContent = es.differentiation || '';
+            document.getElementById('entry-price').textContent = es.pricing || '';
+            document.getElementById('entry-opp').textContent = es.opportunity || '';
+            // 优势品类表（出口国）
+            const advRows = a.advantage_categories || [];
+            if (advRows.length) {
+              fillTable('adv-table',
+                ['优势品类', '优势点', '代表品牌', '目标市场机会'],
+                advRows, r => [r.category || '', r.strength || '', r.brands || '', r.relevance || '']);
+            } else {
+              document.getElementById('adv-table').innerHTML = '';
+            }
+            const acts = document.getElementById('entry-actions');
+            acts.innerHTML = '';
+            (es.actions || []).forEach(x => { const li = document.createElement('li'); li.textContent = x; acts.appendChild(li); });
+            entryBox.hidden = false;
+          } else {
+            entryBox.hidden = true;
+          }
           // Citation：数据来源标注
           const src = document.getElementById('analysis-source');
           src.textContent = '数据区间 ' + (a._data_range || '') + ' · UN Comtrade 公共 API';
@@ -285,15 +425,47 @@
           } else {
             cpEl.hidden = true;
           }
-          // 竞争对手出口对比
+          // 竞争对手出口对比（全球出口大国 → 对目标市场出口）
           const cpBox = document.getElementById('competitor-box');
           const competitors = (data.competitors && data.competitors.competitors) || [];
+          const topExp = data.top_exporters || [];
           if (competitors.length) {
-            fillTable('competitor-table', ['出口国', '出口额(亿美元)', '占比'],
-              competitors, c => [c.country, (c.value / 1e8).toFixed(2), c.share + '%']);
+            // 全球出口额查表（用于标注"该国也是全球出口大国"）
+            const globalVal = {};
+            topExp.forEach(t => { globalVal[t.country] = t.value; });
+            const target = (lastQuery && lastQuery.target) || '';
+            fillTable('competitor-table', ['出口国', '对' + target + '出口(亿美元)', '占比', '全球出口(亿美元)'],
+              competitors, c => [
+                c.country + (c.country === target ? '（目标市场）' : ''),
+                (c.value / 1e8).toFixed(2),
+                c.share + '%',
+                globalVal[c.country] != null ? (globalVal[c.country] / 1e8).toFixed(1) : '—',
+              ]);
+            document.getElementById('competitor-meta').textContent =
+              '竞争对手 = 该品类全球出口大国（按全球出口额自动识别，UN Comtrade）。' +
+              (globalVal[target] != null ? target + ' 全球出口 ' + (globalVal[target] / 1e8).toFixed(1) + ' 亿美元（出口大国，但作为目标市场时由本土供应）。' : '');
             cpBox.hidden = false;
           } else {
             cpBox.hidden = true;
+          }
+
+          // 竞争格局（龙头品牌 + 变动原因 + 产业链）
+          const lsBox = document.getElementById('landscape-box');
+          const ls = data.landscape || {};
+          const brands = ls.top_brands || [];
+          if (brands.length) {
+            fillTable('landscape-table',
+              ['品牌', '市场份额', '市场地位'],
+              brands, b => [b.name || '', b.share || '', b.position || '']);
+            const shifts = document.getElementById('landscape-shifts');
+            shifts.innerHTML = '';
+            (ls.shift_reasons || []).forEach(r => { const li = document.createElement('li'); li.textContent = r; shifts.appendChild(li); });
+            document.getElementById('landscape-chain').textContent = ls.chain_insight || '';
+            document.getElementById('landscape-source').textContent =
+              '来源：' + (ls._source || 'Tavily 行业检索') + (ls._updated ? ' · 更新于 ' + ls._updated.slice(0, 10) : '');
+            lsBox.hidden = false;
+          } else {
+            lsBox.hidden = true;
           }
 
           // 出口目的地排名
@@ -323,6 +495,7 @@
         chart = echarts.init(document.getElementById('trend-chart'));
         chart.setOption({
           backgroundColor: 'transparent',
+          legend: { data: ['出口额'], textStyle: { color: c.axis }, top: 4 },
           tooltip: {
             trigger: 'axis',
             formatter: function (params) {
@@ -330,7 +503,7 @@
               return p.name + '年：' + p.value.toLocaleString('zh-CN') + ' 美元';
             },
           },
-          grid: { left: 90, right: 30, top: 30, bottom: 40 },
+          grid: { left: 90, right: 30, top: 34, bottom: 40 },
           xAxis: { type: 'category', data: years, axisLabel: { color: c.axis } },
           yAxis: {
             type: 'value',

@@ -2,10 +2,26 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境电商</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=11">
   <style>
+    /* 覆盖历史内联样式（圆角/边框/灰底 → 下划线式输入） */
+    #reviews-input, #ebay-url, #aliexpress-url,
+    #prod-a, #prod-b, #reviews-a, #reviews-b, #platform-select {
+      border: none !important;
+      border-bottom: 1.5px solid var(--border) !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      padding: 0.55rem 0.1rem !important;
+    }
+    #reviews-input:focus, #ebay-url:focus, #aliexpress-url:focus,
+    #prod-a:focus, #prod-b:focus, #reviews-a:focus, #reviews-b:focus, #platform-select:focus {
+      outline: none;
+      border-bottom-color: var(--accent) !important;
+    }
     #reviews-input {
       flex: 1;
       padding: 0.62rem 0.85rem;
@@ -44,18 +60,23 @@
   </style>
 </head>
 <body>
-  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html" class="active">跨境电商</a>
+    <a href="/business.html">开发信</a>
+  </nav>
   <header class="hero">
     <span class="eyebrow">E-commerce · Review Intelligence</span>
     <h1>TradePilot AI</h1>
     <p class="subtitle">评论分析 · 用户痛点 · 平台 Listing</p>
     <div class="route-line"><span></span></div>
-    <nav class="tabs">
-      <a href="/">市场分析</a>
-      <a href="/trade.html">贸易数据</a>
-      <a href="/ecommerce.html" class="active">跨境电商</a>
-      <a href="/business.html">开发信</a>
-    </nav>
   </header>
 
   <main>
@@ -166,9 +187,9 @@
 
   <footer>分析基于提供的评论样本 · 数据来源为用户输入/演示数据</footer>
 
-  <script src="echarts.min.js"></script>
-  <script src="theme.js"></script>
-  <script src="settings.js?v=8"></script>
+  <script src="echarts.min.js?v=11"></script>
+  <script src="theme.js?v=11"></script>
+  <script src="settings.js?v=14"></script>
   <script>
     (function () {
       'use strict';

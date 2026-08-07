@@ -437,14 +437,19 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
 
 
 def get_competitor_comparison(product: str, target: str, year: str,
-                              competitors: list = None) -> dict:
-    """竞争对手出口对比：中国 vs 主要竞争国对目标市场的同类产品出口
+                              competitors: list = None,
+                              reporter: str = "中国") -> dict:
+    """竞争对手出口对比：出口国 vs 同类主要出口国对目标市场的同类产品出口
 
-    competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）。
+    competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）；
+    若出口国不在其中（如德国），自动加入并放在第一位，保证对比包含出口国自身。
     返回 {competitors: [{country, value, share}], available: bool}
     """
     if competitors is None:
         competitors = ["中国", "日本", "韩国", "越南"]
+    # 出口国必须是竞争对手之一（否则对比表里没有出口国自身，占比失真）
+    if reporter and reporter not in competitors:
+        competitors = [reporter] + [c for c in competitors if c != reporter]
     try:
         hs = hs_lookup(product)
         if not hs:
@@ -466,6 +471,39 @@ def get_competitor_comparison(product: str, target: str, year: str,
         return {}
 
 
+def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
+    """动态识别品类出口大国：候选出口国对该品类全球出口额排名
+
+    UN Comtrade preview 不支持 reporterCode=0 的全球分组查询（返回空），
+    改为轮询候选出口大国（消费电子主要出口国名单）对该品类的全球出口，
+    按出口额降序取 TOP N。返回 [{country, value}]，失败返回 []。
+    """
+    candidates = [
+        "中国", "德国", "日本", "韩国", "越南", "美国",
+        "英国", "荷兰", "意大利", "新加坡", "法国", "马来西亚",
+        "泰国", "墨西哥", "波兰", "印度",
+    ]
+    try:
+        hs = hs_lookup(product)
+        if not hs:
+            return []
+        results = []
+        for country in candidates:
+            try:
+                rows = fetch_year(hs, "0", year, reporter=country, flow="X")
+                value = sum(r.get("primaryValue") or 0 for r in rows)
+                if value > 0:
+                    results.append({"country": country, "value": value})
+            except Exception:
+                continue
+        results.sort(key=lambda x: x["value"], reverse=True)
+        return results[:top_n]
+    except Exception:
+        return []
+    """出口目的地排名：目标市场（如欧盟）内部各国进口该产品排名
+
+    返回 {destinations: [{country, value, share}], available: bool}
+    """
 def get_destination_ranking(product: str, target: str, year: str,
                             reporter: str = "中国") -> dict:
     """出口目的地排名：目标市场（如欧盟）内部各国进口该产品排名

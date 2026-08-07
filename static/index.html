@@ -2,48 +2,45 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境市场分析</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=13">
   <style>
-    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; justify-content: center; }
-    .tabs a {
-      padding: 0.4rem 1.2rem;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-    }
-    .tabs a.active { background: var(--accent); color: #fff; border-color: transparent; }
     .btn-row { display: flex; gap: 0.8rem; }
     .btn-row .btn-primary { flex: 1; }
     .btn-row .btn-secondary {
       flex: 1;
       padding: 0.7rem;
-      border: 1px solid var(--accent);
-      border-radius: 8px;
+      border: 1px solid var(--navy);
+      border-radius: var(--radius-sm);
       background: transparent;
-      color: var(--accent);
+      color: var(--navy);
       font-size: 1rem;
       cursor: pointer;
     }
-    .btn-row .btn-secondary:hover { background: rgba(79, 140, 255, 0.1); }
+    .btn-row .btn-secondary:hover { background: rgba(18, 60, 92, 0.08); }
   </style>
 </head>
 <body>
-  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/" class="active">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html">开发信</a>
+  </nav>
   <header class="hero">
     <span class="eyebrow">AI-Powered Trade Intelligence</span>
     <h1>TradePilot AI</h1>
     <p class="subtitle">输入产品与目标国家，一键生成市场调研报告</p>
     <div class="route-line"><span></span></div>
-    <nav class="tabs">
-      <a href="/" class="active">市场分析</a>
-      <a href="/trade.html">贸易数据</a>
-      <a href="/ecommerce.html">跨境电商</a>
-      <a href="/business.html">开发信</a>
-    </nav>
   </header>
 
   <main>
@@ -65,6 +62,38 @@
       <p id="status" class="status"></p>
     </section>
 
+    <!-- 双栏仪表盘：左 KPI + 趋势图，右证据链 -->
+    <section id="dash" class="dash" hidden>
+      <div class="dash-left">
+        <div class="kpis">
+          <div class="kpi">
+            <div class="kpi-v" id="kpi-trade">—</div>
+            <div class="kpi-l" id="kpi-trade-lbl">对德出口额</div>
+            <div class="kpi-tag">UN COMTRADE 联合国商品贸易数据库</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-v" id="kpi-cagr">—</div>
+            <div class="kpi-l">5 年复合增速 CAGR</div>
+            <div class="kpi-tag">程序精确计算</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-v" id="kpi-tc">—</div>
+            <div class="kpi-l">TC 贸易竞争力指数</div>
+            <div class="kpi-tag" id="kpi-tc-src">WORLD BANK 世界银行</div>
+          </div>
+        </div>
+        <div class="chart-ph-wrap">
+          <div class="chart-ph-title" id="trend-title">中国 → 德国 出口趋势图</div>
+          <div id="trend-chart"></div>
+        </div>
+      </div>
+      <div class="dash-right">
+        <h4>证据链 · 数据来源</h4>
+        <ul class="evid" id="evid-list"></ul>
+        <p class="evid-seal">数据皆可溯源 —— AI 只解读，不编造</p>
+      </div>
+    </section>
+
     <section id="report" class="report" hidden></section>
     <section id="evidence-box" class="report" hidden>
       <h2>数据依据</h2>
@@ -81,8 +110,9 @@
   <footer>数据由 AI 估算生成，仅供参考，非官方统计</footer>
 
   <!-- marked + DOMPurify：本地文件（CDN 会被浏览器追踪防护拦截） -->
-  <script src="marked.min.js"></script>
-  <script src="dompurify.min.js"></script>
+  <script src="echarts.min.js?v=11"></script>
+  <script src="marked.min.js?v=11"></script>
+  <script src="dompurify.min.js?v=11"></script>
   <script>
     // marked 挂了：降级为纯文本渲染（转义 HTML，不破坏 DOMPurify）
     if (typeof marked === 'undefined') {
@@ -93,8 +123,8 @@
       window.DOMPurify = { sanitize: function (html) { return html; } };
     }
   </script>
-  <script src="app.js"></script>
-  <script src="theme.js"></script>
-  <script src="settings.js?v=8"></script>
+  <script src="app.js?v=14"></script>
+  <script src="theme.js?v=11"></script>
+  <script src="settings.js?v=14"></script>
 </body>
 </html>

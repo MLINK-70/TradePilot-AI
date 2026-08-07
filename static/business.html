@@ -2,9 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 外贸开发信</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=11">
   <style>
     .email-box {
       margin-top: 1.4rem;
@@ -48,10 +50,11 @@
     .company-optional .form-row { margin-top: 0.8rem; }
     #idea {
       flex: 1;
-      padding: 0.62rem 0.85rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
-      background: var(--card-2);
+      padding: 0.62rem 0.1rem;
+      border: none;
+      border-bottom: 1.5px solid var(--border);
+      border-radius: 0;
+      background: transparent;
       color: var(--text);
       font-size: 0.95rem;
       font-family: inherit;
@@ -60,8 +63,7 @@
     }
     #idea:focus {
       outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
+      border-bottom-color: var(--accent);
     }
     .intro-specs { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
     .intro-specs td { border: 1px solid var(--border); padding: 0.35rem 0.6rem; }
@@ -79,10 +81,11 @@
     .chat-input { display: flex; gap: 0.5rem; }
     .chat-input input {
       flex: 1;
-      padding: 0.55rem 0.8rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
-      background: var(--card-2);
+      padding: 0.55rem 0.1rem;
+      border: none;
+      border-bottom: 1.5px solid var(--border);
+      border-radius: 0;
+      background: transparent;
       color: var(--text);
       font-size: 0.9rem;
     }
@@ -90,18 +93,23 @@
   </style>
 </head>
 <body>
-  <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html" class="active">开发信</a>
+  </nav>
   <header class="hero">
     <span class="eyebrow">Business Outreach · AI Cold Email</span>
     <h1>TradePilot AI</h1>
     <p class="subtitle">外贸开发信生成（英文 + 中文要点）</p>
     <div class="route-line"><span></span></div>
-    <nav class="tabs">
-      <a href="/">市场分析</a>
-      <a href="/trade.html">贸易数据</a>
-      <a href="/ecommerce.html">跨境电商</a>
-      <a href="/business.html" class="active">开发信</a>
-    </nav>
   </header>
 
   <main>
@@ -212,8 +220,8 @@
 
   <footer>AI 生成内容仅供参考，发送前请核对信息</footer>
 
-  <script src="theme.js"></script>
-  <script src="settings.js?v=8"></script>
+  <script src="theme.js?v=11"></script>
+  <script src="settings.js?v=14"></script>
   <script>
     (function () {
       'use strict';

@@ -36,7 +36,7 @@ from aliexpress import analyze_product, parse_aliexpress_url
 import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
                    get_competitor_comparison, get_destination_ranking,
-                   get_latest_year, query_trade, query_trend,
+                   get_latest_year, get_top_exporters, query_trade, query_trend,
                    summarize_stats, summarize_trend)
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -115,6 +115,8 @@ def analyze(req: AnalyzeRequest):
         "news": data.get("_news"),
         "trade": data.get("_trade"),
         "competitiveness": data.get("_competitiveness"),
+        "market_context": market_ctx if market_ctx and market_ctx.get("available") else {},
+        "background": background or {},
     }
 
 
@@ -286,13 +288,18 @@ def trade_query(req: TradeQueryRequest):
     analysis = {}
     market_ctx = {}
     competitiveness = {}
+    landscape = {}
+    stats = {}
     try:
         # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
         if len(trend) >= 2:
             stats = summarize_stats(trend)  # 程序先算好已核实指标
             # 注入 World Bank 市场环境（双证据链：贸易 + 经济）
             market_ctx = get_market_context(target)
-            analysis = analyze_trade_trend(product, target, req.reporter, trend, stats, market_ctx)
+            # 注入竞争格局（龙头品牌/变动原因/产业链，Tavily 检索）
+            landscape = get_competitive_landscape(product, target)
+            analysis = analyze_trade_trend(product, target, req.reporter, trend, stats,
+                                           market_ctx, landscape)
             # Citation：解读数据区间（数字可溯源）
             if stats:
                 analysis["_data_range"] = f"{stats['first_year']}-{stats['last_year']}"
@@ -311,10 +318,18 @@ def trade_query(req: TradeQueryRequest):
     # 竞争对手出口对比 + 目的地排名（失败不阻断，仅单年查询时）
     competitor_cmp = {}
     destination_rank = {}
+    top_exporters = []
     try:
         y = str(years[0] if len(years) == 1 else years[-1])
-        # 第4参数是 competitors 列表（默认 中国/日本/韩国/越南），不要传 reporter 字符串
-        competitor_cmp = get_competitor_comparison(product, target, y)
+        # 动态识别品类出口大国：全球 TOP 出口国作为竞争对手
+        top_exporters = get_top_exporters(product, y)
+        top_names = [t["country"] for t in top_exporters]
+        # 出口国必须在列表里，否则对比没有出口国自身
+        if req.reporter not in top_names:
+            top_names = [req.reporter] + [n for n in top_names if n != req.reporter]
+        competitor_cmp = get_competitor_comparison(product, target, y,
+                                                    competitors=top_names[:6],
+                                                    reporter=req.reporter)
         destination_rank = get_destination_ranking(product, target, y, req.reporter)
     except Exception:
         pass
@@ -327,9 +342,12 @@ def trade_query(req: TradeQueryRequest):
         "record_count": len(rows),
         "trend": [{"year": y, "value": v["value"], "weight": v["weight"]} for y, v in trend.items()],
         "analysis": analysis,  # AI 市场解读
+        "stats": stats,  # 程序精确计算的统计指标（CAGR/峰值/单价等）
+        "landscape": landscape if landscape.get("top_brands") else {},  # 竞争格局（龙头品牌/变动原因/产业链）
         "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
         "competitiveness": competitiveness,  # TC/RCA 竞争力指标
         "competitors": competitor_cmp,  # 竞争对手出口对比
+        "top_exporters": top_exporters,  # 品类全球出口大国（含全球出口额）
         "destinations": destination_rank,  # 出口目的地排名
         "rows": [
             {

@@ -80,6 +80,9 @@
         return;
       }
 
+      // 渲染双栏仪表盘：KPI + 趋势图 + 证据链
+      renderDash(data, product, country);
+
       // DOMPurify 先过滤再插入，防止报告内容里的恶意 HTML
       reportEl.innerHTML = DOMPurify.sanitize(marked.parse(data.report));
       reportEl.hidden = false;
@@ -145,5 +148,163 @@
   function showStatus(text, type) {
     statusEl.textContent = text;
     statusEl.className = 'status ' + type;
+  }
+
+  // ===== 双栏仪表盘 =====
+  let dashChart = null;
+
+  function dashColors() {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? { axis: '#9aa8ba', line: '#2a3d55', accent: '#e06a4c', area: 'rgba(224,106,76,0.18)' }
+      : { axis: '#7a715f', line: '#e3dccd', accent: '#c4452c', area: 'rgba(196,69,44,0.12)' };
+  }
+
+  function renderDash(data, product, country) {
+    // 仪表盘渲染失败不应伪装成"网络错误"：数据与报告才是主交付物
+    try {
+      _renderDash(data, product, country);
+    } catch (e) {
+      console.warn('仪表盘渲染失败（不影响报告）:', e);
+    }
+  }
+
+  function _renderDash(data, product, country) {
+    const dashEl = document.getElementById('dash');
+    const trade = data.trade || {};
+    const comp = data.competitiveness || {};
+    const mc = data.market_context || {};
+    const bg = data.background || {};
+    let any = false;
+
+    // KPI 1：中国对目标市场出口额（UN Comtrade 真实数据）
+    const kpiTrade = document.getElementById('kpi-trade');
+    const kpiTradeLbl = document.getElementById('kpi-trade-lbl');
+    if (trade.trend) {
+      const years = Object.keys(trade.trend).map(Number).sort((a, b) => a - b);
+      const lastY = years[years.length - 1];
+      const lastVal = trade.trend[String(lastY)];  // 单位：亿美元
+      kpiTrade.textContent = '$' + lastVal.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '亿';
+      kpiTradeLbl.textContent = '中国→' + country + ' 出口额（' + lastY + '）';
+      any = true;
+    } else {
+      kpiTrade.textContent = '—';
+      kpiTradeLbl.textContent = '出口数据缺失';
+    }
+
+    // KPI 2：CAGR（程序精确计算，基于真实趋势数据）
+    const kpiCagr = document.getElementById('kpi-cagr');
+    if (trade.trend && Object.keys(trade.trend).length >= 2) {
+      const years = Object.keys(trade.trend).map(Number).sort((a, b) => a - b);
+      const firstV = trade.trend[String(years[0])];
+      const lastV = trade.trend[String(years[years.length - 1])];
+      const n = years.length - 1;
+      if (firstV > 0 && lastV > 0 && n > 0) {
+        const cagr = (Math.pow(lastV / firstV, 1 / n) - 1) * 100;
+        kpiCagr.textContent = (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%';
+      } else {
+        kpiCagr.textContent = '—';
+      }
+    } else {
+      kpiCagr.textContent = '—';
+    }
+
+    // KPI 3：TC 竞争力指数
+    const kpiTc = document.getElementById('kpi-tc');
+    if (comp.tc != null) {
+      kpiTc.textContent = comp.tc.toFixed(2);
+      any = true;
+    } else {
+      kpiTc.textContent = '—';
+    }
+
+    // 趋势图（echarts 未加载时跳过，不影响其他内容）
+    if (trade.trend && Object.keys(trade.trend).length && typeof echarts !== 'undefined') {
+      const years = Object.keys(trade.trend).map(Number).sort((a, b) => a - b);
+      const values = years.map(y => trade.trend[String(y)]);
+      const c = dashColors();
+      const chartEl = document.getElementById('trend-chart');
+      if (dashChart) { dashChart.dispose(); }
+      dashChart = echarts.init(chartEl);
+      dashChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger: 'axis',
+          formatter: p => p[0].name + '年：' + p[0].value.toLocaleString('zh-CN') + ' 亿美元',
+        },
+        grid: { left: 60, right: 16, top: 20, bottom: 32 },
+        xAxis: { type: 'category', data: years, axisLabel: { color: c.axis } },
+        yAxis: {
+          type: 'value',
+          axisLabel: { color: c.axis, formatter: v => v + '亿' },
+          splitLine: { lineStyle: { color: c.line } },
+        },
+        series: [{
+          name: '出口额',
+          type: 'line',
+          data: values,
+          smooth: true,
+          symbolSize: 7,
+          lineStyle: { color: c.accent, width: 3 },
+          itemStyle: { color: c.accent },
+          areaStyle: { color: c.area },
+        }],
+      });
+      document.getElementById('trend-title').textContent =
+        '中国 → ' + country + ' 出口趋势图（' + years[0] + '–' + years[years.length - 1] + '）';
+      any = true;
+    } else {
+      document.getElementById('trend-title').textContent = '出口趋势图（暂无数据）';
+    }
+
+    // 证据链清单
+    const evidList = document.getElementById('evid-list');
+    evidList.innerHTML = '';
+    const items = [];
+    if (trade.trend) {
+      const years = Object.keys(trade.trend).map(Number).sort((a, b) => a - b);
+      const lastY = years[years.length - 1];
+      items.push({
+        src: 'UN COMTRADE',
+        text: '中国对' + country + '出口 HS' + (trade.hs_code || '') + '：' + lastY + ' 年 ' +
+          trade.trend[String(lastY)] + ' 亿美元',
+      });
+    }
+    if (mc.gdp_per_capita) {
+      items.push({ src: 'WORLD BANK', text: country + '人均 GDP ' + Math.round(mc.gdp_per_capita).toLocaleString() + ' 美元' });
+    } else if (comp.tc != null) {
+      items.push({ src: 'WORLD BANK', text: '竞争力指数 TC ' + comp.tc.toFixed(2) + '（出口 ' +
+        (comp.export_value / 1e8).toFixed(2) + ' 亿 vs 进口 ' + (comp.import_value / 1e8).toFixed(2) + ' 亿美元）' });
+    }
+    if (data.news && data.news.headlines && data.news.headlines.length) {
+      const first = data.news.headlines[0].title;
+      const more = data.news.headlines.length > 1 ? ' 等 ' + data.news.headlines.length + ' 条' : '';
+      items.push({ src: 'TAVILY', text: '行业动态：' + first + more });
+    }
+    if (bg.summary) {
+      items.push({ src: 'WTO', text: '宏观背景：' + bg.summary });
+    } else if (bg.global_trade_growth) {
+      items.push({ src: 'WTO', text: '宏观背景：全球贸易增长预测 ' + bg.global_trade_growth });
+    }
+    items.forEach(it => {
+      const li = document.createElement('li');
+      const src = document.createElement('span');
+      src.className = 'src';
+      src.textContent = it.src;
+      const txt = document.createElement('span');
+      txt.textContent = it.text;
+      const ok = document.createElement('span');
+      ok.className = 'ok';
+      ok.textContent = '✓';
+      li.appendChild(src); li.appendChild(txt); li.appendChild(ok);
+      evidList.appendChild(li);
+    });
+
+    // 有任一真实数据才显示仪表盘
+    const hasData = any || evidList.children.length > 0;
+    dashEl.hidden = !hasData;
+    if (hasData) {
+      // 先显示再 resize 图表（hidden 容器 init 尺寸为 0）
+      setTimeout(() => { if (dashChart) dashChart.resize(); }, 50);
+    }
   }
 })();
