@@ -1,10 +1,10 @@
 # TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（评论分析 / 竞品对比 / 平台 Listing 生成）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告，基于真实数据证据链）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（评论分析 / 竞品对比 / 平台 Listing 生成）。
 
-**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API
+**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API · World Bank API · Tavily API
 
-> ⚠️ **数据声明**：市场分析报告中的市场规模等数据由大模型估算；贸易数据来自 UN Comtrade 官方 API（真实数据）；评论分析基于用户提供的评论样本。
+> ⚠️ **数据声明**：市场分析基于**多重真实数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 只负责解读引用；评论分析基于用户提供的评论样本。
 
 ---
 
@@ -81,6 +81,8 @@
 ├── ebay.py          # eBay 商品分析（OAuth + Browse API）
 ├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
 ├── database.py      # SQLite 缓存层（trade_cache / query_log）
+├── market_data.py   # 多数据源：World Bank 经济 + Tavily 新闻 + WTO 宏观背景
+├── desktop.py       # 桌面版入口（PyWebView）
 ├── countries.py     # 完整国家清单（159 项 + 组织代码）
 ├── hs_descriptions.py # HS 编码品名描述
 ├── data/
@@ -94,6 +96,7 @@
 │   ├── ecommerce.html   # 跨境电商
 │   ├── bookmarklet.js   # 一键复制评论书签工具
 │   ├── theme.js         # 双主题切换（☀️/🌙）
+│   ├── settings.js      # 设置面板（API Key 配置）
 │   └── style.css        # 设计系统（亮色/暗色）
 ├── requirements.txt
 └── .env             # 密钥（已被 .gitignore 排除，不提交）
