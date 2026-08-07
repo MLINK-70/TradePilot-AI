@@ -165,7 +165,7 @@ def get_trade_background(force_refresh: bool = False) -> dict:
         return {}
 # ===== 竞争格局（龙头品牌/份额，30 天增量刷新）=====
 LANDSCAPE_TTL_DAYS = 30
-LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果，提炼【产品类别】的竞争格局（龙头品牌、市场份额、细分趋势）。
+LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果，提炼【产品类别】的竞争格局（龙头品牌、市场份额、细分趋势、格局变动原因）。
 
 输出 JSON：
 {
@@ -174,14 +174,17 @@ LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果�
     {"name": "品牌名", "share": "市场份额（如 46.5%）", "position": "地位描述（如：全球第一，单反主导）"}
   ],
   "segment_trends": ["细分趋势1（如：微单出货量是单反10倍）", "细分趋势2"],
-  "key_insight": "2-3 句竞争格局核心洞察（面向出口商：谁主导、机会在哪）",
+  "shift_reasons": ["格局变动原因1（上下游/技术/需求驱动，如：国产CMOS传感器突破降低准入门槛）", "原因2", "原因3"],
+  "chain_insight": "产业链洞察（上游核心组件谁主导、对格局的影响，1-2 句）",
+  "key_insight": "2-3 句竞争格局核心洞察（面向出口商：谁主导、为什么在变、机会在哪）",
   "zh_summary": "中文总结"
 }
 
 要求：
 - 基于搜索结果的具体数据（品牌名+份额+年份），不编造
 - 标注数据年份（如"2024年 BCN 数据"）
-- 面向"出口商了解市场格局"的视角"""
+- shift_reasons 要结合产业逻辑（上游传感器/芯片、技术路线转移、需求变化）
+- 面向"出口商了解市场格局与变动趋势"的视角"""
 
 
 def get_competitive_landscape(product: str, market: str, force_refresh: bool = False) -> dict:
@@ -203,24 +206,29 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
     if not TAVILY_API_KEY:
         return {}
     try:
-        resp = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": f"{product} {market} 品牌 市场份额 排名 竞争格局 龙头",
-                "max_results": 8,
-                "search_depth": "advanced",
-            },
-            timeout=20,
-            proxies={"http": None, "https": None},
-        )
-        resp.raise_for_status()
-        search_data = resp.json()
-        snippets = [r.get("content", "") for r in search_data.get("results", [])[:6]]
+        # 两轮检索：①品牌份额 ②产业逻辑（上下游/变动原因）
+        snippets = []
+        for query in [
+            f"{product} {market} 品牌 市场份额 排名 竞争格局 龙头",
+            f"{product} 行业 产业链 上下游 传感器 芯片 格局 变动 原因 分析",
+        ]:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": TAVILY_API_KEY,
+                    "query": query,
+                    "max_results": 5,
+                    "search_depth": "advanced",
+                },
+                timeout=20,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            snippets += [r.get("content", "") for r in resp.json().get("results", [])[:5]]
 
         content = _chat([
             {"role": "system", "content": LANDSCAPE_REFRESH_SYSTEM},
-            {"role": "user", "content": f"产品: {product}，市场: {market}\n搜索到的内容:\n" + "\n---\n".join(snippets)},
+            {"role": "user", "content": f"产品: {product}，市场: {market}\n搜索到的内容:\n" + "\n---\n".join(snippets[:10])},
         ], use_json=True)
         result = _parse_json(content)
         result["_updated"] = datetime.now().isoformat()

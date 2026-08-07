@@ -134,15 +134,21 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     user_prompt = build_user_prompt(product, country)
     evidence_lines = []
 
-    # 竞争格局（龙头品牌/份额）
+    # 竞争格局（龙头品牌/份额/变动原因）
     if landscape and landscape.get("top_brands"):
         brands_str = "、".join(
             f"{b.get('name', '')}（{b.get('share', '')}）" for b in landscape.get("top_brands", [])[:5]
         )
-        evidence_lines.append(
-            f"【竞争格局（{landscape.get('_source', '行业检索')}）】龙头品牌: {brands_str}；"
-            f"细分趋势: {'；'.join(landscape.get('segment_trends', [])[:3])}"
+        shift_str = "；".join(landscape.get("shift_reasons", [])[:3])
+        chain_str = landscape.get("chain_insight", "")
+        landscape_line = (
+            f"【竞争格局（{landscape.get('_source', '行业检索')}）】龙头品牌: {brands_str}"
         )
+        if shift_str:
+            landscape_line += f"；格局变动原因: {shift_str}"
+        if chain_str:
+            landscape_line += f"；产业链: {chain_str}"
+        evidence_lines.append(landscape_line)
 
     # 宏观背景（WTO 全球贸易展望）
     if background and background.get("summary"):
