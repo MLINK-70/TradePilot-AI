@@ -18,7 +18,8 @@ SYSTEM_PROMPT = """你是资深消费电子行业市场分析师。根据用户�
 
 4. 数量要求：top_brands 给 3-5 个真实品牌，risks 给 2-4 项，key_drivers / key_needs / buying_habits 各 2-3 条
 5. 严禁照抄模板中的占位文字（如"驱动因素1""痛点1""风险说明"），必须用针对该产品和该国家的具体内容替代
-6. 所有字段值用中文输出。"""
+6. 所有字段值用中文输出。
+7. 若提供了【市场环境数据】（GDP/人口/人均/互联网普及率），在 market_size 或 growth_trend 中自然引用（如"该国 GDP 5 万亿美元、人均 6 万美元，消费力强"），增强结论可信度；数据来自 World Bank 官方。"""
 
 
 def build_user_prompt(product: str, country: str) -> str:

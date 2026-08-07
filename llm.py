@@ -77,23 +77,47 @@ def _parse_json(content: str) -> dict:
     return data
 
 
-@lru_cache(maxsize=64)
-def analyze_market(product: str, country: str) -> dict:
+# 手动缓存（market_context 是 dict 不可哈希，lru_cache 无法直接用）
+_market_cache: dict = {}
+
+
+def analyze_market(product: str, country: str, market_context: dict | None = None) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
     失败时抛 ValueError，由 main.py 统一转成 502。
-    已加缓存：相同 (产品, 国家) 直接命中，不重复消耗 API token。
+    手动缓存：相同 (产品, 国家) 直接命中，不重复消耗 API token。
+    market_context: World Bank 市场环境数据（可选），注入提示词增强可信度。
     """
     if not DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
 
+    cache_key = (product, country)
+    if cache_key in _market_cache:
+        return _market_cache[cache_key]
+
+    user_prompt = build_user_prompt(product, country)
+    if market_context and market_context.get("available"):
+        env_lines = []
+        if market_context.get("gdp"):
+            env_lines.append(f"GDP: {market_context['gdp'] / 1e12:.2f} 万亿美元")
+        if market_context.get("population"):
+            env_lines.append(f"人口: {market_context['population'] / 1e8:.2f} 亿")
+        if market_context.get("gdp_per_capita"):
+            env_lines.append(f"人均 GDP: {market_context['gdp_per_capita']:,.0f} 美元")
+        if market_context.get("internet") is not None:
+            env_lines.append(f"互联网普及率: {market_context['internet']:.1f}%")
+        if env_lines:
+            user_prompt += "\n【市场环境数据（World Bank 官方）】\n" + "\n".join(env_lines)
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(product, country)},
+        {"role": "user", "content": user_prompt},
     ]
     content = _chat(messages, use_json=True)
-    return _parse_json(content)
+    result = _parse_json(content)
+    _market_cache[cache_key] = result  # 缓存结果（首次含市场环境，后续同参数复用）
+    return result
 
 
 TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供的**已核实统计指标**（程序精确计算，来自 UN Comtrade 数据），输出一份简明的市场解读。

@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
+from market_data import get_market_context
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
@@ -57,7 +58,9 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
     try:
-        data = analyze_market(product, country)
+        # 注入 World Bank 市场环境数据（失败不阻断）
+        market_ctx = get_market_context(country)
+        data = analyze_market(product, country, market_ctx)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -74,7 +77,9 @@ def export_market_report(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
     try:
-        data = analyze_market(product, country)
+        # 注入 World Bank 市场环境数据（失败不阻断）
+        market_ctx = get_market_context(country)
+        data = analyze_market(product, country, market_ctx)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
