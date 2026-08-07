@@ -42,9 +42,17 @@ def request_product_detail(app_key: str, app_secret: str, product_id: str, curre
         "currency": currency,
     }
     params["sign"] = _sign(app_secret, ALIEXPRESS_API_PATH, params)
-    resp = requests.post(ALIEXPRESS_API_BASE, data=params, timeout=30)
+    resp = requests.post(ALIEXPRESS_API_BASE, data=params, timeout=30,
+                         proxies={"http": None, "https": None})  # 强制直连，防梯子 TUN 劫持
     resp.raise_for_status()
     return resp.json()
+
+
+def _str_field(v) -> str:
+    """响应字段兜底：dict 结构（如 {"url": ...}）取 url，其余转字符串"""
+    if isinstance(v, dict):
+        return str(v.get("url") or "")
+    return str(v or "")
 
 
 def parse_aliexpress_url(url: str) -> str | None:
@@ -59,9 +67,11 @@ def parse_aliexpress_url(url: str) -> str | None:
     """
     m = re.search(r"/(?:item|i)/([^?#]+)", url)
     if m:
-        # 路径段中找第一个 10-20 位数字（商品 ID；标题里的年份/数字远短于此）
-        mid = re.search(r"\d{10,20}", m.group(1))
-        return mid.group(0) if mid else None
+        # 商品 ID 固定 16 位、100500 开头；优先精确匹配，回退到"路径段里第一个 16 位数字"
+        mid = re.search(r"(?<!\d)(100500\d{10})(?!\d)", m.group(1))
+        if not mid:
+            mid = re.search(r"(?<!\d)(\d{16})(?!\d)", m.group(1))
+        return mid.group(1) if mid else None
     return None
 
 
@@ -89,16 +99,16 @@ def get_product_info(app_key: str, app_secret: str, product_id: str, currency: s
     p = products[0] if isinstance(products, list) else products
 
     info = {
-        "title": p.get("product_title") or p.get("subject") or p.get("title", ""),
-        "price": p.get("sale_price") or p.get("price") or "",
-        "currency": p.get("currency") or currency,
-        "rating": p.get("evaluation_rate") or p.get("rating", ""),
-        "trade_count": p.get("trade_count") or p.get("sales", ""),
-        "seller": p.get("seller") or p.get("seller_name") or "",
-        "seller_rating": p.get("seller_positive_rate") or "",
-        "item_url": p.get("detail_url") or p.get("product_detail_url") or "",
-        "image_url": p.get("image") or (p.get("images", []) or [""])[0],
-        "orders": p.get("order_count") or "",
+        "title": _str_field(p.get("product_title") or p.get("subject") or p.get("title")),
+        "price": _str_field(p.get("sale_price") or p.get("price")),
+        "currency": _str_field(p.get("currency") or currency),
+        "rating": _str_field(p.get("evaluation_rate") or p.get("rating")),
+        "trade_count": _str_field(p.get("trade_count") or p.get("sales")),
+        "seller": _str_field(p.get("seller") or p.get("seller_name")),
+        "seller_rating": _str_field(p.get("seller_positive_rate")),
+        "item_url": _str_field(p.get("detail_url") or p.get("product_detail_url")),
+        "orders": _str_field(p.get("order_count")),
+        "image_url": _str_field(p.get("image") or (p.get("images") or [""])[0]),
     }
     return info
 
