@@ -133,18 +133,21 @@ TRADE_TREND_SYSTEM = """你是资深国际贸易数据分析师。根据提供�
 }
 3. 必须直接引用给定的指标数值，禁止自行计算或编造任何数字
 4. **建议必须具体可执行**：结合数据给出明确方向（如"针对 2022 年出口额下降 16.8%，建议优化 X 产品线或开拓 Y 市场"），禁止"提升产品附加值""加强市场开拓"这类空话
-5. 所有内容中文输出"""
+5. 若提供了【市场环境数据】（GDP/人口/人均），在 overview 或 highlights 中引用 1 句（如"该国人均 GDP 6 万美元，消费力支撑中高端产品"），增强结论可信度
+6. 所有内容中文输出"""
 
 
 # 手动缓存（trend/stats 是 dict 不可哈希，lru_cache 无法直接用）
 _trade_trend_cache: dict = {}
 
 
-def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None) -> dict:
+def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None,
+                        market_context: dict | None = None) -> dict:
     """AI 解读贸易趋势：trend 为逐年数据，stats 为程序算好的统计指标
 
     AI 只负责解读（引用已核实指标），不负责算数——杜绝 AI 算术错误/幻觉。
     手动缓存：相同查询（产品/目标/出口国/数据区间）不重复消耗 token。
+    market_context: World Bank 市场环境（可选），双证据链支撑结论。
     """
     cache_key = (product, target, reporter, tuple(trend.keys()))
     if cache_key in _trade_trend_cache:
@@ -172,9 +175,23 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
             lines.append("- 单价趋势: " + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in prices))
         if lines:
             stats_lines = "\n已核实统计指标（程序精确计算）:\n" + "\n".join(lines)
+    # 市场环境（World Bank）注入：双证据链
+    market_lines = ""
+    if market_context and market_context.get("available"):
+        env = []
+        if market_context.get("gdp"):
+            env.append(f"GDP {market_context['gdp'] / 1e12:.2f} 万亿美元")
+        if market_context.get("population"):
+            env.append(f"人口 {market_context['population'] / 1e8:.2f} 亿")
+        if market_context.get("gdp_per_capita"):
+            env.append(f"人均 GDP {market_context['gdp_per_capita']:,.0f} 美元")
+        if env:
+            market_lines = "\n市场环境（World Bank 官方）: " + "，".join(env)
+
     user_msg = (
         f"产品: {product}\n出口国: {reporter}\n目标市场: {target}\n"
-        f"逐年出口数据:\n{data_lines}{stats_lines}\n请输出市场解读（引用指标数值，不自行计算）。"
+        f"逐年出口数据:\n{data_lines}{stats_lines}{market_lines}\n"
+        f"请输出市场解读（引用指标数值和市场环境数据支撑结论，不自行计算）。"
     )
     content = _chat([
         {"role": "system", "content": TRADE_TREND_SYSTEM},

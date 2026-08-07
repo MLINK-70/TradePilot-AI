@@ -236,7 +236,9 @@ def trade_query(req: TradeQueryRequest):
         # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
         if len(trend) >= 2:
             stats = summarize_stats(trend)  # 程序先算好已核实指标
-            analysis = analyze_trade_trend(product, target, req.reporter, trend, stats)
+            # 注入 World Bank 市场环境（双证据链：贸易 + 经济）
+            market_ctx = get_market_context(target)
+            analysis = analyze_trade_trend(product, target, req.reporter, trend, stats, market_ctx)
             # Citation：解读数据区间（数字可溯源）
             if stats:
                 analysis["_data_range"] = f"{stats['first_year']}-{stats['last_year']}"
