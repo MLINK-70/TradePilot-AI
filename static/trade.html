@@ -109,6 +109,7 @@
           <p id="analysis-suggestion"></p>
         </div>
         <p class="meta" id="analysis-source"></p>
+        <p class="meta" id="analysis-market" hidden></p>
       </div>
 
       <div class="download-row">
@@ -240,6 +241,20 @@
           // Citation：数据来源标注
           const src = document.getElementById('analysis-source');
           src.textContent = '数据区间 ' + (a._data_range || '') + ' · UN Comtrade 公共 API';
+          // 市场环境（World Bank）来源
+          const mc = data.market_context || {};
+          const mk = document.getElementById('analysis-market');
+          if (mc.available && (mc.gdp || mc.gdp_per_capita)) {
+            const parts = [];
+            if (mc.gdp) parts.push('GDP ' + (mc.gdp / 1e12).toFixed(2) + ' 万亿美元');
+            if (mc.gdp_per_capita) parts.push('人均 GDP ' + Math.round(mc.gdp_per_capita).toLocaleString() + ' 美元');
+            if (mc.population) parts.push('人口 ' + (mc.population / 1e8).toFixed(2) + ' 亿');
+            if (mc.internet != null) parts.push('互联网普及率 ' + mc.internet.toFixed(1) + '%');
+            mk.textContent = '市场环境（World Bank）: ' + parts.join(' · ');
+            mk.hidden = false;
+          } else {
+            mk.hidden = true;
+          }
           ab.hidden = false;
         } else {
           ab.hidden = true;

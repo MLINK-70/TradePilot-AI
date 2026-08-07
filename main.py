@@ -232,6 +232,7 @@ def trade_query(req: TradeQueryRequest):
 
     # AI 解读真实贸易数据（失败不阻断查询，前端显示"解读生成失败"）
     analysis = {}
+    market_ctx = {}
     try:
         # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
         if len(trend) >= 2:
@@ -253,6 +254,7 @@ def trade_query(req: TradeQueryRequest):
         "record_count": len(rows),
         "trend": [{"year": y, "value": v["value"], "weight": v["weight"]} for y, v in trend.items()],
         "analysis": analysis,  # AI 市场解读
+        "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
         "rows": [
             {
                 "year": r.get("refYear"),
