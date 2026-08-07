@@ -21,7 +21,13 @@
       <label style="font-size:.85rem;color:var(--muted);">eBay 凭证（商品分析）</label>
       <input type="password" id="set-ebay-id" placeholder="App ID" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
       <input type="password" id="set-ebay-secret" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 需 eBay 开发者审核</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 需 eBay 开发者审核 · 需梯子</div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:.85rem;color:var(--muted);">速卖通联盟凭证（商品分析）</label>
+      <input type="password" id="set-aliexpress-key" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+      <input type="password" id="set-aliexpress-secret" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 速卖通联盟开放平台 · 国内直连</div>
     </div>
     <div style="display:flex;gap:8px;">
       <button id="set-save" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">保存</button>
@@ -53,10 +59,13 @@
       document.getElementById('set-tavily').value = '';
       document.getElementById('set-ebay-id').value = '';
       document.getElementById('set-ebay-secret').value = '';
+      document.getElementById('set-aliexpress-key').value = '';
+      document.getElementById('set-aliexpress-secret').value = '';
       // 显示已配置状态（placeholder 提示）
       if (s.DEEPSEEK_API_KEY) document.getElementById('set-deepseek').placeholder = '已配置（留空保持不变）';
       if (s.TAVILY_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
       if (s.EBAY_APP_ID) document.getElementById('set-ebay-id').placeholder = '已配置（留空保持不变）';
+      if (s.ALIEXPRESS_APP_KEY) document.getElementById('set-aliexpress-key').placeholder = '已配置（留空保持不变）';
       // 提示：未配置 Tavily 时哪些功能不可用
       if (!s.TAVILY_API_KEY) {
         status.style.color = 'var(--gold)';
@@ -84,8 +93,10 @@
       tavily_key: document.getElementById('set-tavily').value.trim(),
       ebay_app_id: document.getElementById('set-ebay-id').value.trim(),
       ebay_client_secret: document.getElementById('set-ebay-secret').value.trim(),
+      aliexpress_app_key: document.getElementById('set-aliexpress-key').value.trim(),
+      aliexpress_app_secret: document.getElementById('set-aliexpress-secret').value.trim(),
     };
-    if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret) {
+    if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret) {
       status.textContent = '没有要保存的内容';
       return;
     }

@@ -32,6 +32,7 @@ from business import (generate_followup_email, generate_outreach_email,
                       simulate_customer)
 from ecommerce import analyze_reviews, compare_products, generate_listing
 from ebay import analyze_item, get_oauth_token, parse_ebay_url
+from aliexpress import analyze_product, parse_aliexpress_url
 import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
                    get_competitor_comparison, get_destination_ranking,
@@ -563,6 +564,30 @@ def ebay_analyze(req: EbayAnalyzeRequest):
     return data
 
 
+class AliexpressAnalyzeRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/aliexpress/analyze")
+def aliexpress_analyze(req: AliexpressAnalyzeRequest):
+    """速卖通商品链接 → 商品信息 + AI 分析"""
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请提供速卖通商品链接")
+    item_id = parse_aliexpress_url(url)
+    if not item_id:
+        raise HTTPException(status_code=400, detail="无法从链接提取速卖通商品 ID")
+    if not cfg.RUNTIME_KEYS.get("ALIEXPRESS_APP_KEY") or not cfg.RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET"):
+        raise HTTPException(status_code=503, detail="速卖通密钥未配置（需 App Key + App Secret，见设置面板）")
+    try:
+        data = analyze_product(cfg.RUNTIME_KEYS.get("ALIEXPRESS_APP_KEY", ""),
+                               cfg.RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET", ""), item_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"速卖通查询失败: {e}")
+    logging.info("速卖通分析: %s", item_id)
+    return data
+
+
 class EcommerceCompareRequest(BaseModel):
     product_a: str
     reviews_a: list = []
@@ -594,6 +619,8 @@ class SettingsRequest(BaseModel):
     tavily_key: str = ""
     ebay_app_id: str = ""
     ebay_client_secret: str = ""
+    aliexpress_app_key: str = ""
+    aliexpress_app_secret: str = ""
 
 
 @app.get("/api/settings")
@@ -613,6 +640,10 @@ def save_settings(req: SettingsRequest):
         cfg.set_key("EBAY_APP_ID", req.ebay_app_id)
     if req.ebay_client_secret:
         cfg.set_key("EBAY_CLIENT_SECRET", req.ebay_client_secret)
+    if req.aliexpress_app_key:
+        cfg.set_key("ALIEXPRESS_APP_KEY", req.aliexpress_app_key)
+    if req.aliexpress_app_secret:
+        cfg.set_key("ALIEXPRESS_APP_SECRET", req.aliexpress_app_secret)
     logging.info("设置已保存")
     return cfg.get_keys_status()
 

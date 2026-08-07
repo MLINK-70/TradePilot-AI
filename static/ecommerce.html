@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境电商</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
   <style>
     #reviews-input {
       flex: 1;
@@ -69,6 +69,18 @@
       </form>
       <p id="ebay-status" class="status"></p>
       <div id="ebay-result" class="listing-box" hidden></div>
+    </section>
+
+    <section class="card">
+      <form id="aliexpress-form" autocomplete="off">
+        <div class="form-row">
+          <label for="aliexpress-url">速卖通链接</label>
+          <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        </div>
+        <button type="submit" id="aliexpress-submit" class="btn-primary">分析速卖通商品</button>
+      </form>
+      <p id="aliexpress-status" class="status"></p>
+      <div id="aliexpress-result" class="listing-box" hidden></div>
     </section>
 
     <section class="card">
@@ -156,7 +168,7 @@
 
   <script src="echarts.min.js"></script>
   <script src="theme.js"></script>
-  <script src="settings.js"></script>
+  <script src="settings.js?v=8"></script>
   <script>
     (function () {
       'use strict';
@@ -450,6 +462,66 @@
         } finally {
           eb.disabled = false;
           eb.textContent = '分析 eBay 商品';
+        }
+      });
+
+      // 速卖通商品分析
+      document.getElementById('aliexpress-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const url = document.getElementById('aliexpress-url').value.trim();
+        if (!url) { showStatus('请粘贴速卖通商品链接', 'error'); return; }
+        const al = document.getElementById('aliexpress-submit');
+        al.disabled = true;
+        al.textContent = '分析中…';
+        const as = document.getElementById('aliexpress-status');
+        as.textContent = '正在查询速卖通商品…';
+        as.className = 'status info';
+        try {
+          const resp = await fetch('/api/aliexpress/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            as.textContent = data.detail || '查询失败';
+            as.className = 'status error';
+            return;
+          }
+          const box = document.getElementById('aliexpress-result');
+          box.innerHTML = '';
+          const item = data.item || {};
+          const add = (label, text) => {
+            const p = document.createElement('p');
+            const strong = document.createElement('strong');
+            strong.textContent = label + ': ';
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(text || ''));
+            box.appendChild(p);
+          };
+          add('商品', item.title);
+          add('价格', (item.price || '') + ' ' + (item.currency || ''));
+          if (item.rating) add('评分', item.rating);
+          if (item.trade_count) add('销量', item.trade_count);
+          add('卖家', item.seller + (item.seller_rating ? '（好评率 ' + item.seller_rating + '）' : ''));
+          const an = data.analysis || {};
+          add('评估', an.assessment);
+          add('价格定位', an.price_position);
+          add('卖家可信度', an.seller_trust);
+          add('建议', an.suggestion);
+          const zh = document.createElement('p');
+          zh.className = 'meta';
+          zh.textContent = '总结: ' + (an.zh_summary || '');
+          box.appendChild(zh);
+          box.hidden = false;
+          as.textContent = '';
+        } catch (_) {
+          as.textContent = '网络错误，查询失败';
+          as.className = 'status error';
+        } finally {
+          al.disabled = false;
+          al.textContent = '分析速卖通商品';
         }
       });
 

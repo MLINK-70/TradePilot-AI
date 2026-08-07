@@ -17,6 +17,12 @@ DEEPSEEK_MODEL = "deepseek-chat"
 EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
 EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
 
+# 速卖通联盟开放平台凭证（可选，未配置时速卖通功能提示配置）
+# 获取：https://pub.aliexpress.com 注册联盟账号 → 开放平台创建应用 → App Key + App Secret
+# 与 eBay 不同：国内直连可用，无需梯子
+ALIEXPRESS_APP_KEY = os.getenv("ALIEXPRESS_APP_KEY", "")
+ALIEXPRESS_APP_SECRET = os.getenv("ALIEXPRESS_APP_SECRET", "")
+
 # Tavily 搜索 API（行业动态数据源）
 # 获取：https://app.tavily.com 注册后拿 API Key
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -27,6 +33,8 @@ RUNTIME_KEYS = {
     "TAVILY_API_KEY": TAVILY_API_KEY,
     "EBAY_APP_ID": EBAY_APP_ID,
     "EBAY_CLIENT_SECRET": EBAY_CLIENT_SECRET,
+    "ALIEXPRESS_APP_KEY": ALIEXPRESS_APP_KEY,
+    "ALIEXPRESS_APP_SECRET": ALIEXPRESS_APP_SECRET,
 }
 
 
@@ -67,4 +75,6 @@ def get_keys_status() -> dict:
         "TAVILY_API_KEY": bool(RUNTIME_KEYS.get("TAVILY_API_KEY")),
         "EBAY_APP_ID": bool(RUNTIME_KEYS.get("EBAY_APP_ID")),
         "EBAY_CLIENT_SECRET": bool(RUNTIME_KEYS.get("EBAY_CLIENT_SECRET")),
+        "ALIEXPRESS_APP_KEY": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_KEY")),
+        "ALIEXPRESS_APP_SECRET": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET")),
     }
