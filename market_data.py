@@ -6,6 +6,8 @@ World Bank API（无 Key 免费）：市场环境数据（GDP/人口/人均/互�
 OEC / NewsAPI 预留（注册 Key 后启用，见 config）。
 """
 import logging
+import time
+from datetime import datetime, timedelta
 
 import requests
 
@@ -88,7 +90,79 @@ def get_market_context(country: str) -> dict:
     return result
 
 
-# ===== Tavily 行业动态（注册 Key 后启用）=====
+# ===== 宏观背景（WTO 贸易展望，30 天增量刷新）=====
+BACKGROUND_TTL_DAYS = 30  # 缓存有效期：30 天
+BACKGROUND_KEY = "TRADE_BACKGROUND"
+BACKGROUND_REFRESH_SYSTEM = """你是全球经济分析师。根据搜索结果，提炼全球贸易宏观背景（当前最新信息）。
+
+输出 JSON：
+{
+  "global_trade_growth": "全球贸易增长率预测（如：2026年1.9%）",
+  "key_drivers": ["推动因素1（如AI投资）", "推动因素2"],
+  "key_risks": ["风险1（如地缘冲突）", "风险2"],
+  "trends": ["趋势1（如区域化/近岸外包）", "趋势2"],
+  "summary": "2-3 句话宏观背景总结（面向出口商）"
+}
+
+要求：基于搜索结果，标注时间（如"2026年3月 WTO 报告"），不编造。"""
+
+
+def get_trade_background(force_refresh: bool = False) -> dict:
+    """宏观背景：30 天增量刷新（有更新才抓取）
+
+    - 缓存未过期 → 直接返回（不重复搜索，省 Tavily 额度）
+    - 缓存过期或缺失 → Tavily 搜索最新 WTO 贸易展望 → 更新缓存
+    """
+    from llm import _chat, _parse_json
+    init_db()
+
+    # 检查缓存（含抓取时间）
+    cached = get_cached(BACKGROUND_KEY, "0", "0", "X", "META")
+    if cached and not force_refresh:
+        try:
+            fetched = datetime.fromisoformat(cached[0].get("fetched_at", ""))
+            if datetime.now() - fetched < timedelta(days=BACKGROUND_TTL_DAYS):
+                return cached[0].get("data", {})
+        except (ValueError, KeyError, IndexError):
+            pass
+
+    # 缓存过期/缺失 → 重新抓取
+    from config import TAVILY_API_KEY
+    if not TAVILY_API_KEY:
+        return {}
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": TAVILY_API_KEY,
+                "query": "WTO global trade outlook latest forecast merchandise trade growth",
+                "max_results": 8,
+                "search_depth": "advanced",
+            },
+            timeout=20,
+            proxies={"http": None, "https": None},
+        )
+        resp.raise_for_status()
+        search_data = resp.json()
+        snippets = [r.get("content", "") for r in search_data.get("results", [])[:6]]
+
+        content = _chat([
+            {"role": "system", "content": BACKGROUND_REFRESH_SYSTEM},
+            {"role": "user", "content": "搜索到的内容:\n" + "\n---\n".join(snippets)},
+        ], use_json=True)
+        result = _parse_json(content)
+        result["_updated"] = datetime.now().isoformat()
+        result["_source"] = "WTO Global Trade Outlook（Tavily 检索）"
+
+        save_cache(BACKGROUND_KEY, "0", "0", "X",
+                   [{"fetched_at": datetime.now().isoformat(), "data": result}], "META")
+        return result
+    except Exception as e:
+        logging.warning("宏观背景刷新失败: %s", e)
+        # 有旧缓存则降级返回
+        if cached:
+            return cached[0].get("data", {})
+        return {}
 def get_news(product: str, market: str) -> dict:
     """Tavily 搜索：产品+市场 相关新闻（行业动态证据链）
 

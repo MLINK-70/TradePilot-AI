@@ -83,7 +83,8 @@ _market_cache: dict = {}
 
 def analyze_market(product: str, country: str, market_context: dict | None = None,
                    trade_evidence: dict | None = None,
-                   competitiveness: dict | None = None) -> dict:
+                   competitiveness: dict | None = None,
+                   background: dict | None = None) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
@@ -92,6 +93,7 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     market_context: World Bank 市场环境数据（可选）
     trade_evidence: 真实贸易数据（UN Comtrade，可选）
     competitiveness: 竞争力指标 TC（可选）
+    background: 全球宏观背景（WTO 展望，可选）
     """
     if not DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
@@ -102,6 +104,16 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
 
     user_prompt = build_user_prompt(product, country)
     evidence_lines = []
+
+    # 宏观背景（WTO 全球贸易展望）
+    if background and background.get("summary"):
+        evidence_lines.append(
+            f"【全球宏观背景（{background.get('_source', 'WTO')}）】"
+            f"全球贸易增长预测 {background.get('global_trade_growth', '')}；"
+            f"驱动因素：{'、'.join(background.get('key_drivers', [])[:2])}；"
+            f"风险：{'、'.join(background.get('key_risks', [])[:2])}；"
+            f"趋势：{'、'.join(background.get('trends', [])[:2])}"
+        )
 
     # 贸易数据（UN Comtrade 真实出口额）
     if trade_evidence and trade_evidence.get("trend"):

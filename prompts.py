@@ -19,8 +19,9 @@ SYSTEM_PROMPT = """你是资深消费电子行业市场分析师。根据用户�
 4. 数量要求：top_brands 给 3-5 个真实品牌，risks 给 2-4 项，key_drivers / key_needs / buying_habits 各 2-3 条
 5. 严禁照抄模板中的占位文字（如"驱动因素1""痛点1""风险说明"），必须用针对该产品和该国家的具体内容替代
 6. 所有字段值用中文输出。
-7. 若提供了【真实数据】（UN Comtrade 贸易数据 / World Bank 经济环境 / 竞争力指标），**必须基于这些数据生成**：market_size 引用贸易总额和 GDP，growth_trend 引用逐年趋势，risks 结合 TC 竞争力指数——严禁忽略真实数据凭空估算；数据不足时才用常识补充并标注"估算"。
-8. 若提供了【市场环境数据】（GDP/人口/人均/互联网普及率），在 market_size 或 growth_trend 中自然引用（如"该国 GDP 5 万亿美元、人均 6 万美元，消费力强"），增强结论可信度；数据来自 World Bank 官方。"""
+7. 若提供了【真实数据】（UN Comtrade 贸易数据 / World Bank 经济环境 / 竞争力指标 / 全球宏观背景），**必须基于这些数据生成**：market_size 引用贸易总额和 GDP，growth_trend 引用逐年趋势，risks 结合 TC 竞争力指数和宏观风险，严禁忽略真实数据凭空估算；数据不足时才用常识补充并标注"估算"。
+8. 若提供了【全球宏观背景】（WTO 贸易展望），在 risks 或 growth_trend 中引用（如"全球贸易放缓背景下，出口增速承压"），让结论有宏观依据。
+9. 若提供了【市场环境数据】（GDP/人口/人均/互联网普及率），在 market_size 或 growth_trend 中自然引用（如"该国 GDP 5 万亿美元、人均 6 万美元，消费力强"），增强结论可信度；数据来自 World Bank 官方。"""
 
 
 def build_user_prompt(product: str, country: str) -> str:

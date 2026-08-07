@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from market_data import get_market_context, get_news
+from market_data import get_market_context, get_news, get_trade_background
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
@@ -79,7 +79,11 @@ def analyze(req: AnalyzeRequest):
         except Exception:
             pass
 
-        data = analyze_market(product, country, market_ctx, trade_evidence, competitiveness)
+        # 宏观背景（WTO 贸易展望，30 天增量刷新）
+        background = get_trade_background()
+
+        data = analyze_market(product, country, market_ctx, trade_evidence,
+                              competitiveness, background)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
