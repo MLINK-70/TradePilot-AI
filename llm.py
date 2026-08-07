@@ -6,17 +6,18 @@ from functools import lru_cache
 
 import requests
 
-from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+import config as cfg  # 模块引用：set_key 后运行时读新值
 from prompts import SYSTEM_PROMPT, build_user_prompt
 
 
 def _chat(messages: list, use_json: bool = True) -> str:
     """通用 DeepSeek 请求：直连 + 重试 + 超时兜底，返回文本内容"""
-    if not DEEPSEEK_API_KEY:
+    api_key = cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
 
     payload = {
-        "model": DEEPSEEK_MODEL,
+        "model": cfg.DEEPSEEK_MODEL,
         "messages": messages,
         "temperature": 0.7,
     }
@@ -26,9 +27,9 @@ def _chat(messages: list, use_json: bool = True) -> str:
     for attempt in range(2):
         try:
             resp = requests.post(
-                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                f"{cfg.DEEPSEEK_BASE_URL}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                     "Connection": "close",
                 },
@@ -95,7 +96,7 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     competitiveness: 竞争力指标 TC（可选）
     background: 全球宏观背景（WTO 展望，可选）
     """
-    if not DEEPSEEK_API_KEY:
+    if not cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY"):
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
 
     cache_key = (product, country)

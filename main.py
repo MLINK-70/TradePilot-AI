@@ -6,7 +6,17 @@ llm.py / prompts.py 是所有模块共用的底座。
 """
 import logging
 import json
+import os
+import sys
 from urllib.parse import quote
+
+# 资源路径：打包(exe)用 _MEIPASS，开发用项目目录
+BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+
+
+def res_path(name: str) -> str:
+    """资源文件绝对路径（static/templates/data 下的文件）"""
+    return os.path.join(BASE_DIR, name)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +31,7 @@ from business import (generate_followup_email, generate_outreach_email,
                       simulate_customer)
 from ecommerce import analyze_reviews, compare_products, generate_listing
 from ebay import analyze_item, get_oauth_token, parse_ebay_url
-from config import EBAY_APP_ID, EBAY_CLIENT_SECRET
+import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
                    get_latest_year, query_trade, query_trend,
                    summarize_stats, summarize_trend)
@@ -462,7 +472,7 @@ def ecommerce_analyze(req: EcommerceAnalyzeRequest):
     product_hint = ""
     if req.use_sample or not reviews:
         try:
-            with open("data/sample_reviews.json", encoding="utf-8") as f:
+            with open(res_path("data/sample_reviews.json"), encoding="utf-8") as f:
                 sample = json.load(f)
             reviews = sample.get("reviews", [])
             product_hint = sample.get("product", "")
@@ -502,7 +512,7 @@ def ecommerce_listing(req: EcommerceListingRequest):
 def ecommerce_sample():
     """返回内置演示数据"""
     try:
-        with open("data/sample_reviews.json", encoding="utf-8") as f:
+        with open(res_path("data/sample_reviews.json"), encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         raise HTTPException(status_code=500, detail="演示数据加载失败")
@@ -521,10 +531,11 @@ def ebay_analyze(req: EbayAnalyzeRequest):
     item_id = parse_ebay_url(url)
     if not item_id:
         raise HTTPException(status_code=400, detail="无法从链接提取 eBay 商品 ID")
-    if not EBAY_APP_ID or not EBAY_CLIENT_SECRET:
-        raise HTTPException(status_code=503, detail="eBay 密钥未配置（需 App ID + Client Secret，见 config.py 说明）")
+    if not cfg.RUNTIME_KEYS.get("EBAY_APP_ID") or not cfg.RUNTIME_KEYS.get("EBAY_CLIENT_SECRET"):
+        raise HTTPException(status_code=503, detail="eBay 密钥未配置（需 App ID + Client Secret，见设置面板）")
     try:
-        token = get_oauth_token(EBAY_APP_ID, EBAY_CLIENT_SECRET)
+        token = get_oauth_token(cfg.RUNTIME_KEYS.get("EBAY_APP_ID", ""),
+                                cfg.RUNTIME_KEYS.get("EBAY_CLIENT_SECRET", ""))
         data = analyze_item(item_id, token)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"eBay 查询失败: {e}")
@@ -558,9 +569,37 @@ def ecommerce_compare(req: EcommerceCompareRequest):
     return result
 
 
+class SettingsRequest(BaseModel):
+    deepseek_key: str = ""
+    tavily_key: str = ""
+    ebay_app_id: str = ""
+    ebay_client_secret: str = ""
+
+
+@app.get("/api/settings")
+def get_settings():
+    """返回各 Key 配置状态（不返回值，安全）"""
+    return cfg.get_keys_status()
+
+
+@app.post("/api/settings")
+def save_settings(req: SettingsRequest):
+    """保存设置：写入 config + .env，运行时立即生效"""
+    if req.deepseek_key:
+        cfg.set_key("DEEPSEEK_API_KEY", req.deepseek_key)
+    if req.tavily_key:
+        cfg.set_key("TAVILY_API_KEY", req.tavily_key)
+    if req.ebay_app_id:
+        cfg.set_key("EBAY_APP_ID", req.ebay_app_id)
+    if req.ebay_client_secret:
+        cfg.set_key("EBAY_CLIENT_SECRET", req.ebay_client_secret)
+    logging.info("设置已保存")
+    return cfg.get_keys_status()
+
+
 # 挂载前端静态目录，前后端同源（必须放在所有 API 路由之后，
 # 否则 "/" 挂载会拦截 /api 下的请求）
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory=res_path("static"), html=True), name="static")
 
 
 def _safe(value, default=""):
