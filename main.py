@@ -57,6 +57,27 @@ class AnalyzeRequest(BaseModel):
     country: str
 
 
+def _collect_evidence(product: str, country: str) -> tuple:
+    """聚合真实数据证据链（经济/贸易/竞争力/宏观背景），失败不阻断"""
+    market_ctx = get_market_context(country)
+    trade_evidence = {}
+    competitiveness = {}
+    try:
+        hs, rows, trend = query_trend(product, country, list(range(get_latest_year() - 2, get_latest_year() + 1)))
+        if trend:
+            trade_evidence = {
+                "hs_code": hs,
+                "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+            }
+        if len(rows):
+            competitiveness = get_competitiveness(product, country, str(get_latest_year()))
+    except Exception:
+        pass
+    background = get_trade_background()
+    return market_ctx, trade_evidence, competitiveness, background
+
+
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest):
     """输入产品 + 目标国家 → 返回 Markdown 格式市场分析报告
@@ -70,28 +91,8 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
     try:
-        # 聚合真实数据证据链：经济环境 + 贸易数据 + 竞争力（失败不阻断）
-        market_ctx = get_market_context(country)
-        trade_evidence = {}
-        competitiveness = {}
-        try:
-            # 贸易数据：产品 HS 编码 → 目标市场真实出口数据（近3年）
-            hs, rows, trend = query_trend(product, country, list(range(get_latest_year() - 2, get_latest_year() + 1)))
-            if trend:
-                trade_evidence = {
-                    "hs_code": hs,
-                    "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
-                    "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
-                }
-            # 竞争力：最新年份 TC
-            if len(rows):
-                competitiveness = get_competitiveness(product, country, str(get_latest_year()))
-        except Exception:
-            pass
-
-        # 宏观背景（WTO 贸易展望，30 天增量刷新）
-        background = get_trade_background()
-
+        # 聚合真实数据证据链（经济 + 贸易 + 竞争力 + 宏观背景）
+        market_ctx, trade_evidence, competitiveness, background = _collect_evidence(product, country)
         data = analyze_market(product, country, market_ctx, trade_evidence,
                               competitiveness, background)
     except ValueError as e:
@@ -121,13 +122,15 @@ def export_market_report(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
     try:
-        # 注入 World Bank 市场环境数据（失败不阻断）
-        market_ctx = get_market_context(country)
-        data = analyze_market(product, country, market_ctx)
+        # 完整证据链（与页面分析一致）
+        market_ctx, trade_evidence, competitiveness, background = _collect_evidence(product, country)
+        data = analyze_market(product, country, market_ctx, trade_evidence,
+                              competitiveness, background)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    buf = build_market_report(product, country, data)
+    buf = build_market_report(product, country, data, trade_evidence,
+                              competitiveness, background)
     filename = f"TradePilot-{product}-{country}-市场分析报告.docx"
     return StreamingResponse(
         buf,

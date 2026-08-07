@@ -165,8 +165,11 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     return buf
 
 
-def build_market_report(product: str, country: str, ai: dict) -> io.BytesIO:
-    """生成市场分析 Word 报告（AI 结构化数据 → 文档）"""
+def build_market_report(product: str, country: str, ai: dict,
+                        trade_evidence: dict | None = None,
+                        competitiveness: dict | None = None,
+                        background: dict | None = None) -> io.BytesIO:
+    """生成市场分析 Word 报告（AI 结构化数据 + 真实数据证据链 → 文档）"""
     doc = Document()
     style = doc.styles["Normal"]
     style.font.name = "微软雅黑"
@@ -175,7 +178,27 @@ def build_market_report(product: str, country: str, ai: dict) -> io.BytesIO:
     h = doc.add_heading(f"{product}市场分析（{country}）", level=0)
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
     meta = doc.add_paragraph()
-    meta.add_run("声明: 本报告由 AI 大模型生成，数据为估算值，仅供参考，非官方统计")
+    meta.add_run("声明: 本报告由 AI 大模型基于真实数据生成，市场估算部分仅供参考")
+
+    # 数据依据（真实数据证据链）
+    has_evidence = (trade_evidence and trade_evidence.get("trend")) or (
+        competitiveness and competitiveness.get("tc") is not None) or (
+        background and background.get("summary"))
+    if has_evidence:
+        doc.add_heading("数据依据", level=1)
+        if trade_evidence and trade_evidence.get("trend"):
+            trend = trade_evidence["trend"]
+            years = sorted(trend.keys())
+            trend_str = "、".join(f"{y}年 {trend[y]} 亿美元" for y in years)
+            doc.add_paragraph(f"贸易数据（UN Comtrade）: HS{trade_evidence.get('hs_code', '')} 出口额 {trend_str}")
+        if competitiveness and competitiveness.get("tc") is not None:
+            doc.add_paragraph(
+                f"竞争力指标: TC = {competitiveness['tc']}（出口 "
+                f"{competitiveness.get('export_value', 0) / 1e8:.2f} 亿 vs 进口 "
+                f"{competitiveness.get('import_value', 0) / 1e8:.2f} 亿美元）"
+            )
+        if background and background.get("summary"):
+            doc.add_paragraph(f"宏观背景（{background.get('_source', 'WTO')}）: {background.get('summary', '')}")
 
     # 市场规模
     doc.add_heading("市场规模", level=1)
