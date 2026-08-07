@@ -29,6 +29,10 @@
     .year-pair input { flex: 1; }
     .year-sep { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
     .analysis-title { color: var(--accent); font-size: 1rem; margin-bottom: 0.5rem; }
+    .pain-table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
+    .pain-table th, .pain-table td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
+    .pain-table th { background: var(--card-2); color: var(--muted); }
+    .pain-table td:first-child { white-space: nowrap; }
     .analysis-overview { color: var(--text); font-size: 0.92rem; line-height: 1.7; }
     .analysis-section { margin-top: 0.8rem; }
     .analysis-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.2rem; }
@@ -111,6 +115,18 @@
         <p class="meta" id="analysis-source"></p>
         <p class="meta" id="analysis-market" hidden></p>
         <p class="meta" id="competitiveness" hidden></p>
+      </div>
+
+      <div class="chart-box" id="competitor-box" hidden>
+        <h3 class="analysis-title">竞争对手出口对比</h3>
+        <table class="pain-table" id="competitor-table"></table>
+        <p class="meta">同产品各出口国对目标市场的出口额（UN Comtrade）</p>
+      </div>
+
+      <div class="chart-box" id="destination-box" hidden>
+        <h3 class="analysis-title">出口目的地排名</h3>
+        <table class="pain-table" id="destination-table"></table>
+        <p class="meta">目标市场（组织）内部各国进口排名（UN Comtrade）</p>
       </div>
 
       <div class="download-row">
@@ -269,6 +285,28 @@
           } else {
             cpEl.hidden = true;
           }
+          // 竞争对手出口对比
+          const cpBox = document.getElementById('competitor-box');
+          const competitors = (data.competitors && data.competitors.competitors) || [];
+          if (competitors.length) {
+            fillTable('competitor-table', ['出口国', '出口额(亿美元)', '占比'],
+              competitors, c => [c.country, (c.value / 1e8).toFixed(2), c.share + '%']);
+            cpBox.hidden = false;
+          } else {
+            cpBox.hidden = true;
+          }
+
+          // 出口目的地排名
+          const dsBox = document.getElementById('destination-box');
+          const destinations = (data.destinations && data.destinations.destinations) || [];
+          if (destinations.length) {
+            fillTable('destination-table', ['目的地', '进口额(亿美元)', '占比'],
+              destinations, d => [d.country, (d.value / 1e8).toFixed(2), d.share + '%']);
+            dsBox.hidden = false;
+          } else {
+            dsBox.hidden = true;
+          }
+
           ab.hidden = false;
         } else {
           ab.hidden = true;

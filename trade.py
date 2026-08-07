@@ -436,6 +436,71 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
         return {}
 
 
+def get_competitor_comparison(product: str, target: str, year: str,
+                              competitors: list = None) -> dict:
+    """竞争对手出口对比：中国 vs 主要竞争国对目标市场的同类产品出口
+
+    competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）。
+    返回 {competitors: [{country, value, share}], available: bool}
+    """
+    if competitors is None:
+        competitors = ["中国", "日本", "韩国", "越南"]
+    try:
+        hs = hs_lookup(product)
+        if not hs:
+            return {}
+        results = []
+        total = 0
+        for country in competitors:
+            try:
+                rows = fetch_year(hs, partner_lookup(target) or "0", year, reporter=country)
+                value = sum(r.get("primaryValue") or 0 for r in rows)
+                results.append({"country": country, "value": value})
+                total += value
+            except Exception:
+                results.append({"country": country, "value": 0})
+        for r in results:
+            r["share"] = round(r["value"] / total * 100, 1) if total else 0
+        return {"competitors": results, "available": True}
+    except Exception:
+        return {}
+
+
+def get_destination_ranking(product: str, target: str, year: str,
+                            reporter: str = "中国") -> dict:
+    """出口目的地排名：目标市场（如欧盟）内部各国进口该产品排名
+
+    返回 {destinations: [{country, value, share}], available: bool}
+    """
+    try:
+        hs = hs_lookup(product)
+        if not hs:
+            return {}
+        target_code = partner_lookup(target)
+        if target_code not in GROUP_MEMBERS:
+            return {}  # 仅对组织（欧盟/东盟/RCEP）有效
+        members = GROUP_MEMBERS[target_code]
+        results = []
+        total = 0
+        for country in members:
+            code = AREA_MAP.get(country, "")
+            if not code:
+                continue
+            try:
+                rows = fetch_year(hs, code, year, reporter=reporter)
+                value = sum(r.get("primaryValue") or 0 for r in rows)
+                results.append({"country": country, "value": value})
+                total += value
+            except Exception:
+                continue
+        results.sort(key=lambda x: x["value"], reverse=True)
+        for r in results:
+            r["share"] = round(r["value"] / total * 100, 1) if total else 0
+        return {"destinations": results[:10], "available": True}
+    except Exception:
+        return {}
+
+
 def _parse_years(arg: str) -> list:
     """解析年份参数：'2022' / '2020-2022' / '2018,2020,2022'"""
     arg = arg.strip()
