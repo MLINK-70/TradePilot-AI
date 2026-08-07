@@ -34,6 +34,7 @@ from ecommerce import analyze_reviews, compare_products, generate_listing
 from ebay import analyze_item, get_oauth_token, parse_ebay_url
 import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
+                   get_competitor_comparison, get_destination_ranking,
                    get_latest_year, query_trade, query_trend,
                    summarize_stats, summarize_trend)
 from hs_descriptions import get_hs_description
@@ -306,6 +307,17 @@ def trade_query(req: TradeQueryRequest):
     except Exception:
         competitiveness = {}
 
+    # 竞争对手出口对比 + 目的地排名（失败不阻断，仅单年查询时）
+    competitor_cmp = {}
+    destination_rank = {}
+    try:
+        y = str(years[0] if len(years) == 1 else years[-1])
+        # 第4参数是 competitors 列表（默认 中国/日本/韩国/越南），不要传 reporter 字符串
+        competitor_cmp = get_competitor_comparison(product, target, y)
+        destination_rank = get_destination_ranking(product, target, y, req.reporter)
+    except Exception:
+        pass
+
     return {
         "hs_code": hs,
         "hs_description": get_hs_description(hs),  # HS 编码品名解释
@@ -316,6 +328,8 @@ def trade_query(req: TradeQueryRequest):
         "analysis": analysis,  # AI 市场解读
         "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
         "competitiveness": competitiveness,  # TC/RCA 竞争力指标
+        "competitors": competitor_cmp,  # 竞争对手出口对比
+        "destinations": destination_rank,  # 出口目的地排名
         "rows": [
             {
                 "year": r.get("refYear"),
