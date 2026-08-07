@@ -74,6 +74,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                       stats: dict | None = None, analysis: dict | None = None) -> io.BytesIO:
     """生成 Word 分析报告（docxtpl 模板渲染 + 图表嵌入 + python-docx 表格）"""
     from docxtpl import DocxTemplate
+    from main import res_path
 
     total_value = sum(r.get("primaryValue") or 0 for r in rows)
     total_wgt = sum(r.get("netWgt") or 0 for r in rows)
@@ -90,7 +91,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         "meta_line": f"{product} → HS{hs_code}{hs_desc} → {target} | 年份 {year}",
     }
 
-    tpl = DocxTemplate("templates/report_template_v2.docx")
+    tpl = DocxTemplate(res_path("templates/report_template_v2.docx"))
     tpl.render(context)
     doc = tpl.docx
 
