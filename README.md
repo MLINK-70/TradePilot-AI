@@ -1,8 +1,8 @@
 # TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告，基于真实数据证据链）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（评论分析 / 竞品对比 / 平台 Listing 生成）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告，基于真实数据证据链）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（评论分析 / 竞品对比 / 平台 Listing / eBay + 速卖通商品分析）。
 
-**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API · World Bank API · Tavily API
+**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API
 
 > ⚠️ **数据声明**：市场分析基于**多重真实数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 只负责解读引用；评论分析基于用户提供的评论样本。
 
@@ -12,7 +12,7 @@
 
 1. **配置 API Key**
 
-   复制 `.env.example` 为 `.env`，填入 DeepSeek API Key（[获取地址](https://platform.deepseek.com/api_keys)）：
+   复制 `.env.example` 为 `.env`，填入 DeepSeek API Key（[获取地址](https://platform.deepseek.com/api_keys)）。其余密钥可选：Tavily（行业动态）、eBay 与速卖通联盟（商品分析，填在页面右上角 ⚙️ 设置面板亦可）：
 
    ```bash
    copy .env.example .env
@@ -72,13 +72,14 @@
 
 ```
 ├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）
-├── config.py        # 读取 .env 配置（DeepSeek / eBay 密钥）
+├── config.py        # 读取 .env 配置（DeepSeek / Tavily / eBay / 速卖通密钥）
 ├── llm.py           # DeepSeek 调用层：直连、重试、JSON 解析、证据链注入、缓存
 ├── prompts.py       # 系统提示词（6 字段 JSON 协议，产品核心价值）
 ├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标
 ├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
 ├── ecommerce.py     # 跨境电商模块：评论分析 / 竞品对比 / Listing
 ├── ebay.py          # eBay 商品分析（OAuth + Browse API）
+├── aliexpress.py    # 速卖通商品分析（联盟开放平台 API + HmacSHA256 签名）
 ├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
 ├── database.py      # SQLite 缓存层（trade_cache / query_log）
 ├── market_data.py   # 多数据源：World Bank 经济 + Tavily 新闻 + WTO 宏观背景
@@ -102,7 +103,7 @@
 └── .env             # 密钥（已被 .gitignore 排除，不提交）
 ```
 
-**分层设计**：`config → llm → main → 业务模块（trade/business/ecommerce/ebay）`，`llm.py` / `prompts.py` 是所有模块共用的底座。
+**分层设计**：`config → llm → main → 业务模块（trade/business/ecommerce/ebay/aliexpress）`，`llm.py` / `prompts.py` 是所有模块共用的底座。
 
 ---
 
@@ -114,6 +115,7 @@
 | ✅ 已完成 | 贸易数据 Trade | HS 编码 → 中国出口数据 + 趋势图 + AI 解读 + Word/CSV 导出 |
 | ✅ 已完成 | 外贸业务 Business | 英文开发信（含真实数据引用）/ 跟进邮件 / 产品介绍+FAQ / AI 模拟客户 |
 | ✅ 已完成 | 跨境电商 E-commerce | 评论分析 → 痛点报告 + 竞品对比 + 平台 Listing + 一键书签 |
+| ✅ 已完成 | 商品分析 | eBay（OAuth + Browse API）与速卖通（联盟开放平台 API）商品链接 → 商品信息 + AI 采购建议 |
 | ✅ 已完成 | 数据证据链 | 市场分析/贸易数据接入 5 层真实数据（UN Comtrade + World Bank + Tavily + WTO 宏观背景 + TC 竞争力指标） |
 | ✅ 已完成 | 设置与桌面版 | 页面设置面板（Key 即时生效）+ PyWebView 桌面版入口 |
 | 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
