@@ -73,7 +73,7 @@
 ```
 ├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）
 ├── config.py        # 读取 .env 配置（DeepSeek / eBay 密钥）
-├── llm.py           # DeepSeek 调用层：直连、重试、JSON 解析、AI 解读
+├── llm.py           # DeepSeek 调用层：直连、重试、JSON 解析、证据链注入、缓存
 ├── prompts.py       # 系统提示词（6 字段 JSON 协议，产品核心价值）
 ├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标
 ├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
@@ -114,9 +114,11 @@
 | ✅ 已完成 | 贸易数据 Trade | HS 编码 → 中国出口数据 + 趋势图 + AI 解读 + Word/CSV 导出 |
 | ✅ 已完成 | 外贸业务 Business | 英文开发信（含真实数据引用）/ 跟进邮件 / 产品介绍+FAQ / AI 模拟客户 |
 | ✅ 已完成 | 跨境电商 E-commerce | 评论分析 → 痛点报告 + 竞品对比 + 平台 Listing + 一键书签 |
+| ✅ 已完成 | 数据证据链 | 市场分析/贸易数据接入 5 层真实数据（UN Comtrade + World Bank + Tavily + WTO 宏观背景 + TC 竞争力指标） |
+| ✅ 已完成 | 设置与桌面版 | 页面设置面板（Key 即时生效）+ PyWebView 桌面版入口 |
 | 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
 
-**演进方式**：新模块上线时新建 `routers/` 目录，`main.py` 退化为"组装 app + include_router"；AI 调用底座（`llm.py` / `prompts.py`）保持不变。
+**演进方式**：新模块以独立业务模块（market_data / ebay 等）扁平扩展，`main.py` 保持路由入口；AI 调用底座（`llm.py` / `prompts.py`）复用。
 
 ---
 
