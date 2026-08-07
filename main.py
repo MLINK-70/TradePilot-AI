@@ -25,7 +25,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm import analyze_market, analyze_trade_trend
-from market_data import get_market_context, get_news, get_trade_background
+from market_data import (get_competitive_landscape, get_market_context,
+                         get_news, get_trade_background)
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
@@ -58,7 +59,7 @@ class AnalyzeRequest(BaseModel):
 
 
 def _collect_evidence(product: str, country: str) -> tuple:
-    """聚合真实数据证据链（经济/贸易/竞争力/宏观背景），失败不阻断"""
+    """聚合真实数据证据链（经济/贸易/竞争力/宏观背景/竞争格局），失败不阻断"""
     market_ctx = get_market_context(country)
     trade_evidence = {}
     competitiveness = {}
@@ -75,7 +76,9 @@ def _collect_evidence(product: str, country: str) -> tuple:
     except Exception:
         pass
     background = get_trade_background()
-    return market_ctx, trade_evidence, competitiveness, background
+    # 竞争格局（龙头品牌/份额，30 天缓存）
+    landscape = get_competitive_landscape(product, country)
+    return market_ctx, trade_evidence, competitiveness, background, landscape
 
 
 @app.post("/api/analyze")
@@ -92,9 +95,9 @@ def analyze(req: AnalyzeRequest):
 
     try:
         # 聚合真实数据证据链（经济 + 贸易 + 竞争力 + 宏观背景）
-        market_ctx, trade_evidence, competitiveness, background = _collect_evidence(product, country)
+        market_ctx, trade_evidence, competitiveness, background, landscape = _collect_evidence(product, country)
         data = analyze_market(product, country, market_ctx, trade_evidence,
-                              competitiveness, background)
+                              competitiveness, background, landscape)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -123,9 +126,9 @@ def export_market_report(req: AnalyzeRequest):
 
     try:
         # 完整证据链（与页面分析一致）
-        market_ctx, trade_evidence, competitiveness, background = _collect_evidence(product, country)
+        market_ctx, trade_evidence, competitiveness, background, landscape = _collect_evidence(product, country)
         data = analyze_market(product, country, market_ctx, trade_evidence,
-                              competitiveness, background)
+                              competitiveness, background, landscape)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

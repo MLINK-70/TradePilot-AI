@@ -86,7 +86,8 @@ def _market_cache_key(product: str, country: str,
                       market_context: dict | None,
                       trade_evidence: dict | None,
                       competitiveness: dict | None,
-                      background: dict | None) -> tuple:
+                      background: dict | None,
+                      landscape: dict | None = None) -> tuple:
     """缓存 key：产品+国家+证据链签名（证据链变化时缓存失效重算）"""
     def _sig(d):
         if not d:
@@ -97,26 +98,30 @@ def _market_cache_key(product: str, country: str,
             return ("tc", d.get("tc"))
         if "summary" in d:  # background
             return ("bg", str(d.get("summary", ""))[:80])
+        if "top_brands" in d:  # landscape
+            return ("land", tuple(sorted((b.get("name", ""), b.get("share", "")) for b in d.get("top_brands", []))))
         if "gdp" in d:    # market_context
             return ("ctx", d.get("gdp"), d.get("gdp_per_capita"))
         return None
     return (product, country, _sig(market_context), _sig(trade_evidence),
-            _sig(competitiveness), _sig(background))
+            _sig(competitiveness), _sig(background), _sig(landscape))
 
 
 def analyze_market(product: str, country: str, market_context: dict | None = None,
                    trade_evidence: dict | None = None,
                    competitiveness: dict | None = None,
-                   background: dict | None = None) -> dict:
+                   background: dict | None = None,
+                   landscape: dict | None = None) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
     失败时抛 ValueError，由 main.py 统一转成 502。
-    手动缓存：相同 (产品, 国家) 直接命中，不重复消耗 API token。
+    手动缓存：相同 (产品, 国家) + 证据链签名直接命中，不重复消耗 API token。
     market_context: World Bank 市场环境数据（可选）
     trade_evidence: 真实贸易数据（UN Comtrade，可选）
     competitiveness: 竞争力指标 TC（可选）
     background: 全球宏观背景（WTO 展望，可选）
+    landscape: 竞争格局（龙头品牌/份额，可选）
     """
     if not cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY"):
         raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
@@ -128,6 +133,16 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
 
     user_prompt = build_user_prompt(product, country)
     evidence_lines = []
+
+    # 竞争格局（龙头品牌/份额）
+    if landscape and landscape.get("top_brands"):
+        brands_str = "、".join(
+            f"{b.get('name', '')}（{b.get('share', '')}）" for b in landscape.get("top_brands", [])[:5]
+        )
+        evidence_lines.append(
+            f"【竞争格局（{landscape.get('_source', '行业检索')}）】龙头品牌: {brands_str}；"
+            f"细分趋势: {'；'.join(landscape.get('segment_trends', [])[:3])}"
+        )
 
     # 宏观背景（WTO 全球贸易展望）
     if background and background.get("summary"):
