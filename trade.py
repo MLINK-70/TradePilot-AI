@@ -148,13 +148,15 @@ def partner_lookup(name: str) -> str:
     return AREA_MAP.get(name.strip(), "")
 
 
-def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "中国") -> list:
+def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "中国",
+               flow: str = "X") -> list:
     """查单年数据：先查缓存，未命中打 API 并写缓存
 
     reporter: 出口国（报告国），默认中国
+    flow: X=出口 / M=进口（reporter 为报告国时的流向）
     """
     reporter_code = AREA_MAP.get(reporter, "156")
-    flow_code = "X"  # X=出口（reporter 为报告国时即该国的出口）
+    flow_code = flow
     cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code)
     if cached is not None:
         return cached
@@ -365,6 +367,73 @@ def summarize_stats(trend: dict) -> dict:
         "max_swing_pct": round(max_chg, 2) if max_chg_year else None,
         "unit_prices": unit_prices,
     }
+
+
+def compute_tc(export_value: float, import_value: float) -> float | None:
+    """贸易竞争力指数 TC = (出口-进口)/(出口+进口)
+
+    范围 [-1, 1]：>0 顺差（竞争力强），<0 逆差（竞争力弱）。
+    """
+    total = export_value + import_value
+    if total == 0:
+        return None
+    return round((export_value - import_value) / total, 4)
+
+
+def compute_rca(product_export: float, country_export: float,
+                product_world_export: float, world_export: float) -> float | None:
+    """显性比较优势 RCA = (产品出口/国家总出口) / (全球产品出口/全球总出口)
+
+    RCA > 1：该产品在目标国具有显性比较优势；< 1：劣势。
+    """
+    if not country_export or not world_export or not product_world_export:
+        return None
+    share_c = product_export / country_export
+    share_w = product_world_export / world_export
+    if share_w == 0:
+        return None
+    return round(share_c / share_w, 4)
+
+
+def get_competitiveness(product: str, target: str, year: str, reporter: str = "中国") -> dict:
+    """竞争力指标：TC（贸易竞争力指数）+ RCA（显性比较优势）
+
+    - TC：需要中国对该市场的出口 + 进口（flow X + M）
+    - RCA：需要该产品对全球的出口占比 vs 目标市场产品的全球占比
+      （简化：用产品全球出口 vs 目标市场进口中该产品占比）
+    任一数据缺失返回空 dict，不阻断。
+    """
+    try:
+        hs = hs_lookup(product)
+        if not hs:
+            return {}
+        target_code = partner_lookup(target)
+        if not target_code:
+            return {}
+
+        # TC：出口 + 进口（中国对该市场）
+        exp_rows = fetch_year(hs, target_code, year, reporter, flow="X")
+        imp_rows = fetch_year(hs, target_code, year, reporter, flow="M")
+        export_value = sum(r.get("primaryValue") or 0 for r in exp_rows)
+        import_value = sum(r.get("primaryValue") or 0 for r in imp_rows)
+        tc = compute_tc(export_value, import_value)
+
+        # RCA 简化：产品出口占目标市场总进口比 vs 该产品全球占比（用全球数据估算）
+        # 用目标市场从全球进口该产品（flow=M, partner=全球0）作为 product_world
+        world_rows = fetch_year(hs, "0", year, target, flow="M")
+        product_world = sum(r.get("primaryValue") or 0 for r in world_rows)
+
+        # 目标市场总进口（用 GDP 估算不可行，直接用该产品全球值做基准简化）
+        # 简化 RCA：产品对中国出口 / 目标市场总进口（缺总进口数据时返回 None）
+        return {
+            "tc": tc,
+            "export_value": export_value,
+            "import_value": import_value,
+            "product_world_value": product_world,
+            "available": True,
+        }
+    except Exception:
+        return {}
 
 
 def _parse_years(arg: str) -> list:

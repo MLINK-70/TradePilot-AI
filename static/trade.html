@@ -110,6 +110,7 @@
         </div>
         <p class="meta" id="analysis-source"></p>
         <p class="meta" id="analysis-market" hidden></p>
+        <p class="meta" id="competitiveness" hidden></p>
       </div>
 
       <div class="download-row">
@@ -254,6 +255,18 @@
             mk.hidden = false;
           } else {
             mk.hidden = true;
+          }
+          // 竞争力指标（TC/RCA）
+          const cp = data.competitiveness || {};
+          const cpEl = document.getElementById('competitiveness');
+          if (cp.available && cp.tc != null) {
+            const tcDesc = cp.tc > 0.3 ? '强竞争力（顺差明显）'
+              : cp.tc > 0 ? '有一定竞争力' : cp.tc > -0.3 ? '竞争力偏弱' : '竞争力弱（逆差）';
+            cpEl.textContent = '竞争力指数 TC: ' + cp.tc + '（' + tcDesc + '）· 出口 ' +
+              (cp.export_value / 1e8).toFixed(2) + ' 亿 / 进口 ' + (cp.import_value / 1e8).toFixed(2) + ' 亿美元';
+            cpEl.hidden = false;
+          } else {
+            cpEl.hidden = true;
           }
           ab.hidden = false;
         } else {

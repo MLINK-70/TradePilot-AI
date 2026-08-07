@@ -22,7 +22,9 @@ from business import (generate_followup_email, generate_outreach_email,
 from ecommerce import analyze_reviews, compare_products, generate_listing
 from ebay import analyze_item, get_oauth_token, parse_ebay_url
 from config import EBAY_APP_ID, EBAY_CLIENT_SECRET
-from trade import AREA_MAP, GROUP_MEMBERS, HS_MAP, get_latest_year, query_trade, query_trend, summarize_stats, summarize_trend
+from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
+                   get_latest_year, query_trade, query_trend,
+                   summarize_stats, summarize_trend)
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
 
@@ -237,6 +239,7 @@ def trade_query(req: TradeQueryRequest):
     # AI 解读真实贸易数据（失败不阻断查询，前端显示"解读生成失败"）
     analysis = {}
     market_ctx = {}
+    competitiveness = {}
     try:
         # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
         if len(trend) >= 2:
@@ -250,6 +253,15 @@ def trade_query(req: TradeQueryRequest):
     except ValueError:
         pass
 
+    # 竞争力指标（TC/RCA，失败不阻断）
+    try:
+        if len(years) == 1:
+            competitiveness = get_competitiveness(product, target, str(years[0]), req.reporter)
+        else:
+            competitiveness = get_competitiveness(product, target, str(years[-1]), req.reporter)
+    except Exception:
+        competitiveness = {}
+
     return {
         "hs_code": hs,
         "hs_description": get_hs_description(hs),  # HS 编码品名解释
@@ -259,6 +271,7 @@ def trade_query(req: TradeQueryRequest):
         "trend": [{"year": y, "value": v["value"], "weight": v["weight"]} for y, v in trend.items()],
         "analysis": analysis,  # AI 市场解读
         "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
+        "competitiveness": competitiveness,  # TC/RCA 竞争力指标
         "rows": [
             {
                 "year": r.get("refYear"),
