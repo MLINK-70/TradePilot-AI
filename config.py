@@ -12,6 +12,15 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL = "deepseek-chat"
 
+# 可选 AI 提供商（多模型支持）
+# GPT:       base=https://api.openai.com/v1  model=gpt-4o-mini
+# Claude:    base=https://api.anthropic.com/v1  model=claude-sonnet-4-5
+# 自定义:    任何 OpenAI 兼容接口（如通义/GLM/本地 Ollama）
+AI_PROVIDER = os.getenv("AI_PROVIDER", "deepseek")  # deepseek / gpt / claude / custom
+AI_BASE_URL = os.getenv("AI_BASE_URL", DEEPSEEK_BASE_URL)
+AI_MODEL = os.getenv("AI_MODEL", DEEPSEEK_MODEL)
+AI_API_KEY = os.getenv("AI_API_KEY", DEEPSEEK_API_KEY)
+
 # eBay 开发者凭证（可选，未配置时 eBay 功能提示配置）
 # 获取：https://developer.ebay.com 注册后创建应用，审核通过后拿 App ID + Client Secret
 EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
@@ -35,6 +44,10 @@ RUNTIME_KEYS = {
     "EBAY_CLIENT_SECRET": EBAY_CLIENT_SECRET,
     "ALIEXPRESS_APP_KEY": ALIEXPRESS_APP_KEY,
     "ALIEXPRESS_APP_SECRET": ALIEXPRESS_APP_SECRET,
+    "AI_PROVIDER": AI_PROVIDER,
+    "AI_BASE_URL": AI_BASE_URL,
+    "AI_MODEL": AI_MODEL,
+    "AI_API_KEY": AI_API_KEY,
 }
 
 
@@ -77,4 +90,6 @@ def get_keys_status() -> dict:
         "EBAY_CLIENT_SECRET": bool(RUNTIME_KEYS.get("EBAY_CLIENT_SECRET")),
         "ALIEXPRESS_APP_KEY": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_KEY")),
         "ALIEXPRESS_APP_SECRET": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET")),
+        "AI_PROVIDER": RUNTIME_KEYS.get("AI_PROVIDER", "deepseek"),
+        "AI_MODEL": RUNTIME_KEYS.get("AI_MODEL", ""),
     }

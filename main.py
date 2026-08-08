@@ -639,6 +639,9 @@ class SettingsRequest(BaseModel):
     ebay_client_secret: str = ""
     aliexpress_app_key: str = ""
     aliexpress_app_secret: str = ""
+    ai_provider: str = ""
+    ai_model: str = ""
+    ai_base_url: str = ""
 
 
 @app.get("/api/settings")
@@ -662,6 +665,12 @@ def save_settings(req: SettingsRequest):
         cfg.set_key("ALIEXPRESS_APP_KEY", req.aliexpress_app_key)
     if req.aliexpress_app_secret:
         cfg.set_key("ALIEXPRESS_APP_SECRET", req.aliexpress_app_secret)
+    if req.ai_provider:
+        cfg.set_key("AI_PROVIDER", req.ai_provider)
+    if req.ai_model:
+        cfg.set_key("AI_MODEL", req.ai_model)
+    if req.ai_base_url:
+        cfg.set_key("AI_BASE_URL", req.ai_base_url)
     logging.info("设置已保存")
     return cfg.get_keys_status()
 

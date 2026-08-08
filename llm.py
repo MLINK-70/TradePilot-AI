@@ -11,46 +11,74 @@ from prompts import SYSTEM_PROMPT, build_user_prompt
 
 
 def _chat(messages: list, use_json: bool = True) -> str:
-    """通用 DeepSeek 请求：直连 + 重试 + 超时兜底，返回文本内容"""
-    api_key = cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
+    """多提供商 LLM 请求：直连 + 重试 + 超时兜底，返回文本内容
 
-    payload = {
-        "model": cfg.DEEPSEEK_MODEL,
-        "messages": messages,
-        "temperature": 0.7,
+    支持：deepseek（默认）/ gpt（OpenAI 兼容）/ claude / custom（任意 OpenAI 兼容接口）。
+    提供商由 config 的 AI_PROVIDER 决定，.env 可配 AI_BASE_URL / AI_MODEL / AI_API_KEY。
+    """
+    provider = cfg.AI_PROVIDER
+    api_key = cfg.AI_API_KEY
+    base_url = cfg.AI_BASE_URL.rstrip("/")
+    model = cfg.AI_MODEL
+    if not api_key:
+        raise ValueError("未配置 AI_API_KEY（或 DEEPSEEK_API_KEY），请检查 .env 文件")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Connection": "close",
     }
-    if use_json:
-        payload["response_format"] = {"type": "json_object"}
+
+    if provider == "claude":
+        # Anthropic 格式：Authorization: Bearer + anthropic-version 头，system 单独传
+        headers["x-api-key"] = api_key
+        headers["anthropic-version"] = "2023-06-01"
+        payload = {
+            "model": model,
+            "max_tokens": 4096,
+            "messages": [m for m in messages if m["role"] != "system"],
+        }
+        system_text = "\n".join(m["content"] for m in messages if m["role"] == "system")
+        if system_text:
+            payload["system"] = system_text
+        url = f"{base_url}/messages"
+    else:
+        # OpenAI 兼容（deepseek/gpt/custom）
+        headers["Authorization"] = f"Bearer {api_key}"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.7,
+        }
+        if use_json:
+            payload["response_format"] = {"type": "json_object"}
+        url = f"{base_url}/chat/completions"
 
     for attempt in range(2):
         try:
             resp = requests.post(
-                f"{cfg.DEEPSEEK_BASE_URL}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "Connection": "close",
-                },
+                url,
+                headers=headers,
                 json=payload,
                 timeout=60,
                 proxies={"http": None, "https": None},  # 强制直连
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            data = resp.json()
+            if provider == "claude":
+                return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+            return data["choices"][0]["message"]["content"]
         except requests.exceptions.Timeout as e:
             if attempt == 1:
-                raise ValueError("DeepSeek API 请求超时（60 秒），请稍后重试")
-            logging.warning("DeepSeek 请求超时，3 秒后自动重试: %s", e)
+                raise ValueError("AI 请求超时（60 秒），请稍后重试")
+            logging.warning("AI 请求超时，3 秒后自动重试: %s", e)
             time.sleep(3)
         except requests.exceptions.HTTPError as e:
             code = e.response.status_code if e.response is not None else "?"
-            raise ValueError(f"DeepSeek API 返回错误：{code}，可能是余额不足或 Key 无效")
+            raise ValueError(f"AI API 返回错误：{code}，可能是余额不足或 Key 无效")
         except requests.exceptions.RequestException as e:
             if attempt == 1:
-                raise ValueError(f"DeepSeek API 网络错误（重试后仍失败）：{e}")
-            logging.warning("DeepSeek 请求失败，3 秒后自动重试: %s", e)
+                raise ValueError(f"AI API 网络错误（重试后仍失败）：{e}")
+            logging.warning("AI 请求失败，3 秒后自动重试: %s", e)
             time.sleep(3)
 
 
@@ -124,8 +152,8 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     background: 全球宏观背景（WTO 展望，可选）
     landscape: 竞争格局（龙头品牌/份额，可选）
     """
-    if not cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY"):
-        raise ValueError("未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
+    if not cfg.RUNTIME_KEYS.get("AI_API_KEY"):
+        raise ValueError("未配置 AI_API_KEY（或 DEEPSEEK_API_KEY），请检查 .env 文件")
 
     cache_key = _market_cache_key(product, country, market_context, trade_evidence,
                                   competitiveness, background)

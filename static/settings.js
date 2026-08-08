@@ -8,11 +8,27 @@
   <div id="settings-panel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,.3);">
     <h3 style="margin-bottom:12px;color:var(--accent);">设置</h3>
     <div style="margin-bottom:10px;">
-      <label for="set-deepseek" style="font-size:.85rem;color:var(--muted);">DeepSeek API Key <span style="color:var(--error);">*必备</span></label>
-      <input type="password" id="set-deepseek" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
-        AI 分析底座：市场报告 / 贸易解读 / 评论分析 / 开发信 全靠它生成。<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
-      </div>
+      <label for="set-ai-provider" style="font-size:.85rem;color:var(--muted);">AI 提供商 <span style="color:var(--error);">*必备</span></label>
+      <select id="set-ai-provider" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+        <option value="deepseek">DeepSeek（默认）</option>
+        <option value="gpt">OpenAI GPT</option>
+        <option value="claude">Claude</option>
+        <option value="custom">自定义（OpenAI 兼容）</option>
+      </select>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">AI 分析底座：市场报告 / 贸易解读 / 评论分析 / 开发信 全靠它生成</div>
+    </div>
+    <div style="margin-bottom:10px;" id="set-ai-key-wrap">
+      <label for="set-ai-key" style="font-size:.85rem;color:var(--muted);" id="set-ai-key-label">API Key <span style="color:var(--error);">*必备</span></label>
+      <input type="password" id="set-ai-key" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">所选提供商的 API Key（DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>）</div>
+    </div>
+    <div style="margin-bottom:10px;" id="set-ai-model-wrap">
+      <label for="set-ai-model" style="font-size:.85rem;color:var(--muted);">模型（可选，留空用默认）</label>
+      <input type="text" id="set-ai-model" placeholder="如 deepseek-chat / gpt-4o-mini" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+    </div>
+    <div style="margin-bottom:10px;" id="set-ai-base-wrap">
+      <label for="set-ai-base" style="font-size:.85rem;color:var(--muted);">Base URL（仅自定义需要）</label>
+      <input type="text" id="set-ai-base" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
     </div>
     <div style="margin-bottom:10px;">
       <label for="set-tavily" style="font-size:.85rem;color:var(--muted);">Tavily API Key（行业动态）</label>
@@ -80,14 +96,21 @@
     try {
       const resp = await fetch('/api/settings');
       const s = await resp.json();
-      document.getElementById('set-deepseek').value = '';
+      document.getElementById('set-ai-key').value = '';
+      document.getElementById('set-ai-model').value = '';
+      document.getElementById('set-ai-base').value = '';
       document.getElementById('set-tavily').value = '';
       document.getElementById('set-ebay-id').value = '';
       document.getElementById('set-ebay-secret').value = '';
       document.getElementById('set-aliexpress-key').value = '';
       document.getElementById('set-aliexpress-secret').value = '';
       // 显示已配置状态（placeholder 提示）
-      if (s.DEEPSEEK_API_KEY) document.getElementById('set-deepseek').placeholder = '已配置（留空保持不变）';
+      const providerSel = document.getElementById('set-ai-provider');
+      if (s.AI_PROVIDER && ['deepseek','gpt','claude','custom'].includes(s.AI_PROVIDER)) {
+        providerSel.value = s.AI_PROVIDER;
+      }
+      if (s.DEEPSEEK_API_KEY || s.AI_API_KEY) document.getElementById('set-ai-key').placeholder = '已配置（留空保持不变）';
+      if (s.AI_MODEL) document.getElementById('set-ai-model').placeholder = '当前：' + s.AI_MODEL;
       if (s.TAVILY_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
       if (s.EBAY_APP_ID) document.getElementById('set-ebay-id').placeholder = '已配置（留空保持不变）';
       if (s.ALIEXPRESS_APP_KEY && s.ALIEXPRESS_APP_SECRET) {
@@ -119,15 +142,19 @@
   document.getElementById('set-close').addEventListener('click', close);
 
   document.getElementById('set-save').addEventListener('click', async () => {
+    const provider = document.getElementById('set-ai-provider').value;
     const payload = {
-      deepseek_key: document.getElementById('set-deepseek').value.trim(),
+      deepseek_key: document.getElementById('set-ai-key').value.trim(),
       tavily_key: document.getElementById('set-tavily').value.trim(),
       ebay_app_id: document.getElementById('set-ebay-id').value.trim(),
       ebay_client_secret: document.getElementById('set-ebay-secret').value.trim(),
       aliexpress_app_key: document.getElementById('set-aliexpress-key').value.trim(),
       aliexpress_app_secret: document.getElementById('set-aliexpress-secret').value.trim(),
+      ai_provider: provider,
+      ai_model: document.getElementById('set-ai-model').value.trim(),
+      ai_base_url: document.getElementById('set-ai-base').value.trim(),
     };
-    if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret) {
+    if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
       status.textContent = '没有要保存的内容';
       return;
     }
