@@ -524,6 +524,15 @@ def get_competitor_comparison(product: str, target: str, year: str,
         hs = hs_lookup(product)
         if not hs:
             return {}
+        # 结果缓存（HS+目标+年份+出口国 → 对比结果），避免重复轮询多国 UN Comtrade
+        cache_k = f"{target}|{reporter}"
+        try:
+            from database import get_cached
+            cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
+            if cached and isinstance(cached, list):
+                return {"competitors": cached, "available": True}
+        except Exception:
+            pass
         results = []
         total = 0
         for country in competitors:
@@ -536,6 +545,11 @@ def get_competitor_comparison(product: str, target: str, year: str,
                 results.append({"country": country, "value": 0})
         for r in results:
             r["share"] = round(r["value"] / total * 100, 1) if total else 0
+        try:
+            from database import save_cache
+            save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
+        except Exception:
+            pass
         return {"competitors": results, "available": True}
     except Exception:
         return {}
@@ -547,6 +561,9 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
     UN Comtrade preview 不支持 reporterCode=0 的全球分组查询（返回空），
     改为轮询候选出口大国（消费电子主要出口国名单）对该品类的全球出口，
     按出口额降序取 TOP N。返回 [{country, value}]，失败返回 []。
+
+    结果按 (HS, 年份) 缓存到 SQLite——首次轮询 16 国后，后续查询直接命中，
+    避免每次贸易查询都打 16 次 UN Comtrade（免费版 429 限流下会显著拖慢）。
     """
     candidates = [
         "中国", "德国", "日本", "韩国", "越南", "美国",
@@ -557,6 +574,14 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         hs = hs_lookup(product)
         if not hs:
             return []
+        # 先查缓存（HS+年份 → TOP 出口国）
+        try:
+            from database import get_cached
+            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="rank")
+            if cached and isinstance(cached, list):
+                return cached[:top_n]
+        except Exception:
+            pass
         results = []
         for country in candidates:
             try:
@@ -567,7 +592,14 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
             except Exception:
                 continue
         results.sort(key=lambda x: x["value"], reverse=True)
-        return results[:top_n]
+        top = results[:top_n]
+        # 写缓存（含 fetch_year 已缓存，这里存排名结果）
+        try:
+            from database import save_cache
+            save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="rank")
+        except Exception:
+            pass
+        return top
     except Exception:
         return []
 
