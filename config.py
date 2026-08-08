@@ -36,6 +36,12 @@ ALIEXPRESS_APP_SECRET = os.getenv("ALIEXPRESS_APP_SECRET", "")
 # 获取：https://app.tavily.com 注册后拿 API Key
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
+# 搜索提供商（多引擎支持）
+# tavily（推荐·默认）/ serper（Google）/ custom（任意兼容接口）
+SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", TAVILY_API_KEY)
+SEARCH_BASE_URL = os.getenv("SEARCH_BASE_URL", "https://api.tavily.com")
+
 # 运行时可更新的 Key（设置面板写入）
 RUNTIME_KEYS = {
     "DEEPSEEK_API_KEY": DEEPSEEK_API_KEY,
@@ -48,6 +54,9 @@ RUNTIME_KEYS = {
     "AI_BASE_URL": AI_BASE_URL,
     "AI_MODEL": AI_MODEL,
     "AI_API_KEY": AI_API_KEY,
+    "SEARCH_PROVIDER": SEARCH_PROVIDER,
+    "SEARCH_API_KEY": SEARCH_API_KEY,
+    "SEARCH_BASE_URL": SEARCH_BASE_URL,
 }
 
 
@@ -92,4 +101,5 @@ def get_keys_status() -> dict:
         "ALIEXPRESS_APP_SECRET": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET")),
         "AI_PROVIDER": RUNTIME_KEYS.get("AI_PROVIDER", "deepseek"),
         "AI_MODEL": RUNTIME_KEYS.get("AI_MODEL", ""),
+        "SEARCH_PROVIDER": RUNTIME_KEYS.get("SEARCH_PROVIDER", "tavily"),
     }

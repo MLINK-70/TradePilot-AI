@@ -642,6 +642,7 @@ class SettingsRequest(BaseModel):
     ai_provider: str = ""
     ai_model: str = ""
     ai_base_url: str = ""
+    search_provider: str = ""
 
 
 @app.get("/api/settings")
@@ -671,6 +672,8 @@ def save_settings(req: SettingsRequest):
         cfg.set_key("AI_MODEL", req.ai_model)
     if req.ai_base_url:
         cfg.set_key("AI_BASE_URL", req.ai_base_url)
+    if req.search_provider:
+        cfg.set_key("SEARCH_PROVIDER", req.search_provider)
     logging.info("设置已保存")
     return cfg.get_keys_status()
 

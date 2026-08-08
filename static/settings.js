@@ -44,7 +44,13 @@
         搜索与行业数据 <span style="font-size:.68rem;color:var(--teal);background:rgba(13,148,136,.1);padding:1px 8px;border-radius:999px;">推荐 Tavily</span>
       </summary>
       <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
-        <label for="set-tavily" style="font-size:.85rem;color:var(--muted);">Tavily API Key（行业动态）</label>
+        <label for="set-search-provider" style="font-size:.85rem;color:var(--muted);">搜索提供商</label>
+        <select id="set-search-provider" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <option value="tavily">Tavily（推荐 · 默认）</option>
+          <option value="serper">Serper（Google 搜索）</option>
+          <option value="custom">自定义</option>
+        </select>
+        <label for="set-tavily" style="font-size:.85rem;color:var(--muted);display:block;margin-top:8px;">搜索 API Key</label>
         <input type="password" id="set-tavily" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
         <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
           行业动态 / 宏观背景 / 竞争格局的来源。未配置时这些板块缺失，其余功能不受影响。<a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
@@ -122,6 +128,10 @@
       if (s.AI_PROVIDER && ['deepseek','gpt','claude','custom'].includes(s.AI_PROVIDER)) {
         providerSel.value = s.AI_PROVIDER;
       }
+      const searchSel = document.getElementById('set-search-provider');
+      if (s.SEARCH_PROVIDER && ['tavily','serper','custom'].includes(s.SEARCH_PROVIDER)) {
+        searchSel.value = s.SEARCH_PROVIDER;
+      }
       if (s.DEEPSEEK_API_KEY || s.AI_API_KEY) document.getElementById('set-ai-key').placeholder = '已配置（留空保持不变）';
       if (s.AI_MODEL) document.getElementById('set-ai-model').placeholder = '当前：' + s.AI_MODEL;
       if (s.TAVILY_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
@@ -166,6 +176,7 @@
       ai_provider: provider,
       ai_model: document.getElementById('set-ai-model').value.trim(),
       ai_base_url: document.getElementById('set-ai-base').value.trim(),
+      search_provider: document.getElementById('set-search-provider').value,
     };
     if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
       status.textContent = '没有要保存的内容';

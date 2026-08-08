@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 import requests
 
+import config as cfg
 from database import get_cached, init_db, save_cache
 
 WB_BASE = "https://api.worldbank.org/v2/country"
@@ -107,6 +108,77 @@ BACKGROUND_REFRESH_SYSTEM = """你是全球经济分析师。根据搜索结果�
 要求：基于搜索结果，标注时间（如"2026年3月 WTO 报告"），不编造。"""
 
 
+def _search_web(query: str, max_results: int = 5, depth: str = "basic") -> list:
+    """统一网页搜索封装（多提供商）
+
+    支持：tavily（推荐·默认）/ serper（Google）/ custom（任意兼容接口）。
+    返回 [{title, url, content}]，失败返回 []。
+    """
+    import config as cfg
+    provider = cfg.SEARCH_PROVIDER
+    api_key = cfg.SEARCH_API_KEY
+    if not api_key:
+        return []
+    try:
+        if provider == "serper":
+            resp = requests.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                json={"q": query, "num": max_results},
+                timeout=20,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for r in data.get("organic", [])[:max_results]:
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("link", ""),
+                    "content": r.get("snippet", ""),
+                })
+            return results
+        elif provider == "custom":
+            resp = requests.post(
+                cfg.SEARCH_BASE_URL.rstrip("/") + "/search",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"query": query, "max_results": max_results},
+                timeout=20,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for r in (data.get("results", []) or data.get("data", []))[:max_results]:
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("url", "") or r.get("link", ""),
+                    "content": r.get("content", "") or r.get("snippet", ""),
+                })
+            return results
+        else:  # tavily（默认）
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": query,
+                    "max_results": max_results,
+                    "search_depth": depth,
+                },
+                timeout=20,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return [
+                {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
+                for r in data.get("results", [])[:max_results]
+            ]
+    except Exception as e:
+        logging.warning("搜索失败 %s: %s", provider, e)
+        return []
+
+
 def get_trade_background(force_refresh: bool = False) -> dict:
     """宏观背景：30 天增量刷新（有更新才抓取）
 
@@ -127,24 +199,14 @@ def get_trade_background(force_refresh: bool = False) -> dict:
             pass
 
     # 缓存过期/缺失 → 重新抓取
-    from config import TAVILY_API_KEY
-    if not TAVILY_API_KEY:
+    if not cfg.SEARCH_API_KEY:
         return {}
     try:
-        resp = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": "WTO global trade outlook latest forecast merchandise trade growth",
-                "max_results": 8,
-                "search_depth": "advanced",
-            },
-            timeout=20,
-            proxies={"http": None, "https": None},
-        )
-        resp.raise_for_status()
-        search_data = resp.json()
-        snippets = [r.get("content", "") for r in search_data.get("results", [])[:6]]
+        snippets = [
+            r.get("content", "")
+            for r in _search_web("WTO global trade outlook latest forecast merchandise trade growth",
+                                 max_results=8, depth="advanced")
+        ][:6]
 
         content = _chat([
             {"role": "system", "content": BACKGROUND_REFRESH_SYSTEM},
@@ -202,8 +264,8 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
         except (ValueError, KeyError, IndexError):
             pass
 
-    from config import TAVILY_API_KEY
-    if not TAVILY_API_KEY:
+    from config import SEARCH_API_KEY
+    if not SEARCH_API_KEY:
         return {}
     try:
         # 两轮检索：①品牌份额 ②产业逻辑（上下游/变动原因）
@@ -212,19 +274,10 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
             f"{product} {market} 品牌 市场份额 排名 竞争格局 龙头",
             f"{product} 行业 产业链 上下游 传感器 芯片 格局 变动 原因 分析",
         ]:
-            resp = requests.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": TAVILY_API_KEY,
-                    "query": query,
-                    "max_results": 5,
-                    "search_depth": "advanced",
-                },
-                timeout=20,
-                proxies={"http": None, "https": None},
-            )
-            resp.raise_for_status()
-            snippets += [r.get("content", "") for r in resp.json().get("results", [])[:5]]
+            snippets += [
+                r.get("content", "")
+                for r in _search_web(query, max_results=5, depth="advanced")
+            ][:5]
 
         content = _chat([
             {"role": "system", "content": LANDSCAPE_REFRESH_SYSTEM},
@@ -249,27 +302,14 @@ def get_news(product: str, market: str) -> dict:
 
     返回：{headlines: [{title, url}], available: bool}
     """
-    from config import TAVILY_API_KEY
-    if not TAVILY_API_KEY:
+    if not cfg.SEARCH_API_KEY:
         return {"available": False}
 
     try:
-        resp = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": f"{product} market {market}",
-                "max_results": 5,
-                "search_depth": "basic",
-            },
-            timeout=20,
-            proxies={"http": None, "https": None},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        results = _search_web(f"{product} market {market}", max_results=5, depth="basic")
         headlines = [
             {"title": r.get("title", ""), "url": r.get("url", "")}
-            for r in data.get("results", [])[:5]
+            for r in results[:5]
         ]
         return {"available": bool(headlines), "headlines": headlines}
     except Exception as e:
