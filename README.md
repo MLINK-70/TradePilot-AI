@@ -4,7 +4,7 @@
 
 **技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · DeepSeek API · UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API
 
-> ⚠️ **数据声明**：市场分析基于**多重真实数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 只负责解读引用；评论分析基于用户提供的评论样本。
+> ⚠️ **数据声明**：市场分析基于**多重真实数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 引用并解读这些数据；统计指标（CAGR/峰值/竞争力）由程序精确计算，AI 不参与算数；数据不足处 AI 估算并标注"估算"；评论分析基于用户提供的评论样本。
 
 ---
 
