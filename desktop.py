@@ -70,7 +70,7 @@ def main():
     import webview
 
     webview.create_window(
-        "TradePilot AI — 跨境贸易智能平台",
+        "TradePilot AI — 跨境贸易智能平台 v0.9.1",
         f"http://127.0.0.1:{port}",
         width=1280,
         height=850,

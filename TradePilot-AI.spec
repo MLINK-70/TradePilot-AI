@@ -16,7 +16,7 @@ a = Analysis(
         # 业务模块（uvicorn.run("main:app") 是字符串导入，需显式声明）
         'main', 'config', 'llm', 'prompts', 'trade', 'database',
         'countries', 'hs_descriptions', 'business', 'ecommerce',
-        'ebay', 'export', 'market_data',
+        'ebay', 'aliexpress', 'export', 'market_data',
         # uvicorn 子模块
         'uvicorn.logging',
         'uvicorn.loops',
