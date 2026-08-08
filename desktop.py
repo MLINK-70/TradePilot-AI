@@ -17,13 +17,23 @@ import uvicorn
 
 
 def setup_env():
-    """确保 .env 存在：exe 运行目录有则用，没有则从同目录复制模板"""
+    """确保 .env 存在：exe 运行目录有则用，没有则从模板复制
+
+    模板来源优先级：exe 同目录 > _MEIPASS 内部（PyInstaller 打包资源）> 源码目录
+    """
     base = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, 'frozen', False) else __file__))
     env_path = os.path.join(base, '.env')
     if not os.path.exists(env_path):
-        example = os.path.join(base, '.env.example')
-        if os.path.exists(example):
-            shutil.copy(example, env_path)
+        # 找模板：先 exe 同目录，再 _MEIPASS（打包进 exe 的），最后源码目录
+        candidates = [
+            os.path.join(base, '.env.example'),
+            os.path.join(getattr(sys, '_MEIPASS', ''), '.env.example'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env.example'),
+        ]
+        for example in candidates:
+            if example and os.path.exists(example):
+                shutil.copy(example, env_path)
+                break
     # 切换到 exe 所在目录（保证相对路径资源可访问）
     if getattr(sys, 'frozen', False):
         os.chdir(base)
