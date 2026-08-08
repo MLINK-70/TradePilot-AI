@@ -32,14 +32,12 @@ def get_hs_description(hs_code: str) -> str:
     desc = HS_DESCRIPTIONS.get(hs, "")
     if desc:
         return desc
-    # 从 SQLite 持久缓存找（hs_lookup 的 AI 解析结果含描述）
+    # 从 SQLite 持久缓存找（hs_lookup 的 AI 解析结果含描述，cache_key 存产品名）
     try:
-        from database import get_cached
-        # 遍历 HSAI 缓存找匹配编码（产品名 → {hs, desc}）
         import sqlite3
         conn = sqlite3.connect("tradepilot.db")
         rows = conn.execute(
-            "SELECT data_json FROM trade_cache WHERE cmd_code='HSAI'"
+            "SELECT data_json FROM trade_cache WHERE cmd_code='HSAI' AND cache_key != ''"
         ).fetchall()
         conn.close()
         import json

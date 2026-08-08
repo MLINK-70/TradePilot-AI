@@ -149,10 +149,10 @@ def _hs_via_ai(product: str) -> str:
         return ""
     if product in _HS_AI_CACHE:
         return _HS_AI_CACHE[product]
-    # 先查 SQLite 持久缓存（重启不丢）
+    # 先查 SQLite 持久缓存（重启不丢），cache_key 专用字段存产品名
     try:
         from database import get_cached
-        cached = get_cached("HSAI", "0", "0", "X", product)
+        cached = get_cached("HSAI", "0", "0", "X", "0", cache_key=product)
         if cached:
             hs = str(cached[0].get("hs", ""))
             if hs.isdigit():
@@ -180,10 +180,10 @@ def _hs_via_ai(product: str) -> str:
         if hs.isdigit() and 4 <= len(hs) <= 6:
             _HS_AI_CACHE[product] = hs
             HS_MAP[product] = hs  # 写进内置表，下次直接命中
-            # 描述持久化：写进 SQLite + hs_descriptions 内存表
+            # 描述持久化：写进 SQLite（cache_key 存产品名）+ hs_descriptions 内存表
             try:
                 from database import save_cache
-                save_cache("HSAI", "0", "0", "X", [{"hs": hs, "desc": desc}], product)
+                save_cache("HSAI", "0", "0", "X", [{"hs": hs, "desc": desc}], "0", cache_key=product)
             except Exception:
                 pass
             if desc:

@@ -132,7 +132,9 @@ def _market_cache_key(product: str, country: str,
             return ("ctx", d.get("gdp"), d.get("gdp_per_capita"),
                     d.get("population"), d.get("internet"))
         return None
-    return (product, country, _sig(market_context), _sig(trade_evidence),
+    # AI 提供商/模型签名：切换提供商或模型时旧缓存自动失效
+    ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
+    return (product, country, ai_sig, _sig(market_context), _sig(trade_evidence),
             _sig(competitiveness), _sig(background), _sig(landscape))
 
 

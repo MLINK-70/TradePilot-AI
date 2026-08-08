@@ -26,14 +26,15 @@ def init_db():
             period TEXT NOT NULL,
             flow_code TEXT NOT NULL,
             reporter_code TEXT NOT NULL DEFAULT '156',
+            cache_key TEXT NOT NULL DEFAULT '',
             data_json TEXT NOT NULL,
             fetched_at TEXT NOT NULL,
-            UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code)
+            UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
         )
     """)
-    # 迁移：旧表无 reporter_code 列时重建（缓存数据易失，直接重建避免索引冲突）
+    # 迁移：旧表无 cache_key 列时重建（缓存数据易失，直接重建避免索引冲突）
     cols = [r[1] for r in conn.execute("PRAGMA table_info(trade_cache)").fetchall()]
-    if "reporter_code" not in cols:
+    if "cache_key" not in cols:
         conn.execute("DROP TABLE trade_cache")
         conn.execute("""
             CREATE TABLE trade_cache (
@@ -43,9 +44,10 @@ def init_db():
                 period TEXT NOT NULL,
                 flow_code TEXT NOT NULL,
                 reporter_code TEXT NOT NULL DEFAULT '156',
+                cache_key TEXT NOT NULL DEFAULT '',
                 data_json TEXT NOT NULL,
                 fetched_at TEXT NOT NULL,
-                UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code)
+                UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
             )
         """)
     conn.execute("""
@@ -61,26 +63,26 @@ def init_db():
     conn.close()
 
 
-def get_cached(cmd_code: str, partner_code: str, period: str, flow_code: str, reporter_code: str = "156") -> list | None:
+def get_cached(cmd_code: str, partner_code: str, period: str, flow_code: str, reporter_code: str = "156", cache_key: str = "") -> list | None:
     """查缓存；命中返回数据列表，未命中返回 None"""
     conn = get_conn()
     row = conn.execute(
-        "SELECT data_json FROM trade_cache WHERE cmd_code=? AND partner_code=? AND period=? AND flow_code=? AND reporter_code=?",
-        (cmd_code, partner_code, period, flow_code, reporter_code),
+        "SELECT data_json FROM trade_cache WHERE cmd_code=? AND partner_code=? AND period=? AND flow_code=? AND reporter_code=? AND cache_key=?",
+        (cmd_code, partner_code, period, flow_code, reporter_code, cache_key),
     ).fetchone()
     conn.close()
     return json.loads(row["data_json"]) if row else None
 
 
-def save_cache(cmd_code: str, partner_code: str, period: str, flow_code: str, data: list, reporter_code: str = "156"):
+def save_cache(cmd_code: str, partner_code: str, period: str, flow_code: str, data: list, reporter_code: str = "156", cache_key: str = ""):
     """写入缓存（存在则更新）"""
     conn = get_conn()
     conn.execute(
-        """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, data_json, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(cmd_code, partner_code, period, flow_code, reporter_code)
+        """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
            DO UPDATE SET data_json=excluded.data_json, fetched_at=excluded.fetched_at""",
-        (cmd_code, partner_code, period, flow_code, reporter_code, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()),
+        (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
