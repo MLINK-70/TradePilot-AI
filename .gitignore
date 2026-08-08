@@ -10,3 +10,4 @@ __pycache__/
 
 # SQLite 数据库（本地缓存，不进版本库）
 *.db
+_release_notes.md
