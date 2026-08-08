@@ -10,33 +10,47 @@
     <div style="margin-bottom:10px;">
       <label for="set-ai-provider" style="font-size:.85rem;color:var(--muted);">AI 提供商 <span style="color:var(--error);">*必备</span></label>
       <select id="set-ai-provider" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-        <option value="deepseek">DeepSeek（默认）</option>
+        <option value="deepseek">DeepSeek（推荐 · 默认）</option>
         <option value="gpt">OpenAI GPT</option>
         <option value="claude">Claude</option>
         <option value="custom">自定义（OpenAI 兼容）</option>
       </select>
       <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">AI 分析底座：市场报告 / 贸易解读 / 评论分析 / 开发信 全靠它生成</div>
     </div>
-    <div style="margin-bottom:10px;" id="set-ai-key-wrap">
-      <label for="set-ai-key" style="font-size:.85rem;color:var(--muted);" id="set-ai-key-label">API Key <span style="color:var(--error);">*必备</span></label>
-      <input type="password" id="set-ai-key" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">所选提供商的 API Key（DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>）</div>
-    </div>
-    <div style="margin-bottom:10px;" id="set-ai-model-wrap">
-      <label for="set-ai-model" style="font-size:.85rem;color:var(--muted);">模型（可选，留空用默认）</label>
-      <input type="text" id="set-ai-model" placeholder="如 deepseek-chat / gpt-4o-mini" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-    </div>
-    <div style="margin-bottom:10px;" id="set-ai-base-wrap">
-      <label for="set-ai-base" style="font-size:.85rem;color:var(--muted);">Base URL（仅自定义需要）</label>
-      <input type="text" id="set-ai-base" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-    </div>
-    <div style="margin-bottom:10px;">
-      <label for="set-tavily" style="font-size:.85rem;color:var(--muted);">Tavily API Key（行业动态）</label>
-      <input type="password" id="set-tavily" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
-        行业动态 / 宏观背景 / 竞争格局（品牌份额·变动原因）的来源。未配置时这些板块会缺失，其余功能不受影响。<a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
+    <details style="margin-bottom:10px;border:1px dashed var(--border);border-radius:8px;padding:8px 10px;">
+      <summary style="font-size:.85rem;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
+        <span style="transition:transform .2s;display:inline-block;" id="set-ai-more-arrow">▸</span>
+        AI 提供商详细配置 <span style="font-size:.68rem;color:var(--teal);background:rgba(13,148,136,.1);padding:1px 8px;border-radius:999px;">Key · 模型</span>
+      </summary>
+      <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
+        <div style="margin-bottom:10px;">
+          <label for="set-ai-key" style="font-size:.85rem;color:var(--muted);">API Key <span style="color:var(--error);">*必备</span></label>
+          <input type="password" id="set-ai-key" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a></div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="set-ai-model" style="font-size:.85rem;color:var(--muted);">模型（可选，留空用默认）</label>
+          <input type="text" id="set-ai-model" placeholder="如 deepseek-chat / gpt-4o-mini" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="set-ai-base" style="font-size:.85rem;color:var(--muted);">Base URL（仅自定义需要）</label>
+          <input type="text" id="set-ai-base" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+        </div>
       </div>
-    </div>
+    </details>
+    <details style="margin-bottom:10px;border:1px dashed var(--border);border-radius:8px;padding:8px 10px;">
+      <summary style="font-size:.85rem;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
+        <span style="transition:transform .2s;display:inline-block;" id="set-tavily-more-arrow">▸</span>
+        搜索与行业数据 <span style="font-size:.68rem;color:var(--teal);background:rgba(13,148,136,.1);padding:1px 8px;border-radius:999px;">推荐 Tavily</span>
+      </summary>
+      <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
+        <label for="set-tavily" style="font-size:.85rem;color:var(--muted);">Tavily API Key（行业动态）</label>
+        <input type="password" id="set-tavily" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+        <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
+          行业动态 / 宏观背景 / 竞争格局的来源。未配置时这些板块缺失，其余功能不受影响。<a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
+        </div>
+      </div>
+    </details>
     <details style="margin-bottom:14px;border:1px dashed var(--border);border-radius:8px;padding:8px 10px;">
       <summary style="font-size:.85rem;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
         <span style="transition:transform .2s;display:inline-block;" id="set-more-arrow">▸</span>
@@ -69,14 +83,13 @@
   const panel = document.getElementById('settings-panel');
   const status = document.getElementById('set-status');
 
-  // 更多 API 折叠箭头旋转
-  const moreDetail = panel.querySelector('details');
-  if (moreDetail) {
-    moreDetail.addEventListener('toggle', () => {
-      const arrow = document.getElementById('set-more-arrow');
-      if (arrow) arrow.style.transform = moreDetail.open ? 'rotate(90deg)' : '';
+  // 折叠区箭头旋转（AI 详细配置 / 搜索与行业数据 / 更多 API）
+  panel.querySelectorAll('details').forEach(d => {
+    const arrowId = d.querySelector('summary span');
+    d.addEventListener('toggle', () => {
+      if (arrowId) arrowId.style.transform = d.open ? 'rotate(90deg)' : '';
     });
-  }
+  });
 
   // 右上角 ⚙️ 按钮（插入品牌栏右侧，与主题按钮并排）
   const gear = document.createElement('button');
