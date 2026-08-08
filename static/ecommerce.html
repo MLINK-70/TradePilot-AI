@@ -57,6 +57,38 @@
     .listing-box { margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--border); }
     .listing-title { font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; }
     .listing-bullets li { margin: 0.2rem 0; }
+
+    /* 更多 API 折叠区 */
+    .api-more {
+      margin-bottom: 1rem;
+      background: var(--card);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 0.7rem 1rem;
+    }
+    .api-more summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.88rem;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .api-more summary::-webkit-details-marker { display: none; }
+    .api-more summary::before { content: "▸"; color: var(--navy); font-size: 0.8rem; transition: transform 0.2s; }
+    .api-more[open] summary::before { transform: rotate(90deg); }
+    .api-more summary:hover { color: var(--navy-deep); }
+    .api-badge {
+      font-size: 0.68rem;
+      color: var(--navy);
+      background: var(--accent-soft);
+      padding: 0.12rem 0.5rem;
+      border-radius: 999px;
+      letter-spacing: 0.05em;
+    }
+    .api-panel { margin-top: 1rem; border-top: 1px dashed var(--border); padding-top: 1rem; }
   </style>
 </head>
 <body>
@@ -80,29 +112,31 @@
   </header>
 
   <main>
-    <section class="card">
-      <form id="ebay-form" autocomplete="off">
-        <div class="form-row">
-          <label for="ebay-url">eBay 链接</label>
-          <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
-        </div>
-        <button type="submit" id="ebay-submit" class="btn-primary">分析 eBay 商品</button>
-      </form>
-      <p id="ebay-status" class="status"></p>
-      <div id="ebay-result" class="listing-box" hidden></div>
-    </section>
+    <!-- 更多 API：eBay / 速卖通商品分析（默认折叠） -->
+    <details class="company-optional api-more">
+      <summary id="api-more-toggle">更多 API <span class="api-badge">eBay · 速卖通</span></summary>
+      <div class="api-panel">
+        <form id="ebay-form" autocomplete="off">
+          <div class="form-row">
+            <label for="ebay-url">eBay 链接</label>
+            <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);">
+          </div>
+          <button type="submit" id="ebay-submit" class="btn-primary">分析 eBay 商品</button>
+        </form>
+        <p id="ebay-status" class="status"></p>
+        <div id="ebay-result" class="listing-box" hidden></div>
 
-    <section class="card">
-      <form id="aliexpress-form" autocomplete="off">
-        <div class="form-row">
-          <label for="aliexpress-url">速卖通链接</label>
-          <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
-        </div>
-        <button type="submit" id="aliexpress-submit" class="btn-primary">分析速卖通商品</button>
-      </form>
-      <p id="aliexpress-status" class="status"></p>
-      <div id="aliexpress-result" class="listing-box" hidden></div>
-    </section>
+        <form id="aliexpress-form" autocomplete="off" style="margin-top:1.4rem;">
+          <div class="form-row">
+            <label for="aliexpress-url">速卖通链接</label>
+            <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);">
+          </div>
+          <button type="submit" id="aliexpress-submit" class="btn-primary">分析速卖通商品</button>
+        </form>
+        <p id="aliexpress-status" class="status"></p>
+        <div id="aliexpress-result" class="listing-box" hidden></div>
+      </div>
+    </details>
 
     <section class="card">
       <form id="review-form" autocomplete="off">
@@ -189,7 +223,7 @@
 
   <script src="echarts.min.js?v=11"></script>
   <script src="theme.js?v=11"></script>
-  <script src="settings.js?v=14"></script>
+  <script src="settings.js?v=15"></script>
   <script>
     (function () {
       'use strict';

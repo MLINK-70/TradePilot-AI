@@ -8,27 +8,39 @@
   <div id="settings-panel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,.3);">
     <h3 style="margin-bottom:12px;color:var(--accent);">设置</h3>
     <div style="margin-bottom:10px;">
-      <label for="set-deepseek" style="font-size:.85rem;color:var(--muted);">DeepSeek API Key <span style="color:var(--error);">*必填</span></label>
+      <label for="set-deepseek" style="font-size:.85rem;color:var(--muted);">DeepSeek API Key <span style="color:var(--error);">*必备</span></label>
       <input type="password" id="set-deepseek" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">分析必用 · <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a></div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
+        AI 分析底座：市场报告 / 贸易解读 / 评论分析 / 开发信 全靠它生成。<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
+      </div>
     </div>
     <div style="margin-bottom:10px;">
       <label for="set-tavily" style="font-size:.85rem;color:var(--muted);">Tavily API Key（行业动态）</label>
       <input type="password" id="set-tavily" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 新闻搜索 · <a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a></div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
+        行业动态 / 宏观背景 / 竞争格局（品牌份额·变动原因）的来源。未配置时这些板块会缺失，其余功能不受影响。<a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
+      </div>
     </div>
-    <div style="margin-bottom:14px;">
-      <label for="set-ebay-id" style="font-size:.85rem;color:var(--muted);">eBay 凭证（商品分析）</label>
-      <input type="password" id="set-ebay-id" placeholder="App ID" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <input type="password" id="set-ebay-secret" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 需 eBay 开发者审核 · 需梯子</div>
-    </div>
-    <div style="margin-bottom:14px;">
-      <label for="set-aliexpress-key" style="font-size:.85rem;color:var(--muted);">速卖通联盟凭证（商品分析）</label>
-      <input type="password" id="set-aliexpress-key" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <input type="password" id="set-aliexpress-secret" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-      <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 速卖通联盟开放平台 · 国内直连</div>
-    </div>
+    <details style="margin-bottom:14px;border:1px dashed var(--border);border-radius:8px;padding:8px 10px;">
+      <summary style="font-size:.85rem;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
+        <span style="transition:transform .2s;display:inline-block;" id="set-more-arrow">▸</span>
+        更多 API <span style="font-size:.68rem;color:var(--navy);background:var(--accent-soft);padding:1px 8px;border-radius:999px;">eBay · 速卖通</span>
+      </summary>
+      <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
+        <div style="margin-bottom:10px;">
+          <label for="set-ebay-id" style="font-size:.85rem;color:var(--muted);">eBay 凭证（商品分析）</label>
+          <input type="password" id="set-ebay-id" placeholder="App ID" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-ebay-secret" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · eBay 商品分析（链接→价格/评分/卖家）。需 eBay 开发者审核 · 需梯子</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="set-aliexpress-key" style="font-size:.85rem;color:var(--muted);">速卖通联盟凭证（商品分析）</label>
+          <input type="password" id="set-aliexpress-key" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-aliexpress-secret" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 速卖通商品分析（链接→商品/价格/销量）。联盟开放平台 · 国内直连</div>
+        </div>
+      </div>
+    </details>
     <div style="display:flex;gap:8px;">
       <button id="set-save" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">保存</button>
       <button id="set-close" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;">关闭</button>
@@ -40,6 +52,15 @@
   const mask = document.getElementById('settings-mask');
   const panel = document.getElementById('settings-panel');
   const status = document.getElementById('set-status');
+
+  // 更多 API 折叠箭头旋转
+  const moreDetail = panel.querySelector('details');
+  if (moreDetail) {
+    moreDetail.addEventListener('toggle', () => {
+      const arrow = document.getElementById('set-more-arrow');
+      if (arrow) arrow.style.transform = moreDetail.open ? 'rotate(90deg)' : '';
+    });
+  }
 
   // 右上角 ⚙️ 按钮（插入品牌栏右侧，与主题按钮并排）
   const gear = document.createElement('button');
