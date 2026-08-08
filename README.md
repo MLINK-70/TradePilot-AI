@@ -73,9 +73,9 @@
 ```
 ├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）
 ├── config.py        # 读取 .env 配置（DeepSeek / Tavily / eBay / 速卖通密钥）
-├── llm.py           # DeepSeek 调用层：直连、重试、JSON 解析、证据链注入、缓存
-├── prompts.py       # 系统提示词（6 字段 JSON 协议，产品核心价值）
-├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标
+├── llm.py           # 多 AI 提供商调用层（DeepSeek/GPT/Claude/自定义）：重试、JSON 解析、证据链注入、缓存
+├── prompts.py       # 系统提示词（9 字段 JSON 协议，IDC/学术报告风格）
+├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标、HS 编码 AI 自动解析
 ├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
 ├── ecommerce.py     # 跨境电商模块：评论分析 / 竞品对比 / Listing
 ├── ebay.py          # eBay 商品分析（OAuth + Browse API）
@@ -111,7 +111,7 @@
 
 | 阶段 | 模块 | 内容 |
 | --- | --- | --- |
-| ✅ 已完成 | 市场分析 Research | 产品 + 国家 → 结构化市场报告（6 字段） |
+| ✅ 已完成 | 市场分析 Research | 产品 + 国家 → 结构化市场报告（9 字段：摘要五段式/规模/趋势/品牌点评/画像/法规风险/行动路线/展望） |
 | ✅ 已完成 | 贸易数据 Trade | HS 编码 → 中国出口数据 + 趋势图 + AI 解读 + Word/CSV 导出 |
 | ✅ 已完成 | 外贸业务 Business | 英文开发信（含真实数据引用）/ 跟进邮件 / 产品介绍+FAQ / AI 模拟客户 |
 | ✅ 已完成 | 跨境电商 E-commerce | 评论分析 → 痛点报告 + 竞品对比 + 平台 Listing + 一键书签 |
