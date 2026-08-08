@@ -163,6 +163,8 @@ def _hs_via_ai(product: str) -> str:
                     try:
                         from hs_descriptions import HS_DESCRIPTIONS
                         HS_DESCRIPTIONS[str(hs)] = desc
+                        from database import save_cache
+                        save_cache("HSDESC", "0", "0", "X", [{"hs": hs, "desc": desc}], "0", cache_key=hs)
                     except Exception:
                         pass
                 return hs
@@ -180,10 +182,12 @@ def _hs_via_ai(product: str) -> str:
         if hs.isdigit() and 4 <= len(hs) <= 6:
             _HS_AI_CACHE[product] = hs
             HS_MAP[product] = hs  # 写进内置表，下次直接命中
-            # 描述持久化：写进 SQLite（cache_key 存产品名）+ hs_descriptions 内存表
+            # 描述持久化：写进 SQLite（cache_key 存产品名）+ HSDESC 反向缓存（按编码精确查）+ 内存表
             try:
                 from database import save_cache
                 save_cache("HSAI", "0", "0", "X", [{"hs": hs, "desc": desc}], "0", cache_key=product)
+                if desc:
+                    save_cache("HSDESC", "0", "0", "X", [{"hs": hs, "desc": desc}], "0", cache_key=hs)
             except Exception:
                 pass
             if desc:
@@ -525,7 +529,8 @@ def get_competitor_comparison(product: str, target: str, year: str,
         if not hs:
             return {}
         # 结果缓存（HS+目标+年份+出口国 → 对比结果），避免重复轮询多国 UN Comtrade
-        cache_k = f"{target}|{reporter}"
+        # 版本签名 V1：未来改 share 计算/候选人名单时递增，旧缓存自动失效
+        cache_k = f"V1|{target}|{reporter}"
         try:
             from database import get_cached
             cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
@@ -574,10 +579,10 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         hs = hs_lookup(product)
         if not hs:
             return []
-        # 先查缓存（HS+年份 → TOP 出口国）
+        # 先查缓存（HS+年份 → TOP 出口国），版本签名 V1：改候选人名单/计算时递增
         try:
             from database import get_cached
-            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="rank")
+            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="V1|rank")
             if cached and isinstance(cached, list):
                 return cached[:top_n]
         except Exception:
@@ -596,7 +601,7 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         # 写缓存（含 fetch_year 已缓存，这里存排名结果）
         try:
             from database import save_cache
-            save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="rank")
+            save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="V1|rank")
         except Exception:
             pass
         return top

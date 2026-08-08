@@ -27,30 +27,19 @@ HS_DESCRIPTIONS = {
 
 
 def get_hs_description(hs_code: str) -> str:
-    """返回 HS 编码的中文描述；未收录时查 SQLite 持久缓存（AI 解析时写入）"""
+    """返回 HS 编码的中文描述；未收录时查 SQLite 持久缓存（HSDESC，按编码精确查）"""
     hs = str(hs_code)
     desc = HS_DESCRIPTIONS.get(hs, "")
     if desc:
         return desc
-    # 从 SQLite 持久缓存找（hs_lookup 的 AI 解析结果含描述，cache_key 存产品名）
+    # 精确查 HSDESC 缓存（cache_key=hs_code），O(1) 无全表扫描
     try:
-        import sqlite3
-        conn = sqlite3.connect("tradepilot.db")
-        rows = conn.execute(
-            "SELECT data_json FROM trade_cache WHERE cmd_code='HSAI' AND cache_key != ''"
-        ).fetchall()
-        conn.close()
-        import json
-        for (data_json,) in rows:
-            try:
-                d = json.loads(data_json)
-                if isinstance(d, list) and d and str(d[0].get("hs", "")) == hs:
-                    desc = str(d[0].get("desc", ""))
-                    if desc:
-                        HS_DESCRIPTIONS[hs] = desc  # 写回内存表
-                    return desc
-            except Exception:
-                continue
+        from database import get_cached
+        cached = get_cached("HSDESC", "0", "0", "X", "0", cache_key=hs)
+        if cached and isinstance(cached, list) and cached:
+            desc = str(cached[0].get("desc", ""))
+            if desc:
+                HS_DESCRIPTIONS[hs] = desc  # 写回内存表
     except Exception:
         pass
     return desc
