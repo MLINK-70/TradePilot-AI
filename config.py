@@ -101,5 +101,9 @@ def get_keys_status() -> dict:
         "ALIEXPRESS_APP_SECRET": bool(RUNTIME_KEYS.get("ALIEXPRESS_APP_SECRET")),
         "AI_PROVIDER": RUNTIME_KEYS.get("AI_PROVIDER", "deepseek"),
         "AI_MODEL": RUNTIME_KEYS.get("AI_MODEL", ""),
+        "AI_API_KEY": bool(RUNTIME_KEYS.get("AI_API_KEY")),
+        "AI_BASE_URL": bool(RUNTIME_KEYS.get("AI_BASE_URL")),
         "SEARCH_PROVIDER": RUNTIME_KEYS.get("SEARCH_PROVIDER", "tavily"),
+        "SEARCH_API_KEY": bool(RUNTIME_KEYS.get("SEARCH_API_KEY")),
+        "SEARCH_BASE_URL": bool(RUNTIME_KEYS.get("SEARCH_BASE_URL")),
     }

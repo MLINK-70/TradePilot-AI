@@ -134,7 +134,8 @@
       }
       if (s.DEEPSEEK_API_KEY || s.AI_API_KEY) document.getElementById('set-ai-key').placeholder = '已配置（留空保持不变）';
       if (s.AI_MODEL) document.getElementById('set-ai-model').placeholder = '当前：' + s.AI_MODEL;
-      if (s.TAVILY_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
+      if (s.AI_BASE_URL) document.getElementById('set-ai-base').placeholder = '已配置（留空保持不变）';
+      if (s.TAVILY_API_KEY || s.SEARCH_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
       if (s.EBAY_APP_ID) document.getElementById('set-ebay-id').placeholder = '已配置（留空保持不变）';
       if (s.ALIEXPRESS_APP_KEY && s.ALIEXPRESS_APP_SECRET) {
         document.getElementById('set-aliexpress-key').placeholder = '已配置（留空保持不变）';
