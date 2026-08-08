@@ -119,7 +119,7 @@
         <form id="ebay-form" autocomplete="off">
           <div class="form-row">
             <label for="ebay-url">eBay 链接</label>
-            <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);">
+            <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off">
           </div>
           <button type="submit" id="ebay-submit" class="btn-primary">分析 eBay 商品</button>
         </form>
@@ -129,7 +129,7 @@
         <form id="aliexpress-form" autocomplete="off" style="margin-top:1.4rem;">
           <div class="form-row">
             <label for="aliexpress-url">速卖通链接</label>
-            <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);">
+            <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off">
           </div>
           <button type="submit" id="aliexpress-submit" class="btn-primary">分析速卖通商品</button>
         </form>
@@ -192,12 +192,12 @@
         <h3 class="analysis-title">竞品对比</h3>
         <div class="form-row">
           <label for="prod-a">产品 A</label>
-          <input type="text" id="prod-a" placeholder="例如：A 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+          <input type="text" id="prod-a" placeholder="例如：A 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off">
         </div>
         <textarea id="reviews-a" placeholder="粘贴产品 A 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
         <div class="form-row">
           <label for="prod-b">产品 B</label>
-          <input type="text" id="prod-b" placeholder="例如：B 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+          <input type="text" id="prod-b" placeholder="例如：B 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off">
         </div>
         <textarea id="reviews-b" placeholder="粘贴产品 B 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
         <button type="button" id="compare-btn" class="btn-inline">对比分析</button>

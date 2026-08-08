@@ -27,5 +27,32 @@ HS_DESCRIPTIONS = {
 
 
 def get_hs_description(hs_code: str) -> str:
-    """返回 HS 编码的中文描述；未收录返回空字符串"""
-    return HS_DESCRIPTIONS.get(str(hs_code), "")
+    """返回 HS 编码的中文描述；未收录时查 SQLite 持久缓存（AI 解析时写入）"""
+    hs = str(hs_code)
+    desc = HS_DESCRIPTIONS.get(hs, "")
+    if desc:
+        return desc
+    # 从 SQLite 持久缓存找（hs_lookup 的 AI 解析结果含描述）
+    try:
+        from database import get_cached
+        # 遍历 HSAI 缓存找匹配编码（产品名 → {hs, desc}）
+        import sqlite3
+        conn = sqlite3.connect("tradepilot.db")
+        rows = conn.execute(
+            "SELECT data_json FROM trade_cache WHERE cmd_code='HSAI'"
+        ).fetchall()
+        conn.close()
+        import json
+        for (data_json,) in rows:
+            try:
+                d = json.loads(data_json)
+                if isinstance(d, list) and d and str(d[0].get("hs", "")) == hs:
+                    desc = str(d[0].get("desc", ""))
+                    if desc:
+                        HS_DESCRIPTIONS[hs] = desc  # 写回内存表
+                    return desc
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return desc

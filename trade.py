@@ -135,12 +135,82 @@ def get_latest_year() -> int:
     return 2024  # 兜底
 
 
+# AI 辅助 HS 编码解析缓存（产品名 → 编码，避免重复调用）
+_HS_AI_CACHE: dict = {}
+
+
+def _hs_via_ai(product: str) -> str:
+    """AI 辅助：产品名 → HS 编码（4-6 位）。失败返回空字符串。
+
+    用 DeepSeek 知识库解析（如"羽毛球拍"→9506），成功后写入 SQLite 持久缓存 + 内置表。
+    """
+    # 太短的输入无法识别（防 AI 幻觉乱猜编码），直接返回空
+    if len(product.strip()) < 2:
+        return ""
+    if product in _HS_AI_CACHE:
+        return _HS_AI_CACHE[product]
+    # 先查 SQLite 持久缓存（重启不丢）
+    try:
+        from database import get_cached
+        cached = get_cached("HSAI", "0", "0", "X", product)
+        if cached:
+            hs = str(cached[0].get("hs", ""))
+            if hs.isdigit():
+                _HS_AI_CACHE[product] = hs
+                HS_MAP[product] = hs
+                desc = str(cached[0].get("desc", "")).strip()
+                if desc:
+                    try:
+                        from hs_descriptions import HS_DESCRIPTIONS
+                        HS_DESCRIPTIONS[str(hs)] = desc
+                    except Exception:
+                        pass
+                return hs
+    except Exception:
+        pass
+    try:
+        from llm import _chat, _parse_json
+        content = _chat([
+            {"role": "system", "content": "你是 HS 编码专家。根据产品名，返回对应的 HS 编码（4-6 位数字）和中文品名描述。只输出 JSON：{\"hs_code\": \"9506\", \"description\": \"体育器械：羽毛球拍等\"}"},
+            {"role": "user", "content": f"产品: {product}"},
+        ], use_json=True)
+        data = _parse_json(content)
+        hs = str(data.get("hs_code", "")).strip()
+        desc = str(data.get("description", "")).strip()
+        if hs.isdigit() and 4 <= len(hs) <= 6:
+            _HS_AI_CACHE[product] = hs
+            HS_MAP[product] = hs  # 写进内置表，下次直接命中
+            # 描述持久化：写进 SQLite + hs_descriptions 内存表
+            try:
+                from database import save_cache
+                save_cache("HSAI", "0", "0", "X", [{"hs": hs, "desc": desc}], product)
+            except Exception:
+                pass
+            if desc:
+                try:
+                    from hs_descriptions import HS_DESCRIPTIONS
+                    HS_DESCRIPTIONS[str(hs)] = desc
+                except Exception:
+                    pass
+            return hs
+    except Exception:
+        pass
+    _HS_AI_CACHE[product] = ""
+    return ""
+
+
 def hs_lookup(product: str) -> str:
-    """产品名 → HS 编码；支持直接传 4-6 位数字编码"""
+    """产品名 → HS 编码；支持直接传 4-6 位数字编码
+
+    优先内置表；匹配不到时 AI 辅助解析（成功后写缓存），再失败返回空（前端提示手输）。
+    """
     product = product.strip()
     if product.isdigit() and 4 <= len(product) <= 6:
         return product
-    return HS_MAP.get(product, "")
+    hs = HS_MAP.get(product, "")
+    if not hs:
+        hs = _hs_via_ai(product)
+    return hs
 
 
 def partner_lookup(name: str) -> str:

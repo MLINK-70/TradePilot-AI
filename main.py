@@ -692,6 +692,22 @@ def markdown_report(product: str, country: str, d: dict) -> str:
     """把 DeepSeek 返回的结构化 JSON 渲染成 Markdown 报告"""
     lines = [f"# {product}市场分析（{country}）", ""]
 
+    # 核心结论速览（摘要五段式：背景→数据→发现→挑战→建议）
+    es = d.get("executive_summary") or {}
+    if es and (es.get("background") or es.get("data_points")):
+        lines += ["> **摘要**", ""]
+        if es.get("background"):
+            lines += [f"> **背景**：{_safe(es['background'])}", ""]
+        if es.get("data_points"):
+            lines += ["> **关键数据**：", *[f"> - {_safe(item)}" for item in es["data_points"]], ""]
+        if es.get("key_findings"):
+            lines += ["> **核心发现**：", *[f"> - {_safe(item)}" for item in es["key_findings"]], ""]
+        if es.get("challenges"):
+            lines += ["> **主要挑战**：", *[f"> - {_safe(item)}" for item in es["challenges"]], ""]
+        if es.get("recommendation"):
+            lines += [f"> **建议**：{_safe(es['recommendation'])}", ""]
+        lines.append("")
+
     # 市场规模
     ms = d.get("market_size") or {}
     lines += [
@@ -714,16 +730,21 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         "",
     ]
 
-    # 热门品牌
+    # 热门品牌（含点评列，IDC 风格）
     brands = d.get("top_brands") or []
-    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 | 备注 |", "| --- | --- | --- | --- |"]
+    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 | 点评 |", "| --- | --- | --- | --- |"]
     for b in brands:
         if not isinstance(b, dict):
             continue
-        note = _safe(b.get("note"))
+        note = _safe(b.get("comment")) or _safe(b.get("note"))
+        ship = _safe(b.get("shipment"))
+        growth = _safe(b.get("growth"))
+        pos = _safe(b.get("position"))
+        if ship or growth:
+            pos = pos + (f" · 出货{ship}" if ship else "") + (f" · 同比{growth}" if growth else "")
         lines.append(
             f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | "
-            f"{_safe(b.get('position'))} | {note} |"
+            f"{pos} | {note} |"
         )
     lines.append("")
 
@@ -742,16 +763,29 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         "",
     ]
 
-    # 风险分析
+    # 风险分析（含具体法规条款）
     risks = d.get("risks") or []
-    lines += ["## 风险分析", "| 风险类型 | 等级 | 说明 |", "| --- | --- | --- |"]
+    lines += ["## 风险分析", "| 风险类型 | 等级 | 说明 | 相关法规 |", "| --- | --- | --- | --- |"]
     for r in risks:
         if not isinstance(r, dict):
             continue
-        lines.append(f"| {_safe(r.get('type'))} | {_safe(r.get('level'))} | {_safe(r.get('description'))} |")
+        lines.append(f"| {_safe(r.get('type'))} | {_safe(r.get('level'))} | {_safe(r.get('description'))} | {_safe(r.get('regulation'))} |")
     lines.append("")
+
+    # 行动路线（分步可执行）
+    ap = d.get("action_plan") or []
+    if ap:
+        lines += ["## 行动路线"]
+        for i, step in enumerate(ap, 1):
+            lines.append(f"{i}. {_safe(step)}")
+        lines.append("")
 
     # 总结
     lines += ["## AI 总结", _safe(d.get("summary")), ""]
+
+    # 展望（IDC 风格：给方向性预测）
+    outlook = _safe(d.get("outlook"))
+    if outlook and outlook != "":
+        lines += ["## 市场展望", outlook, ""]
 
     return "\n".join(lines)
