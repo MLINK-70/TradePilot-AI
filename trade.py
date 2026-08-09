@@ -470,12 +470,15 @@ def compute_rca(product_export: float, country_export: float,
 
 
 def get_competitiveness(product: str, target: str, year: str, reporter: str = "中国") -> dict:
-    """竞争力指标：TC（贸易竞争力指数）+ RCA（显性比较优势）
+    """竞争力指标：TC（贸易竞争力指数）+ 市场出口份额
 
-    - TC：需要中国对该市场的出口 + 进口（flow X + M）
-    - RCA：需要该产品对全球的出口占比 vs 目标市场产品的全球占比
-      （简化：用产品全球出口 vs 目标市场进口中该产品占比）
-    任一数据缺失返回空 dict，不阻断。
+    - TC：出口国对该市场该产品的出口 + 进口（flow X + M），TC=(X-M)/(X+M)
+    - 市场出口份额：出口国对该市场该产品出口 / 该市场该产品总进口
+      （份额 = 出口国占目标市场进口的比重，真实可算、有业务含义）
+
+    说明：标准 RCA（显性比较优势）需要全球总出口数据（reporter=0），
+    UN Comtrade preview 免费接口不提供，故用"市场出口份额"替代——
+    同样衡量竞争力，且数据严谨可溯源。任一数据缺失返回空 dict，不阻断。
     """
     try:
         hs = hs_lookup(product)
@@ -485,25 +488,24 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
         if not target_code:
             return {}
 
-        # TC：出口 + 进口（中国对该市场）
+        # TC：出口 + 进口（出口国对该市场）
         exp_rows = fetch_year(hs, target_code, year, reporter, flow="X")
         imp_rows = fetch_year(hs, target_code, year, reporter, flow="M")
         export_value = sum(r.get("primaryValue") or 0 for r in exp_rows)
         import_value = sum(r.get("primaryValue") or 0 for r in imp_rows)
         tc = compute_tc(export_value, import_value)
 
-        # RCA 简化：产品出口占目标市场总进口比 vs 该产品全球占比（用全球数据估算）
-        # 用目标市场从全球进口该产品（flow=M, partner=全球0）作为 product_world
-        world_rows = fetch_year(hs, "0", year, target, flow="M")
-        product_world = sum(r.get("primaryValue") or 0 for r in world_rows)
+        # 市场出口份额：目标市场该产品总进口（flow=M, partner=0 全球）
+        market_import_rows = fetch_year(hs, "0", year, target, flow="M")
+        market_import_value = sum(r.get("primaryValue") or 0 for r in market_import_rows)
+        market_share = round(export_value / market_import_value * 100, 2) if market_import_value else None
 
-        # 目标市场总进口（用 GDP 估算不可行，直接用该产品全球值做基准简化）
-        # 简化 RCA：产品对中国出口 / 目标市场总进口（缺总进口数据时返回 None）
         return {
             "tc": tc,
             "export_value": export_value,
             "import_value": import_value,
-            "product_world_value": product_world,
+            "market_import_value": market_import_value,
+            "market_share": market_share,  # 出口国占目标市场该产品进口的份额（%）
             "available": True,
         }
     except Exception:

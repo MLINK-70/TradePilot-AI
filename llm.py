@@ -278,6 +278,15 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
     market_context: World Bank 市场环境（可选），双证据链支撑结论。
     landscape: 竞争格局（龙头品牌/变动原因/产业链，可选），深化解读。
     """
+    # 数据不足硬校验：趋势数据点 <3 时不调 AI（防止 AI 硬编数值绕开"AI 不参与算术"底线）
+    if len(trend) < 3:
+        return {
+            "overview": "数据不足：该查询的有效数据点少于 3 年，无法计算趋势，建议扩大年份范围或更换产品/市场。",
+            "highlights": [],
+            "risks": [],
+            "suggestion": "请扩大查询年份范围后重试。",
+            "_data_insufficient": True,
+        }
     # 缓存 key 含提示词版本签名：TRADE_TREND_SYSTEM 变更时旧缓存自动失效
     PROMPT_VER = "v2-entry-strategy"  # 提示词结构版本（改提示词需递增）
     cache_key = (product, target, reporter, tuple(trend.keys()), PROMPT_VER)

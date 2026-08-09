@@ -193,10 +193,10 @@ def export_report(req: TradeExportRequest):
         ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
     # 统计指标 + AI 趋势解读（供执行摘要引用）
     trend = summarize_trend(rows)
-    stats = summarize_stats(trend) if len(trend) >= 2 else {}
+    stats = summarize_stats(trend) if len(trend) >= 3 else {}
     analysis = {}
     try:
-        if len(trend) >= 2:
+        if len(trend) >= 3:
             analysis = analyze_trade_trend(req.product.strip(), req.target.strip(),
                                            req.reporter, trend, stats)
     except ValueError:
@@ -292,7 +292,7 @@ def trade_query(req: TradeQueryRequest):
     stats = {}
     try:
         # 单年数据无趋势可解读（首末同年变化 0% 无意义），跳过 AI 解读
-        if len(trend) >= 2:
+        if len(trend) >= 3:
             stats = summarize_stats(trend)  # 程序先算好已核实指标
             # 注入 World Bank 市场环境（双证据链：贸易 + 经济）
             market_ctx = get_market_context(target)
@@ -306,7 +306,7 @@ def trade_query(req: TradeQueryRequest):
     except ValueError:
         pass
 
-    # 竞争力指标（TC/RCA，失败不阻断）
+    # 竞争力指标（TC + 市场出口份额，失败不阻断）
     try:
         if len(years) == 1:
             competitiveness = get_competitiveness(product, target, str(years[0]), req.reporter)
@@ -345,7 +345,7 @@ def trade_query(req: TradeQueryRequest):
         "stats": stats,  # 程序精确计算的统计指标（CAGR/峰值/单价等）
         "landscape": landscape if landscape.get("top_brands") else {},  # 竞争格局（龙头品牌/变动原因/产业链）
         "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
-        "competitiveness": competitiveness,  # TC/RCA 竞争力指标
+        "competitiveness": competitiveness,  # TC + 市场出口份额
         "competitors": competitor_cmp,  # 竞争对手出口对比
         "top_exporters": top_exporters,  # 品类全球出口大国（含全球出口额）
         "destinations": destination_rank,  # 出口目的地排名

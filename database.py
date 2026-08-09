@@ -11,7 +11,8 @@ DB_PATH = "tradepilot.db"
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # timeout=10：并发写时等待锁最多 10 秒，避免立即抛 "database is locked"
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
