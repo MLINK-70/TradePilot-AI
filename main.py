@@ -35,8 +35,9 @@ from ebay import analyze_item, get_oauth_token, parse_ebay_url
 from aliexpress import analyze_product, parse_aliexpress_url
 import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
-                   get_competitor_comparison, get_destination_ranking,
-                   get_latest_year, get_top_exporters, query_trade, query_trend,
+                   get_competitiveness_matrix, get_competitor_comparison,
+                   get_destination_ranking, get_hs_candidates, get_latest_year,
+                   get_top_exporters, query_trade, query_trend,
                    summarize_stats, summarize_trend)
 from hs_descriptions import get_hs_description
 from export import build_csv, build_market_report, build_word_report
@@ -248,6 +249,22 @@ def _years_from_range(start_year: int, end_year: int | None) -> list:
     return list(range(start_year, end_year + 1))
 
 
+class HsCandidatesRequest(BaseModel):
+    product: str
+
+
+@app.post("/api/trade/hs-candidates")
+def hs_candidates(req: HsCandidatesRequest):
+    """产品名 → 3 个候选 HS 编码（编码 + 描述），供用户点选确认"""
+    product = req.product.strip()
+    if not product:
+        raise HTTPException(status_code=400, detail="产品不能为空")
+    candidates = get_hs_candidates(product)
+    if not candidates:
+        raise HTTPException(status_code=502, detail="HS 编码解析失败，请手输 4-6 位数字编码")
+    return {"candidates": candidates}
+
+
 @app.get("/api/trade/options")
 def trade_options():
     """返回前端下拉选项：产品（HS映射）+ 国家/组织（含分组标记）+ 最新年份"""
@@ -318,6 +335,7 @@ def trade_query(req: TradeQueryRequest):
     # 竞争对手出口对比 + 目的地排名（失败不阻断，仅单年查询时）
     competitor_cmp = {}
     destination_rank = {}
+    matrix = []
     top_exporters = []
     try:
         y = str(years[0] if len(years) == 1 else years[-1])
@@ -331,6 +349,8 @@ def trade_query(req: TradeQueryRequest):
                                                     competitors=top_names[:6],
                                                     reporter=req.reporter)
         destination_rank = get_destination_ranking(product, target, y, req.reporter)
+        # 竞争力矩阵：出口大国 × {出口额/份额/CAGR/单价/判断}（程序计算）
+        matrix = get_competitiveness_matrix(product, target, years, req.reporter)
     except Exception:
         pass
 
@@ -347,6 +367,7 @@ def trade_query(req: TradeQueryRequest):
         "market_context": market_ctx,  # World Bank 经济环境（前端展示来源）
         "competitiveness": competitiveness,  # TC + 市场出口份额
         "competitors": competitor_cmp,  # 竞争对手出口对比
+        "matrix": matrix,  # 竞争力矩阵（出口大国 × 出口额/份额/CAGR/单价/判断）
         "top_exporters": top_exporters,  # 品类全球出口大国（含全球出口额）
         "destinations": destination_rank,  # 出口目的地排名
         "rows": [

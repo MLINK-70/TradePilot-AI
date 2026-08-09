@@ -29,6 +29,19 @@
     }
     .analysis-section { margin-top: 0.8rem; }
     .analysis-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.2rem; }
+    .hs-cand-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.4rem; }
+    .hs-cand {
+      padding: 0.35rem 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      color: var(--text);
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .hs-cand:hover { border-color: var(--accent); color: var(--accent); }
+    .hs-cand.active { background: var(--accent); color: #fff; border-color: transparent; }
     .analysis-section ul { padding-left: 1.2rem; color: var(--text); font-size: 0.9rem; }
     .analysis-section li { margin: 0.15rem 0; }
     .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
@@ -81,6 +94,10 @@
         <div class="form-row">
           <label for="product">产品</label>
           <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required autocomplete="off">
+          <div id="hs-cand-box" hidden>
+            <div class="analysis-label">检测到可能的 HS 编码，请选择：</div>
+            <div id="hs-cand-list" class="hs-cand-list"></div>
+          </div>
         </div>
         <div class="form-row">
           <label for="reporter">出口国</label>
@@ -182,6 +199,13 @@
         <p class="meta" id="competitor-meta"></p>
       </div>
 
+      <!-- 竞争力矩阵：出口大国 × 出口额/份额/CAGR/单价/判断 -->
+      <div class="chart-box" id="matrix-box" hidden>
+        <h3 class="analysis-title">竞争力矩阵</h3>
+        <table class="pain-table" id="matrix-table"></table>
+        <p class="meta">出口大国对目标市场的竞争力对比 · CAGR 与份额由程序精确计算</p>
+      </div>
+
       <!-- 竞争格局：龙头品牌 + 变动原因 + 产业链（行业报告式） -->
       <div class="chart-box" id="landscape-box" hidden>
         <h3 class="analysis-title">竞争格局</h3>
@@ -260,6 +284,46 @@
         }
       })();
 
+      // HS 编码候选确认：输入产品后展示候选，用户点选（防错编码→错数据）
+      let selectedHs = null;
+      const productInput = document.getElementById('product');
+      const candBox = document.getElementById('hs-cand-box');
+      const candList = document.getElementById('hs-cand-list');
+
+      async function loadHsCandidates() {
+        const val = productInput.value.trim();
+        selectedHs = null;
+        candBox.hidden = true;
+        candList.innerHTML = '';
+        // 数字编码直接可用，不弹候选；太短的输入不查
+        if (!val || /^\d{4,6}$/.test(val) || val.length < 2) return;
+        try {
+          const resp = await fetch('/api/trade/hs-candidates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product: val }),
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.candidates || !data.candidates.length) return;
+          data.candidates.forEach(c => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hs-cand';
+            btn.textContent = c.hs_code + ' — ' + (c.description || '');
+            btn.addEventListener('click', () => {
+              candList.querySelectorAll('.hs-cand').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              selectedHs = c.hs_code;
+            });
+            candList.appendChild(btn);
+          });
+          candBox.hidden = false;
+        } catch (_) { /* 候选加载失败不阻断手动查询 */ }
+      }
+
+      productInput.addEventListener('change', loadHsCandidates);
+      productInput.addEventListener('blur', () => setTimeout(loadHsCandidates, 300));
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const product = document.getElementById('product').value.trim();
@@ -278,6 +342,8 @@
           showStatus('截至年份不能早于起始年份', 'error');
           return;
         }
+        // 用户已点选 HS 候选 → 用确认的编码查询（防错编码→错数据）
+        const queryProduct = selectedHs || product;
 
         btn.disabled = true;
         btn.textContent = '查询中…';
@@ -288,7 +354,7 @@
           const resp = await fetch('/api/trade/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product, target, start_year: startYear, end_year: endYear, reporter }),
+            body: JSON.stringify({ product: queryProduct, target, start_year: startYear, end_year: endYear, reporter }),
           });
           let data = {};
           try { data = await resp.json(); } catch (_) {}
@@ -320,7 +386,11 @@
         const tbody = document.createElement('tbody');
         rows.forEach(r => {
           const tr = document.createElement('tr');
-          mapper(r).forEach(v => { const td = document.createElement('td'); td.textContent = v || ''; tr.appendChild(td); });
+          mapper(r).forEach(v => {
+            const td = document.createElement('td');
+            if (v instanceof Node) { td.appendChild(v); } else { td.textContent = v || ''; }
+            tr.appendChild(td);
+          });
           tbody.appendChild(tr);
         });
         tbl.appendChild(tbody);
@@ -452,6 +522,38 @@
             cpBox.hidden = false;
           } else {
             cpBox.hidden = true;
+          }
+
+          // 竞争力矩阵（程序计算：出口额/份额/CAGR/单价/判断）
+          const mxBox = document.getElementById('matrix-box');
+          const matrix = data.matrix || [];
+          if (matrix.length) {
+            const verdictColor = v => {
+              if (v === '快速上升') return 'var(--teal)';
+              if (v === '稳步增长') return 'var(--accent)';
+              if (v === '稳定') return 'var(--muted)';
+              if (v === '下降') return 'var(--error)';
+              return 'var(--muted)';
+            };
+            fillTable('matrix-table',
+              ['出口国', '最新出口(亿美元)', '占市场进口份额', '5年CAGR', '单价($/kg)', '判断'],
+              matrix, r => {
+                const v = document.createElement('span');
+                v.textContent = r.verdict || '—';
+                v.style.color = verdictColor(r.verdict);
+                v.style.fontWeight = '700';
+                return [
+                  r.country || '',
+                  r.export_value != null ? (r.export_value / 1e8).toFixed(2) : '—',
+                  r.market_share != null ? r.market_share + '%' : '—',
+                  r.cagr_pct != null ? (r.cagr_pct >= 0 ? '+' : '') + r.cagr_pct + '%' : '—',
+                  r.unit_price != null ? '$' + r.unit_price.toFixed(2) : '—',
+                  v,
+                ];
+              });
+            mxBox.hidden = false;
+          } else {
+            mxBox.hidden = true;
           }
 
           // 竞争格局（龙头品牌 + 变动原因 + 产业链）

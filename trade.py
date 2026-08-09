@@ -139,6 +139,48 @@ def get_latest_year() -> int:
 _HS_AI_CACHE: dict = {}
 
 
+def get_hs_candidates(product: str, top_n: int = 3) -> list:
+    """AI 辅助：产品名 → 3 个候选 HS 编码（编码 + 描述），供用户确认
+
+    返回 [{hs_code, description}]。用户点选后 hs_lookup 用确认的编码查询，
+    防止 AI 单次解析错编码 → 错误数据 → 漂亮但错误的报告。
+    结果持久化到 SQLite（cache_key=产品名|cand）。
+    """
+    product = product.strip()
+    if len(product) < 2:
+        return []
+    try:
+        from database import get_cached
+        cached = get_cached("HSCAND", "0", "0", "X", "0", cache_key=product)
+        if cached and isinstance(cached, list) and cached:
+            return cached[:top_n]
+    except Exception:
+        pass
+    try:
+        from llm import _chat, _parse_json
+        content = _chat([
+            {"role": "system", "content": "你是 HS 编码专家。根据产品名，返回 3 个最可能的 HS 编码候选（4-6 位），每个带中文品名描述，按匹配度排序。只输出 JSON：{\"candidates\": [{\"hs_code\": \"9506\", \"description\": \"体育器械：羽毛球拍等\"}, ...]}"},
+            {"role": "user", "content": f"产品: {product}"},
+        ], use_json=True)
+        data = _parse_json(content)
+        candidates = []
+        for c in (data.get("candidates") or [])[:top_n]:
+            hs = str(c.get("hs_code", "")).strip()
+            desc = str(c.get("description", "")).strip()
+            if hs.isdigit() and 4 <= len(hs) <= 6:
+                candidates.append({"hs_code": hs, "description": desc})
+        if candidates:
+            try:
+                from database import save_cache
+                save_cache("HSCAND", "0", "0", "X", candidates, "0", cache_key=product)
+            except Exception:
+                pass
+            return candidates
+    except Exception:
+        pass
+    return []
+
+
 def _hs_via_ai(product: str) -> str:
     """AI 辅助：产品名 → HS 编码（4-6 位）。失败返回空字符串。
 
@@ -515,6 +557,108 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
 def get_competitor_comparison(product: str, target: str, year: str,
                               competitors: list = None,
                               reporter: str = "中国") -> dict:
+    """竞争对手出口对比：出口国 vs 同类主要出口国对目标市场的同类产品出口
+
+    competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）；
+    若出口国不在其中（如德国），自动加入并放在第一位，保证对比包含出口国自身。
+    返回 {competitors: [{country, value, share}], available: bool}
+    """
+    if competitors is None:
+        competitors = ["中国", "日本", "韩国", "越南"]
+    # 出口国必须是竞争对手之一（否则对比表里没有出口国自身，占比失真）
+    if reporter and reporter not in competitors:
+        competitors = [reporter] + [c for c in competitors if c != reporter]
+    try:
+        hs = hs_lookup(product)
+        if not hs:
+            return {}
+        # 结果缓存（HS+目标+年份+出口国 → 对比结果），避免重复轮询多国 UN Comtrade
+        # 版本签名 V1：未来改 share 计算/候选人名单时递增，旧缓存自动失效
+        cache_k = f"V1|{target}|{reporter}"
+        try:
+            from database import get_cached
+            cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
+            if cached and isinstance(cached, list):
+                return {"competitors": cached, "available": True}
+        except Exception:
+            pass
+        results = []
+        total = 0
+        for country in competitors:
+            try:
+                rows = fetch_year(hs, partner_lookup(target) or "0", year, reporter=country)
+                value = sum(r.get("primaryValue") or 0 for r in rows)
+                results.append({"country": country, "value": value})
+                total += value
+            except Exception:
+                results.append({"country": country, "value": 0})
+        for r in results:
+            r["share"] = round(r["value"] / total * 100, 1) if total else 0
+        try:
+            from database import save_cache
+            save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
+        except Exception:
+            pass
+        return {"competitors": results, "available": True}
+    except Exception:
+        return {}
+
+
+def get_competitiveness_matrix(product: str, target: str, years: list,
+                               reporter: str = "中国") -> list:
+    """竞争力矩阵：品类出口大国 × {出口额/份额/5年CAGR/单价/判断}
+
+    对每个出口大国查其对目标市场的多年出口趋势（复用 query_trend + 缓存），
+    程序计算 CAGR/单价/份额，判断列用 CAGR 阈值（非 AI，守住"AI 不参与算术"）。
+    返回 [{country, export_value, market_share, cagr_pct, unit_price, verdict}]，失败返回 []。
+    """
+    try:
+        # 出口大国名单（动态识别，复用 TOPEXP 缓存）
+        top = get_top_exporters(product, str(years[-1]))
+        top_names = [t["country"] for t in top]
+        if reporter not in top_names:
+            top_names = [reporter] + [n for n in top_names if n != reporter]
+        top_names = top_names[:6]
+
+        matrix = []
+        for country in top_names:
+            try:
+                hs, rows, trend = query_trend(product, target, years, reporter=country)
+                if not trend or len(trend) < 3:
+                    continue
+                stats = summarize_stats(trend)
+                # 份额：该国对目标市场出口 / 目标市场总进口（复用 get_competitiveness 逻辑）
+                cmp = get_competitiveness(product, target, str(years[-1]), reporter=country)
+                share = cmp.get("market_share")
+                # 判断：程序阈值（CAGR + 份额）
+                cagr = stats.get("cagr_pct")
+                if cagr is None:
+                    verdict = "数据不足"
+                elif cagr > 10:
+                    verdict = "快速上升"
+                elif cagr > 3:
+                    verdict = "稳步增长"
+                elif cagr > -3:
+                    verdict = "稳定"
+                else:
+                    verdict = "下降"
+                # 单价：最新年份
+                ups = stats.get("unit_prices") or []
+                unit_price = ups[-1]["price"] if ups else None
+                matrix.append({
+                    "country": country,
+                    "export_value": stats.get("last_value"),
+                    "market_share": share,
+                    "cagr_pct": cagr,
+                    "unit_price": unit_price,
+                    "verdict": verdict,
+                })
+            except Exception:
+                continue
+        matrix.sort(key=lambda x: (x["export_value"] or 0), reverse=True)
+        return matrix
+    except Exception:
+        return []
     """竞争对手出口对比：出口国 vs 同类主要出口国对目标市场的同类产品出口
 
     competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）；
