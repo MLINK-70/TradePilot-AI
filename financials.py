@@ -32,6 +32,11 @@ A_SHARES = {
     "亿纬锂能": "300014", "京东方A": "000725", "TCL科技": "000100",
 }
 
+# 非上市但有公开报道财务数据的公司（仅名单内走 Tavily 兜底，防未知公司幻觉）
+PRIVATE_COMPANIES = {
+    "华为", "OPPO", "vivo", "大疆", "传音", "字节跳动", "小米", "荣耀",
+}
+
 
 def get_a_share_financials(company: str) -> dict:
     """A 股财报：总营收/净利/毛利率/ROE（东方财富 datacenter 免费接口）
@@ -88,7 +93,8 @@ def get_company_financials(company: str) -> dict:
 
     - COMPANIES 里有 CIK → SEC EDGAR 官方（美股）
     - A_SHARES 里有代码 → 东方财富 A 股年报
-    - 否则 → Tavily 公开报道兜底（华为等非上市）
+    - PRIVATE_COMPANIES 名单内 → Tavily 公开报道兜底（华为等非上市）
+    - 其他 → 未收录（防未知公司走 Tavily 产生幻觉数据）
     返回统一结构 {company, source, available, metrics}
     """
     info = COMPANIES.get(company, "")
@@ -96,7 +102,9 @@ def get_company_financials(company: str) -> dict:
         return get_sec_financials(company)
     if company in A_SHARES:
         return get_a_share_financials(company)
-    return get_private_company_financials(company)
+    if company in PRIVATE_COMPANIES:
+        return get_private_company_financials(company)
+    return {"available": False, "reason": f"未收录公司「{company}」，暂不支持财报查询"}
 
 # us-gaap tag → 指标名（SEC 不同公司 tag 可能不同，按候选列表取）
 TAG_CANDIDATES = {
