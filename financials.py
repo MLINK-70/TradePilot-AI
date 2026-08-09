@@ -130,13 +130,29 @@ TAG_CANDIDATES = {
 
 
 def _fetch_concept(cik: str, tag: str) -> dict | None:
-    """拉取 SEC XBRL 概念数据（公司 + 指标 tag）"""
+    """拉取 SEC XBRL 概念数据（公司 + 指标 tag），429 限流重试"""
     url = f"{SEC_BASE}/CIK{cik}/us-gaap/{tag}.json"
-    resp = requests.get(url, headers={"User-Agent": "TradePilotAI contact@example.com"}, timeout=30)
-    if resp.status_code == 404:
-        return None
-    resp.raise_for_status()
-    return resp.json()
+    last_error = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers={"User-Agent": "TradePilotAI contact@example.com"}, timeout=30)
+            if resp.status_code == 404:
+                return None
+            if resp.status_code == 429:
+                last_error = f"429 限流（第 {attempt + 1} 次）"
+                wait = 2 * (attempt + 1)
+                logging.warning("SEC 429，%d 秒后重试...", wait)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            if attempt == 2:
+                logging.warning("SEC 拉取失败 %s/%s: %s", cik, tag, last_error)
+                return None
+            time.sleep(2)
+    return None
 
 
 def _annual_series(data: dict, n: int = 5) -> list:
