@@ -112,6 +112,23 @@
   </header>
 
   <main>
+    <!-- 公司财报画像：SEC/东方财富/公开报道 三层财务数据 -->
+    <section class="card">
+      <form id="fin-form" autocomplete="off">
+        <div class="form-row">
+          <label for="fin-company">公司名称</label>
+          <input type="text" id="fin-company" placeholder="例如：苹果 / 歌尔股份 / 华为" required autocomplete="off">
+        </div>
+        <button type="submit" id="fin-submit" class="btn-primary">查询财报画像</button>
+      </form>
+      <p id="fin-status" class="status"></p>
+      <div id="fin-result" class="listing-box" hidden>
+        <div class="listing-title" id="fin-name"></div>
+        <p class="meta" id="fin-source"></p>
+        <table class="pain-table" id="fin-table"></table>
+      </div>
+    </section>
+
     <!-- 更多 API：eBay / 速卖通商品分析（默认折叠） -->
     <details class="company-optional api-more">
       <summary id="api-more-toggle">更多 API <span class="api-badge">eBay · 速卖通</span></summary>
@@ -577,6 +594,76 @@
         } finally {
           al.disabled = false;
           al.textContent = '分析速卖通商品';
+        }
+      });
+
+      // 公司财报画像（SEC / 东方财富 / 公开报道）
+      document.getElementById('fin-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const company = document.getElementById('fin-company').value.trim();
+        if (!company) { showStatus('请输入公司名称', 'error'); return; }
+        const fb = document.getElementById('fin-submit');
+        fb.disabled = true;
+        fb.textContent = '查询中…';
+        const fs = document.getElementById('fin-status');
+        fs.textContent = '正在获取 ' + company + ' 财报数据…';
+        fs.className = 'status info';
+        try {
+          const resp = await fetch('/api/company/financials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ company }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            fs.textContent = data.detail || '查询失败';
+            fs.className = 'status error';
+            return;
+          }
+          const box = document.getElementById('fin-result');
+          document.getElementById('fin-name').textContent = data.company || company;
+          document.getElementById('fin-source').textContent = '数据来源：' + (data.source || '') +
+            (data.available ? '' : '（' + (data.reason || '无数据') + '）');
+          const tbl = document.getElementById('fin-table');
+          tbl.innerHTML = '';
+          const metrics = data.metrics || {};
+          const rows = [];
+          const defs = [
+            ['revenue', '营收', 1e8, '亿元'],
+            ['net_income', '归母净利', 1e8, '亿元'],
+            ['gross_margin_pct', '毛利率', 1, '%'],
+            ['rd_expense', '研发投入', 1e8, '亿元'],
+            ['roe_pct', 'ROE', 1, '%'],
+          ];
+          for (const [key, label, scale, unit] of defs) {
+            const series = metrics[key];
+            if (!series || !series.length) continue;
+            rows.push([label, ...series.map(s => (s.value / scale).toFixed(2) + unit)]);
+          }
+          if (rows.length) {
+            const years = (metrics.revenue || []).map(s => s.year);
+            const thead = document.createElement('thead');
+            const hr = document.createElement('tr');
+            ['指标', ...years].forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+            thead.appendChild(hr);
+            tbl.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            rows.forEach(r => {
+              const tr = document.createElement('tr');
+              r.forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+              tbody.appendChild(tr);
+            });
+            tbl.appendChild(tbody);
+          }
+          box.hidden = false;
+          fs.textContent = '';
+        } catch (_) {
+          fs.textContent = '网络错误，查询失败';
+          fs.className = 'status error';
+        } finally {
+          fb.disabled = false;
+          fb.textContent = '查询财报画像';
         }
       });
 

@@ -40,6 +40,7 @@ from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
                    get_top_exporters, query_trade, query_trend,
                    summarize_stats, summarize_trend)
 from hs_descriptions import get_hs_description
+from financials import get_company_financials
 from export import build_csv, build_market_report, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -251,6 +252,20 @@ def _years_from_range(start_year: int, end_year: int | None) -> list:
 
 class HsCandidatesRequest(BaseModel):
     product: str
+
+
+class CompanyFinancialsRequest(BaseModel):
+    company: str
+
+
+@app.post("/api/company/financials")
+def company_financials(req: CompanyFinancialsRequest):
+    """公司财报画像：营收/净利/毛利率/研发（SEC 官方或公开报道）"""
+    company = req.company.strip()
+    if not company:
+        raise HTTPException(status_code=400, detail="公司名不能为空")
+    result = get_company_financials(company)
+    return result
 
 
 @app.post("/api/trade/hs-candidates")
