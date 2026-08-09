@@ -613,6 +613,15 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
     返回 [{country, export_value, market_share, cagr_pct, unit_price, verdict}]，失败返回 []。
     """
     try:
+        # 结果缓存（HS+目标+年份范围+出口国 → 矩阵），避免每次查询重算多国多年
+        cache_k = f"V1|{target}|{years[0]}-{years[-1]}|{reporter}"
+        try:
+            from database import get_cached
+            cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k)
+            if cached and isinstance(cached, list):
+                return cached
+        except Exception:
+            pass
         # 出口大国名单（动态识别，复用 TOPEXP 缓存）
         top = get_top_exporters(product, str(years[-1]))
         top_names = [t["country"] for t in top]
@@ -656,54 +665,14 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
             except Exception:
                 continue
         matrix.sort(key=lambda x: (x["export_value"] or 0), reverse=True)
+        try:
+            from database import save_cache
+            save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k)
+        except Exception:
+            pass
         return matrix
     except Exception:
         return []
-    """竞争对手出口对比：出口国 vs 同类主要出口国对目标市场的同类产品出口
-
-    competitors 默认 [中国, 日本, 韩国, 越南]（消费电子主要出口国）；
-    若出口国不在其中（如德国），自动加入并放在第一位，保证对比包含出口国自身。
-    返回 {competitors: [{country, value, share}], available: bool}
-    """
-    if competitors is None:
-        competitors = ["中国", "日本", "韩国", "越南"]
-    # 出口国必须是竞争对手之一（否则对比表里没有出口国自身，占比失真）
-    if reporter and reporter not in competitors:
-        competitors = [reporter] + [c for c in competitors if c != reporter]
-    try:
-        hs = hs_lookup(product)
-        if not hs:
-            return {}
-        # 结果缓存（HS+目标+年份+出口国 → 对比结果），避免重复轮询多国 UN Comtrade
-        # 版本签名 V1：未来改 share 计算/候选人名单时递增，旧缓存自动失效
-        cache_k = f"V1|{target}|{reporter}"
-        try:
-            from database import get_cached
-            cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
-            if cached and isinstance(cached, list):
-                return {"competitors": cached, "available": True}
-        except Exception:
-            pass
-        results = []
-        total = 0
-        for country in competitors:
-            try:
-                rows = fetch_year(hs, partner_lookup(target) or "0", year, reporter=country)
-                value = sum(r.get("primaryValue") or 0 for r in rows)
-                results.append({"country": country, "value": value})
-                total += value
-            except Exception:
-                results.append({"country": country, "value": 0})
-        for r in results:
-            r["share"] = round(r["value"] / total * 100, 1) if total else 0
-        try:
-            from database import save_cache
-            save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
-        except Exception:
-            pass
-        return {"competitors": results, "available": True}
-    except Exception:
-        return {}
 
 
 def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
