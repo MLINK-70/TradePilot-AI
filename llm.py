@@ -268,8 +268,36 @@ TRADE_TREND_SYSTEM = """你是资深国际贸易分析师兼出海品牌策略�
 9. 所有内容中文输出"""
 
 
+COMPARE_SYSTEM = """你是资深消费电子市场分析师（IDC/Counterpoint 风格）。根据提供的**多个目标国家**的真实数据证据链（UN Comtrade 贸易数据 / World Bank 经济环境 / 竞争力指标），做横向对比分析，帮出口商选出最值得进入的市场。
+
+输出要求：
+1. 只输出合法 JSON 对象
+2. 结构如下：
+{
+  "overview": "2-3 句总体对比结论：哪个市场最值得优先进入，为什么",
+  "market_table": [
+    {"country": "国家名", "market_size": "出口额规模（亿美元+年份）", "growth": "CAGR/增速（%）", "competitiveness": "TC 指数或市场出口份额", "opportunity": "机会点（结合数据，具体）", "risk": "主要风险（结合数据/宏观）"}
+  ],
+  "recommendations": [
+    {"market": "国家名", "priority": "优先/次选/观察", "rationale": "入选理由（引用具体数据）", "strategy": "进入策略（渠道/价位/定位，具体可执行）"}
+  ],
+  "key_insights": ["洞察1（跨市场对比发现，如「德国消费力强但市场饱和，美国增速最快」）", "洞察2"],
+  "risks": ["风险1（跨市场层面，如「三市场均面临欧盟 EPR 合规成本」）", "风险2"],
+  "zh_summary": "不超过 50 字的一句话总结"
+}
+3. 必须直接引用给定指标数值（各国出口额/CAGR/TC/GDP/人均），禁止自行计算或编造任何数字
+4. market_table 每个国家一条，字段基于该国的真实数据
+5. recommendations 按优先级排序（优先/次选/观察），strategy 必须具体可执行（如「主推德国中端降噪，线上 Amazon.de + 线下 MediaMarkt」）
+6. key_insights 至少 2 条，要跨市场对比（如「美国市场增长最快但竞争最激烈，德国市场趋于饱和」）
+7. 数据不足的国家（无可查数据）如实标注「数据不足」，不硬编
+8. 所有内容中文输出"""
+
+
 # 手动缓存（trend/stats 是 dict 不可哈希，lru_cache 无法直接用）
 _trade_trend_cache: dict = {}
+
+# 多国对比缓存（product, countries 元组 + AI 提供商签名 → 对比结果）
+_compare_cache: dict = {}
 
 
 def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, stats: dict | None = None,
@@ -360,4 +388,68 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
     ], use_json=True)
     result = _parse_json(content)
     _trade_trend_cache[cache_key] = result  # 缓存结果，避免重复烧 token
+    return result
+
+
+def analyze_market_comparison(product: str, countries: list, per_country: dict) -> dict:
+    """多国家横向对比：各国真实证据链 → AI 对比解读
+
+    per_country: {国家: {market_context, trade_evidence, competitiveness}}
+    程序先算好各国指标（出口额/CAGR/TC/份额/GDP），AI 只解读不参与算术。
+    数据不足（无任何可用证据链）时返回降级结果，不硬编。
+    """
+    # 各国程序计算的指标行（格式化，供 AI 引用）
+    country_lines = []
+    for c in countries:
+        ev = per_country.get(c) or {}
+        ctx = ev.get("market_context") or {}
+        te = ev.get("trade_evidence") or {}
+        comp = ev.get("competitiveness") or {}
+        parts = [f"国家: {c}"]
+        if te.get("trend"):
+            trend = te["trend"]
+            years = sorted(trend.keys())
+            parts.append("出口额: " + "、".join(f"{y}年 {trend[y]} 亿美元" for y in years))
+        if comp.get("tc") is not None:
+            parts.append(f"TC={comp['tc']}（出口 {comp.get('export_value', 0) / 1e8:.2f} 亿 vs 进口 {comp.get('import_value', 0) / 1e8:.2f} 亿美元）")
+            if comp.get("market_share") is not None:
+                parts.append(f"占该国市场进口份额 {comp['market_share']}%")
+        if ctx.get("available"):
+            env = []
+            if ctx.get("gdp"):
+                env.append(f"GDP {ctx['gdp'] / 1e12:.2f} 万亿美元")
+            if ctx.get("population"):
+                env.append(f"人口 {ctx['population'] / 1e8:.2f} 亿")
+            if ctx.get("gdp_per_capita"):
+                env.append(f"人均 GDP {ctx['gdp_per_capita']:,.0f} 美元")
+            if env:
+                parts.append("市场环境（World Bank）: " + "，".join(env))
+        country_lines.append("\n".join(parts))
+
+    # 数据不足硬校验：没有任何国家有可用数据 → 不调 AI，避免幻觉算术
+    if not any(ev.get("trade_evidence") or ev.get("competitiveness")
+               for ev in per_country.values() if ev):
+        return {
+            "overview": "数据不足：所选国家均无法获取真实贸易/竞争力数据，无法进行对比分析。",
+            "market_table": [], "recommendations": [], "key_insights": [],
+            "risks": [], "zh_summary": "数据不足，无法对比。", "_data_insufficient": True,
+        }
+
+    PROMPT_VER = "v1-multi-country"
+    ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
+    cache_key = (product, tuple(countries), PROMPT_VER, ai_sig)
+    if cache_key in _compare_cache:
+        return _compare_cache[cache_key]
+
+    user_msg = (
+        f"产品: {product}\n请对以下目标国家做横向对比分析:\n\n"
+        + "\n\n".join(country_lines)
+        + "\n\n请输出对比解读 JSON（引用指标数值支撑结论，不自行计算）。"
+    )
+    content = _chat([
+        {"role": "system", "content": COMPARE_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ], use_json=True)
+    result = _parse_json(content)
+    _compare_cache[cache_key] = result
     return result

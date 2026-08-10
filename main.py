@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from llm import analyze_market, analyze_trade_trend
+from llm import analyze_market, analyze_market_comparison, analyze_trade_trend
 from market_data import (get_competitive_landscape, get_market_context,
                          get_news, get_trade_background)
 from business import (generate_followup_email, generate_outreach_email,
@@ -120,6 +120,66 @@ def analyze(req: AnalyzeRequest):
         "competitiveness": data.get("_competitiveness"),
         "market_context": market_ctx if market_ctx and market_ctx.get("available") else {},
         "background": background or {},
+    }
+
+
+class AnalyzeCompareRequest(BaseModel):
+    product: str
+    countries: list[str]
+
+
+def _collect_country_evidence(product: str, country: str) -> dict:
+    """聚合单国证据链（多国对比用）：市场环境/贸易趋势/竞争力，失败不阻断
+
+    趋势窗口与单国分析一致（默认近五年），保证 CAGR 口径可比。
+    """
+    ev = {"country": country, "market_context": {}, "trade_evidence": {}, "competitiveness": {}}
+    ev["market_context"] = get_market_context(country)
+    try:
+        latest = get_latest_year()
+        hs, rows, trend = query_trend(product, country, list(range(latest - 4, latest + 1)))
+        if trend:
+            ev["trade_evidence"] = {
+                "hs_code": hs,
+                "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+            }
+        if len(rows):
+            ev["competitiveness"] = get_competitiveness(product, country, str(latest))
+    except Exception:
+        pass
+    return ev
+
+
+@app.post("/api/analyze/compare")
+def analyze_compare(req: AnalyzeCompareRequest):
+    """多国家横向对比：产品 + 2-3 国 → 各国真实证据链 + AI 对比解读"""
+    product = req.product.strip()
+    countries = [c.strip() for c in req.countries if c and c.strip()]
+    if not product or not countries:
+        raise HTTPException(status_code=400, detail="product 和 countries 不能为空")
+    if len(countries) < 2:
+        raise HTTPException(status_code=400, detail="请选择至少 2 个国家进行对比")
+    if len(countries) > 5:
+        raise HTTPException(status_code=400, detail="对比国家最多 5 个")
+
+    # 并行聚合各国证据链（每个国家独立查贸易/经济/竞争力）
+    per_country = {}
+    for c in countries:
+        per_country[c] = _collect_country_evidence(product, c)
+
+    # AI 对比解读（基于程序计算的各国指标，数据不足时返回降级结果）
+    try:
+        comparison = analyze_market_comparison(product, countries, per_country)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    logging.info("多国对比: %s / %s", product, "、".join(countries))
+    return {
+        "product": product,
+        "countries": countries,
+        "per_country": per_country,  # 各国程序计算的证据链（前端渲染对比表）
+        "comparison": comparison,    # AI 对比解读（overview/market_table/recommendations）
     }
 
 

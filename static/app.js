@@ -307,4 +307,134 @@
       setTimeout(() => { if (dashChart) dashChart.resize(); }, 50);
     }
   }
+
+  // ===== 多国市场对比 =====
+  const compareBtn = document.getElementById('compare-btn');
+  const compareResult = document.getElementById('compare-result');
+
+  function fmtMoney(v) {
+    return '$' + Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '亿';
+  }
+
+  function fmtCagr(trend) {
+    const years = Object.keys(trend).map(Number).sort((a, b) => a - b);
+    if (years.length < 2) return '—';
+    const first = trend[String(years[0])];
+    const last = trend[String(years[years.length - 1])];
+    if (!(first > 0 && last > 0)) return '—';
+    const cagr = (Math.pow(last / first, 1 / (years.length - 1)) - 1) * 100;
+    const range = years[0] + '-' + years[years.length - 1];
+    return (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%（' + range + '）';
+  }
+
+  compareBtn.addEventListener('click', async () => {
+    const product = document.getElementById('compare-product').value.trim();
+    const inputs = Array.from(document.querySelectorAll('.compare-country'));
+    const countries = inputs.map(i => i.value.trim()).filter(Boolean);
+    if (!product) { alert('请填写产品名称'); return; }
+    if (countries.length < 2) { alert('请填写至少 2 个国家进行对比'); return; }
+
+    compareBtn.disabled = true;
+    compareBtn.textContent = '对比中…（每国独立查询，约 20-60 秒）';
+    compareResult.hidden = true;
+    // 保留初始 DOM 结构（table 骨架等），仅清空动态内容区
+    document.querySelector('#compare-table tbody').innerHTML = '';
+    document.getElementById('compare-recommend').innerHTML = '';
+    document.getElementById('compare-insights').innerHTML = '';
+    document.getElementById('compare-risks').innerHTML = '';
+
+    try {
+      const resp = await fetch('/api/analyze/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product, countries }),
+      });
+      let data = {};
+      try { data = await resp.json(); } catch (_) {}
+      if (!resp.ok) {
+        alert(data.detail || '对比失败，请稍后重试');
+        return;
+      }
+
+      renderCompare(data, product);
+      // 对比完成自动滚动到结果区
+      compareResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      alert('网络错误，请确认后端服务已启动');
+    } finally {
+      compareBtn.disabled = false;
+      compareBtn.textContent = '开始对比';
+    }
+  });
+
+  function renderCompare(data, product) {
+    document.getElementById('compare-product-name').textContent = product;
+    compareResult.hidden = false;
+
+    // AI 总览
+    const cmp = data.comparison || {};
+    const overview = document.getElementById('compare-overview');
+    overview.textContent = cmp.overview || '';
+
+    // 对比表：数字列用程序计算的 per_country（AI 不参与算术），解读列用 AI market_table
+    const tbody = document.querySelector('#compare-table tbody');
+    tbody.innerHTML = '';
+    const aiRows = (cmp.market_table || []).reduce((m, r) => { m[r.country] = r; return m; }, {});
+    data.countries.forEach(c => {
+      const ev = (data.per_country && data.per_country[c]) || {};
+      const te = ev.trade_evidence || {};
+      const comp = ev.competitiveness || {};
+      const ai = aiRows[c] || {};
+      const tr = document.createElement('tr');
+      // 出口额规模（最新一年）
+      let size = '—';
+      if (te.trend) {
+        const years = Object.keys(te.trend).map(Number).sort((a, b) => a - b);
+        const y = years[years.length - 1];
+        size = fmtMoney(te.trend[String(y)]) + '（' + y + '）';
+      }
+      // TC
+      const tc = comp.tc != null ? comp.tc.toFixed(2) : '—';
+      [[c, '国家'], [size, '规模'], [fmtCagr(te.trend || {}), '增速'], [tc, '竞争力'],
+       [ai.opportunity || '—', '机会点'], [ai.risk || '—', '风险']].forEach(([v, label]) => {
+        const td = document.createElement('td');
+        td.textContent = v || '—';
+        if (label === '国家') td.className = 'cname';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    document.getElementById('compare-table-wrap').hidden = false;
+
+    // 入选建议（优先级带颜色）
+    const recBox = document.getElementById('compare-recommend');
+    recBox.innerHTML = '';
+    (cmp.recommendations || []).forEach(r => {
+      const p = document.createElement('p');
+      const prioMap = { '优先': 'prio-hi', '次选': 'prio-mid', '观察': 'prio-low' };
+      const cls = prioMap[r.priority] || '';
+      const span = document.createElement('span');
+      span.textContent = '【' + (r.priority || '建议') + '】';
+      if (cls) span.className = cls;
+      p.appendChild(span);
+      const text = document.createElement('span');
+      text.textContent = ' ' + (r.market || '') + '：' + (r.rationale || '') +
+        (r.strategy ? ' 策略：' + r.strategy : '');
+      p.appendChild(text);
+      recBox.appendChild(p);
+    });
+
+    // 关键洞察 + 跨市场风险
+    const fillList = (id, items) => {
+      const ul = document.getElementById(id);
+      ul.innerHTML = '';
+      (items || []).forEach(t => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        ul.appendChild(li);
+      });
+    };
+    fillList('compare-insights', cmp.key_insights);
+    fillList('compare-risks', cmp.risks);
+  }
 })();

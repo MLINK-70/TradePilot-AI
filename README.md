@@ -66,6 +66,20 @@
 
 启动后可访问 <http://127.0.0.1:8000/docs> 在线调试（FastAPI 自带 Swagger UI）。
 
+### `POST /api/analyze/compare`
+
+产品 + 2-5 个国家 → 多国横向对比（规模/增速/竞争力/风险）+ AI 市场选择建议。
+
+**请求示例：**
+
+```json
+{ "product": "蓝牙耳机", "countries": ["德国", "美国"] }
+```
+
+**响应（200）：** `{ product, countries, per_country: {国家: {market_context, trade_evidence, competitiveness}}, comparison: {overview, market_table, recommendations, key_insights, risks} }`
+
+**说明**：每国独立聚合真实数据证据链（UN Comtrade 贸易趋势 + World Bank 经济环境 + TC 竞争力指标），对比表数字列全部程序精确计算，AI 只提供机会点/风险解读与入选建议，不参与算术。
+
 ### `POST /api/ecommerce/collect`
 
 商品 URL 或粘贴文本 → 采集商品画像 + AI 选品分析（无需 API Key）。
@@ -132,6 +146,7 @@
 | ✅ 已完成 | 跨境电商 E-commerce | 评论分析 → 痛点报告 + 竞品对比 + 平台 Listing + 一键书签 |
 | ✅ 已完成 | 商品分析 | eBay（OAuth + Browse API）与速卖通（联盟开放平台 API）商品链接 → 商品信息 + AI 采购建议 |
 | ✅ 已完成 | 数据证据链 | 市场分析/贸易数据接入 5 层真实数据（UN Comtrade + World Bank + Tavily + WTO 宏观背景 + TC 竞争力指标） |
+| ✅ 已完成 | 多国市场对比 | 2-5 国横向对比（出口额/CAGR/TC/份额 + AI 入选建议），市场分析页折叠卡片 |
 | ✅ 已完成 | 设置与桌面版 | 页面设置面板（Key 即时生效）+ PyWebView 桌面版入口 |
 | 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
 
