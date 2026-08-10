@@ -49,6 +49,15 @@
       return;
     }
 
+    // 高级选项：多市场对比（开关打开时走对比流程）
+    const multiMarketBtn = document.getElementById('multi-market');
+    if (multiMarketBtn && multiMarketBtn.getAttribute('aria-checked') === 'true') {
+      const extra = Array.from(document.querySelectorAll('.compare-country'))
+        .map(i => i.value.trim()).filter(Boolean);
+      runCompare(product, [country, ...extra]);
+      return;
+    }
+
     btn.disabled = true;
     btn.textContent = '分析中…';
     btn.classList.add('loading');
@@ -57,6 +66,8 @@
     // 新请求开始即清空旧报告，避免误读上次结果
     reportEl.hidden = true;
     reportEl.innerHTML = '';
+    // 单国分析时隐藏旧的多市场对比结果（避免残留误导）
+    compareResult.hidden = true;
 
     try {
       const resp = await fetch('/api/analyze', {
@@ -308,9 +319,32 @@
     }
   }
 
-  // ===== 多国市场对比 =====
-  const compareBtn = document.getElementById('compare-btn');
+  // ===== 多市场对比（高级选项） =====
   const compareResult = document.getElementById('compare-result');
+  const multiMarketBtn = document.getElementById('multi-market');
+
+  // 精致 toggle 开关：点击切换状态 + 展开国家输入区
+  multiMarketBtn.addEventListener('click', () => {
+    const on = multiMarketBtn.getAttribute('aria-checked') === 'true';
+    multiMarketBtn.setAttribute('aria-checked', String(!on));
+    document.getElementById('multi-countries').hidden = on;
+  });
+
+  // "+ 添加"动态加国家输入框（最多到第 5 个国家后隐藏按钮）
+  const addCountryBtn = document.getElementById('add-country');
+  addCountryBtn.addEventListener('click', () => {
+    const wrap = document.getElementById('compare-countries');
+    if (wrap.querySelectorAll('.compare-country').length >= 4) { addCountryBtn.hidden = true; return; }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'compare-country';
+    input.placeholder = '国家' + (wrap.querySelectorAll('.compare-country').length + 2);
+    input.setAttribute('list', 'country-list');
+    input.autocomplete = 'off';
+    wrap.insertBefore(input, addCountryBtn);
+    input.focus();
+    if (wrap.querySelectorAll('.compare-country').length >= 4) { addCountryBtn.hidden = true; }
+  });
 
   function fmtMoney(v) {
     return '$' + Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '亿';
@@ -327,15 +361,20 @@
     return (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%（' + range + '）';
   }
 
-  compareBtn.addEventListener('click', async () => {
-    const product = document.getElementById('compare-product').value.trim();
-    const inputs = Array.from(document.querySelectorAll('.compare-country'));
-    const countries = inputs.map(i => i.value.trim()).filter(Boolean);
-    if (!product) { alert('请填写产品名称'); return; }
-    if (countries.length < 2) { alert('请填写至少 2 个国家进行对比'); return; }
+  async function runCompare(product, countries) {
+    if (countries.length < 2) {
+      showStatus('多市场对比至少需要 2 个国家（补充对比国家）', 'error');
+      return;
+    }
 
-    compareBtn.disabled = true;
-    compareBtn.textContent = '对比中…（每国独立查询，约 20-60 秒）';
+    btn.disabled = true;
+    btn.textContent = '分析中…（每市场独立查询，约 20-60 秒）';
+    btn.classList.add('loading');
+    dlBtn.hidden = true;
+    showStatus('正在生成多市场对比报告，请稍候…', 'info');
+    // 新请求开始即清空旧对比结果
+    reportEl.hidden = true;
+    reportEl.innerHTML = '';
     compareResult.hidden = true;
     // 保留初始 DOM 结构（table 骨架等），仅清空动态内容区
     document.querySelector('#compare-table tbody').innerHTML = '';
@@ -352,20 +391,21 @@
       let data = {};
       try { data = await resp.json(); } catch (_) {}
       if (!resp.ok) {
-        alert(data.detail || '对比失败，请稍后重试');
+        showStatus(data.detail || '对比失败，请稍后重试', 'error');
         return;
       }
 
       renderCompare(data, product);
-      // 对比完成自动滚动到结果区
       compareResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showStatus('', '');
     } catch (err) {
-      alert('网络错误，请确认后端服务已启动');
+      showStatus('网络错误，请确认后端服务已启动', 'error');
     } finally {
-      compareBtn.disabled = false;
-      compareBtn.textContent = '开始对比';
+      btn.disabled = false;
+      btn.textContent = '开始分析';
+      btn.classList.remove('loading');
     }
-  });
+  }
 
   function renderCompare(data, product) {
     document.getElementById('compare-product-name').textContent = product;

@@ -21,32 +21,89 @@
       cursor: pointer;
     }
     .btn-row .btn-secondary:hover { background: rgba(18, 60, 92, 0.08); }
-    /* 多国对比 */
-    .badge-new {
-      display: inline-block;
-      margin-left: 0.5rem;
-      padding: 0.1rem 0.5rem;
-      font-size: 0.7rem;
+    /* 高级选项（多市场对比） */
+    .adv-options {
+      margin: 0.6rem 0 1.15rem;
+      padding: 0.55rem 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card);
+    }
+    .adv-options > summary {
+      cursor: pointer;
+      font-size: 0.85rem;
       font-weight: 600;
       letter-spacing: 0.08em;
-      color: #fff;
-      background: var(--accent);
-      border-radius: 10px;
-      vertical-align: middle;
-    }
-    #compare-card details > summary {
-      cursor: pointer;
-      font-weight: 700;
-      font-size: 1rem;
-      color: var(--text);
+      color: var(--muted);
       list-style: none;
+      user-select: none;
     }
-    #compare-card details > summary::-webkit-details-marker { display: none; }
-    #compare-card details > summary::before { content: '▸ '; color: var(--accent); }
-    #compare-card details[open] > summary::before { content: '▾ '; }
-    #compare-card details[open] .compare-body { margin-top: 1.1rem; }
-    #compare-countries { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
-    #compare-countries .compare-country { flex: none; }
+    .adv-options > summary::-webkit-details-marker { display: none; }
+    .adv-options > summary::before { content: '⚙ '; color: var(--accent); }
+    .adv-options[open] .adv-body { margin-top: 0.9rem; }
+    .adv-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.9rem;
+    }
+    .adv-label { color: var(--text); font-size: 0.9rem; font-weight: 600; }
+    /* 精致 toggle 开关 */
+    .switch {
+      position: relative;
+      width: 2.6rem;
+      height: 1.5rem;
+      flex: none;
+      border: none;
+      border-radius: 1rem;
+      background: var(--border);
+      cursor: pointer;
+      transition: background 0.2s ease;
+      padding: 0;
+    }
+    .switch .knob {
+      position: absolute;
+      top: 0.18rem;
+      left: 0.2rem;
+      width: 1.14rem;
+      height: 1.14rem;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: left 0.2s ease;
+    }
+    .switch[aria-checked="true"] { background: var(--accent); }
+    .switch[aria-checked="true"] .knob { left: 1.28rem; }
+    /* 国家输入横排 + 添加按钮 */
+    #compare-countries { flex: 1; display: flex; flex-wrap: wrap; gap: 0.55rem; }
+    #compare-countries .compare-country {
+      flex: 1 1 6.5rem;
+      min-width: 6rem;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      text-align: center;
+    }
+    #compare-countries .compare-country:focus { outline: none; border-color: var(--accent); }
+    #compare-countries .compare-country::placeholder { color: var(--muted); }
+    #add-country {
+      flex: 0 0 auto;
+      width: auto;
+      padding: 0.45rem 0.9rem;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    #add-country:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
     #compare-result .data-table {
       width: 100%;
       border-collapse: collapse;
@@ -103,44 +160,41 @@
           <label for="country">目标国家</label>
           <input type="text" id="country" placeholder="例如：德国" required autocomplete="off">
         </div>
+        <details class="adv-options" id="adv-options">
+          <summary>高级选项</summary>
+          <div class="adv-body">
+            <div class="adv-toggle-row">
+              <span class="adv-label">多市场对比</span>
+              <button type="button" class="switch" id="multi-market" role="switch" aria-checked="false" aria-label="多市场对比">
+                <span class="knob"></span>
+              </button>
+            </div>
+            <div id="multi-countries" hidden>
+              <div class="form-row">
+                <label>对比国家</label>
+                <div id="compare-countries">
+                  <input type="text" class="compare-country" placeholder="国家2" list="country-list" autocomplete="off">
+                  <input type="text" class="compare-country" placeholder="国家3" list="country-list" autocomplete="off">
+                  <button type="button" id="add-country" title="添加对比国家">+ 添加</button>
+                </div>
+                <datalist id="country-list">
+                  <option value="德国"></option><option value="美国"></option><option value="日本"></option>
+                  <option value="英国"></option><option value="法国"></option><option value="荷兰"></option>
+                  <option value="韩国"></option><option value="印度"></option><option value="巴西"></option>
+                  <option value="澳大利亚"></option><option value="加拿大"></option><option value="西班牙"></option>
+                  <option value="墨西哥"></option><option value="越南"></option><option value="泰国"></option>
+                  <option value="马来西亚"></option><option value="新加坡"></option><option value="印度尼西亚"></option>
+                </datalist>
+              </div>
+            </div>
+          </div>
+        </details>
         <div class="btn-row">
           <button type="submit" id="submit-btn" class="btn-primary">开始分析</button>
           <button type="button" id="dl-report" class="btn-secondary" hidden>下载 Word 报告</button>
         </div>
       </form>
       <p id="status" class="status"></p>
-    </section>
-
-    <!-- 多国对比：2-3 国横向对比（规模/增速/竞争力/风险） -->
-    <section class="card" id="compare-card">
-      <details id="compare-details">
-        <summary>多国市场对比 <span class="badge-new">NEW</span></summary>
-        <div class="compare-body">
-          <div class="form-row">
-            <label for="compare-product">产品</label>
-            <input type="text" id="compare-product" placeholder="例如：蓝牙耳机" autocomplete="off">
-          </div>
-          <div class="form-row">
-            <label>对比国家（2-3 个）</label>
-            <div id="compare-countries">
-              <input type="text" class="compare-country" placeholder="国家1，例如：德国" list="country-list" autocomplete="off">
-              <input type="text" class="compare-country" placeholder="国家2，例如：美国" list="country-list" autocomplete="off">
-              <input type="text" class="compare-country" placeholder="国家3（可选）" list="country-list" autocomplete="off">
-            </div>
-            <datalist id="country-list">
-              <option value="德国"></option><option value="美国"></option><option value="日本"></option>
-              <option value="英国"></option><option value="法国"></option><option value="荷兰"></option>
-              <option value="韩国"></option><option value="印度"></option><option value="巴西"></option>
-              <option value="澳大利亚"></option><option value="加拿大"></option><option value="西班牙"></option>
-              <option value="墨西哥"></option><option value="越南"></option><option value="泰国"></option>
-              <option value="马来西亚"></option><option value="新加坡"></option><option value="印度尼西亚"></option>
-            </datalist>
-          </div>
-          <div class="btn-row">
-            <button type="button" id="compare-btn" class="btn-primary">开始对比</button>
-          </div>
-        </div>
-      </details>
     </section>
 
     <!-- 双栏仪表盘：左 KPI + 趋势图，右证据链 -->
@@ -227,7 +281,7 @@
       window.DOMPurify = { sanitize: function (html) { return html; } };
     }
   </script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=18"></script>
   <script src="theme.js?v=11"></script>
   <script src="settings.js?v=18"></script>
 </body>
