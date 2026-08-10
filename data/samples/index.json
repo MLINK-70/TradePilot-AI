@@ -2,7 +2,7 @@
   {
     "slug": "headphones",
     "product": "耳机/音箱",
-    "count": 40
+    "count": 35
   },
   {
     "slug": "smartwatch",
@@ -22,7 +22,7 @@
   {
     "slug": "smartphone",
     "product": "手机",
-    "count": 40
+    "count": 39
   },
   {
     "slug": "charger",
@@ -32,7 +32,7 @@
   {
     "slug": "tv",
     "product": "电视/显示器",
-    "count": 40
+    "count": 35
   },
   {
     "slug": "camera",
@@ -42,7 +42,7 @@
   {
     "slug": "laptop",
     "product": "电脑/笔记本",
-    "count": 40
+    "count": 36
   },
   {
     "slug": "kitchen",
@@ -67,7 +67,7 @@
   {
     "slug": "drone",
     "product": "无人机",
-    "count": 10
+    "count": 8
   },
   {
     "slug": "vape",
@@ -87,6 +87,6 @@
   {
     "slug": "router",
     "product": "路由器/机顶盒",
-    "count": 40
+    "count": 26
   }
 ]

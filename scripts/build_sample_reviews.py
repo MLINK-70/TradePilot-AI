@@ -11,8 +11,10 @@
   python scripts/build_sample_reviews.py
 单品类失败不中断，跑完汇总成功/失败清单并写 index.json。
 """
+import html
 import json
 import os
+import re
 import sys
 import time
 
@@ -75,8 +77,22 @@ CATEGORIES = [
      ["router", "wifi router", "mesh", "netgear", "tp-link", "fire tv", "roku", "chromecast"]),
 ]
 
+# 品类级排除词：防止同品类大文件里命中宽泛关键词的无关商品评论混入
+# （如 Electronics 里 "bass" 会命中 AV 功放、"photo" 会命中照片收纳盒）
+EXCLUDE = {
+    "headphones": ["photo", "album", "coax", "antenna", "receiver", "amplifier", "turntable",
+                   "cd player", "dvd", "projector", "camcorder", "camera"],
+    "tv": ["camera", "photo", "projector", "laptop", "desktop", "phone"],
+    "camera": ["tv", "monitor", "speaker", "headphone"],
+    "smartphone": ["laptop", "tablet", "desktop", "router", "tv"],
+    "laptop": ["tv", "monitor", "desktop", "phone", "server"],
+    "smarthome": ["vacuum", "robot vacuum", "camera", "smartwatch", "tv"],
+    "router": ["tv", "monitor", "camera", "phone case", "screen protector"],
+    "drone": ["camera", "tv", "laptop"],
+}
 
-def extract(jsonl_name: str, keywords: list, n: int) -> list:
+
+def extract(jsonl_name: str, keywords: list, n: int, slug: str = "") -> list:
     """分块 Range 请求读取品类 jsonl，取 text 含任一关键词的评论，按 helpful 票数取前 n。
 
     大文件（Electronics/Cell_Phones/Home_and_Kitchen 等可达数 GB~31GB）整体流式读易被
@@ -85,6 +101,7 @@ def extract(jsonl_name: str, keywords: list, n: int) -> list:
     """
     url = f"{BASE_URL}/{jsonl_name}.jsonl"
     kws = [k.lower() for k in keywords]
+    excl = [e.lower() for e in EXCLUDE.get(slug, [])]
     collected = []
     scanned = 0
     buf = ""                  # 跨块行缓冲（块边界可能截断一行）
@@ -127,12 +144,26 @@ def extract(jsonl_name: str, keywords: list, n: int) -> list:
             low = text.lower()
             if not any(k in low for k in kws):
                 continue
+            if any(e in low for e in excl):
+                continue  # 排除无关品类评论（如耳机品类里的 AV 功放/照片收纳盒）
+            text = _clean_text(text)
             collected.append({"text": text, "helpful": ex.get("helpful_vote", 0) or 0})
         offset += len(chunk)
         if len(chunk) < CHUNK:
             break  # 文件已读完
     collected.sort(key=lambda x: x["helpful"], reverse=True)
     return [c["text"] for c in collected[:n]]
+
+
+def _clean_text(text: str) -> str:
+    """清洗评论文本：HTML 实体解码（&#34; → "）+ 去 br 标签 + 去多余空白
+
+    不 clean 的话实体原文与 LLM 引用不一致，引用校验会误删真实评论。
+    """
+    text = html.unescape(text)
+    text = re.sub(r"<br\s*/?>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)  # 兜底去残留标签
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def main():
@@ -144,7 +175,7 @@ def main():
         print(f"[{i}/{total}] {name_cn} ({jsonl_name})...", flush=True)
         t0 = time.time()
         try:
-            reviews = extract(jsonl_name, kws, PER_CATEGORY)
+            reviews = extract(jsonl_name, kws, PER_CATEGORY, slug)
             dt = time.time() - t0
             if len(reviews) < MIN_KEEP:
                 fail.append(f"{name_cn}: only {len(reviews)} hits (< {MIN_KEEP}, skip)")

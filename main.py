@@ -156,6 +156,13 @@ def analyze_compare(req: AnalyzeCompareRequest):
     """多国家横向对比：产品 + 2-3 国 → 各国真实证据链 + AI 对比解读"""
     product = req.product.strip()
     countries = [c.strip() for c in req.countries if c and c.strip()]
+    # 去重（保持顺序）：重复国家会覆盖 per_country dict，AI 收到两行相同数据
+    seen, dedup = set(), []
+    for c in countries:
+        if c not in seen:
+            seen.add(c)
+            dedup.append(c)
+    countries = dedup
     if not product or not countries:
         raise HTTPException(status_code=400, detail="product 和 countries 不能为空")
     if len(countries) < 2:
@@ -615,12 +622,23 @@ class ProductCollectRequest(BaseModel):
 
 @app.post("/api/ecommerce/collect")
 def ecommerce_collect(req: ProductCollectRequest):
-    """商品 URL/粘贴文本 → 采集画像 + AI 选品分析（无 Key 可独立工作）"""
+    """商品 URL/粘贴文本 → 采集画像 + AI 选品分析
+
+    无 AI Key 时降级：URL 采集成功 → 返回 item + 空 analysis（前端可显示画像）；
+    粘贴路径（必须 AI 提取）→ 502 提示配置 Key。
+    """
+    item = None
     try:
         item = collect_product(req.url, req.pasted_text)
         analysis = analyze_product_profile(item)
     except CollectorError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    except ValueError as e:
+        # AI 不可用（无 Key/额度）：URL 采集成功则降级返回画像，否则明确报错
+        if item:
+            logging.warning("商品画像分析失败（降级返回画像）: %s", e)
+            return {"item": item, "analysis": {}}
+        raise HTTPException(status_code=502, detail=f"AI 分析不可用：{e}")
     logging.info("商品采集: %s", item.get("title", "")[:40])
     return {"item": item, "analysis": analysis}
 
@@ -788,7 +806,8 @@ def ecommerce_compare(req: EcommerceCompareRequest):
 
 
 class SettingsRequest(BaseModel):
-    deepseek_key: str = ""
+    deepseek_key: str = ""   # 兼容旧面板：provider=deepseek 时等价于 AI Key
+    ai_api_key: str = ""     # 新面板：AI Key（当前 provider 的 key，统一入口）
     tavily_key: str = ""
     ebay_app_id: str = ""
     ebay_client_secret: str = ""
@@ -808,8 +827,16 @@ def get_settings():
 
 @app.post("/api/settings")
 def save_settings(req: SettingsRequest):
-    """保存设置：写入 config + .env，运行时立即生效"""
-    if req.deepseek_key:
+    """保存设置：写入 config + .env，运行时立即生效
+
+    AI Key 统一入口：ai_api_key 直接写 AI_API_KEY（provider 无关），
+    兼容旧 deepseek_key 字段（仅 provider=deepseek 时联动）。
+    """
+    if req.ai_api_key:
+        cfg.set_key("AI_API_KEY", req.ai_api_key)
+    elif req.deepseek_key:
+        # 旧字段：provider=deepseek 时等价 AI Key（config 联动），其他 provider 时
+        # 视为兜底存 DeepSeek key（AI_API_KEY 优先于回退链，不覆盖已配置的）
         cfg.set_key("DEEPSEEK_API_KEY", req.deepseek_key)
     if req.tavily_key:
         cfg.set_key("TAVILY_API_KEY", req.tavily_key)

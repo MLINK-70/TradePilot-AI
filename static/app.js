@@ -348,6 +348,7 @@
     if (wrap.querySelectorAll('.compare-country').length >= 4) { addCountryBtn.hidden = true; }
   });
 
+  // UN Comtrade 统一美元计价，出口额单位固定为亿美元（$ 前缀是单位的一部分，不是货币换算）
   function fmtMoney(v) {
     return '$' + Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '亿';
   }

@@ -72,8 +72,14 @@ def set_key(name: str, value: str) -> bool:
     RUNTIME_KEYS[name] = value
     globals()[name] = value  # 让引用处（llm/market_data/ebay）立即读到新值
 
-    # 联动别名：DeepSeek key -> AI_API_KEY（provider=deepseek 时跟随，避免设置面板填了不生效）
+    # 联动别名：
+    # - 设置面板"API Key"输入框 → AI_API_KEY（无论 provider，_chat 统一读 AI_API_KEY）
+    # - DeepSeek/Tavily 默认 provider 时，填 DEEPSEEK/TAVILY 同步到 AI_API_KEY/SEARCH_API_KEY
+    #   （兼容老面板只填 DeepSeek Key 的用法；provider 已切换时 AI_API_KEY 优先于回退链）
     if name == "DEEPSEEK_API_KEY" and RUNTIME_KEYS.get("AI_PROVIDER", "deepseek") == "deepseek":
+        RUNTIME_KEYS["AI_API_KEY"] = value
+        globals()["AI_API_KEY"] = value
+    elif name == "AI_API_KEY":
         RUNTIME_KEYS["AI_API_KEY"] = value
         globals()["AI_API_KEY"] = value
     # 联动别名：Tavily key -> SEARCH_API_KEY（search_provider=tavily 时跟随）

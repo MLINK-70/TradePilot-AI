@@ -26,7 +26,7 @@
         <div style="margin-bottom:10px;">
           <label for="set-ai-key" style="font-size:.85rem;color:var(--muted);">API Key <span style="color:var(--error);">*必备</span></label>
           <input type="password" id="set-ai-key" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a></div>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">当前所选 AI 提供商的 Key（DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a> · GPT: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a> · Claude: <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>）</div>
         </div>
         <div style="margin-bottom:10px;">
           <label for="set-ai-model" style="font-size:.85rem;color:var(--muted);">模型（可选，留空用默认）</label>
@@ -168,7 +168,8 @@
   document.getElementById('set-save').addEventListener('click', async () => {
     const provider = document.getElementById('set-ai-provider').value;
     const payload = {
-      deepseek_key: document.getElementById('set-ai-key').value.trim(),
+      ai_api_key: document.getElementById('set-ai-key').value.trim(),
+      deepseek_key: '',  // 旧字段留空，AI Key 统一走 ai_api_key（provider 无关）
       tavily_key: document.getElementById('set-tavily').value.trim(),
       ebay_app_id: document.getElementById('set-ebay-id').value.trim(),
       ebay_client_secret: document.getElementById('set-ebay-secret').value.trim(),
@@ -179,7 +180,7 @@
       ai_base_url: document.getElementById('set-ai-base').value.trim(),
       search_provider: document.getElementById('set-search-provider').value,
     };
-    if (!payload.deepseek_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
+    if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
       status.textContent = '没有要保存的内容';
       return;
     }
