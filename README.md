@@ -66,6 +66,20 @@
 
 启动后可访问 <http://127.0.0.1:8000/docs> 在线调试（FastAPI 自带 Swagger UI）。
 
+### `POST /api/ecommerce/collect`
+
+商品 URL 或粘贴文本 → 采集商品画像 + AI 选品分析（无需 API Key）。
+
+**请求示例：**
+
+```json
+{ "url": "https://www.amazon.com/dp/B0XXXX", "pasted_text": "" }
+```
+
+**响应（200）：** `{ item: {title, brand, price, specifications, ...}, analysis: {assessment, price_position, ...} }`
+
+**说明**：优先抓取商品页公开数据（JSON-LD）；页面不可访问时可用 `pasted_text` 粘贴页面内容，AI 提取字段（不破解反爬）。
+
 ---
 
 ## 目录结构
@@ -77,8 +91,9 @@
 ├── prompts.py       # 系统提示词（9 字段 JSON 协议，IDC/学术报告风格）
 ├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标、HS 编码 AI 自动解析
 ├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
-├── ecommerce.py     # 跨境电商模块：评论分析 / 竞品对比 / Listing
-├── ebay.py          # eBay 商品分析（OAuth + Browse API）
+├── ecommerce.py     # 跨境电商模块：评论分析 / 商品画像分析 / 竞品对比 / Listing
+├── collectors.py    # 商品数据采集层：URL 抓取 / JSON-LD / 粘贴 AI 提取（无 Key）
+├── ebay.py          # eBay 商品分析（OAuth + Browse API，可选增强）
 ├── aliexpress.py    # 速卖通商品分析（联盟开放平台 API + HmacSHA256 签名）
 ├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
 ├── database.py      # SQLite 缓存层（trade_cache / query_log）
