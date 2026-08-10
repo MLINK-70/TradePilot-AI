@@ -1,0 +1,92 @@
+[
+  {
+    "slug": "headphones",
+    "product": "耳机/音箱",
+    "count": 40
+  },
+  {
+    "slug": "smartwatch",
+    "product": "智能手表",
+    "count": 40
+  },
+  {
+    "slug": "vacuum",
+    "product": "吸尘器/扫地机器人",
+    "count": 40
+  },
+  {
+    "slug": "powerbank",
+    "product": "充电宝/移动电源",
+    "count": 40
+  },
+  {
+    "slug": "smartphone",
+    "product": "手机",
+    "count": 40
+  },
+  {
+    "slug": "charger",
+    "product": "充电器/电源适配器",
+    "count": 40
+  },
+  {
+    "slug": "tv",
+    "product": "电视/显示器",
+    "count": 40
+  },
+  {
+    "slug": "camera",
+    "product": "相机/摄像头",
+    "count": 40
+  },
+  {
+    "slug": "laptop",
+    "product": "电脑/笔记本",
+    "count": 40
+  },
+  {
+    "slug": "kitchen",
+    "product": "小家电",
+    "count": 40
+  },
+  {
+    "slug": "airpurifier",
+    "product": "空气净化器",
+    "count": 10
+  },
+  {
+    "slug": "smarthome",
+    "product": "智能家居",
+    "count": 40
+  },
+  {
+    "slug": "powertool",
+    "product": "电动工具",
+    "count": 40
+  },
+  {
+    "slug": "drone",
+    "product": "无人机",
+    "count": 10
+  },
+  {
+    "slug": "vape",
+    "product": "电子烟",
+    "count": 24
+  },
+  {
+    "slug": "toothbrush",
+    "product": "电动牙刷",
+    "count": 40
+  },
+  {
+    "slug": "massager",
+    "product": "按摩仪",
+    "count": 40
+  },
+  {
+    "slug": "router",
+    "product": "路由器/机顶盒",
+    "count": 40
+  }
+]
