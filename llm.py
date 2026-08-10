@@ -437,7 +437,14 @@ def analyze_market_comparison(product: str, countries: list, per_country: dict) 
 
     PROMPT_VER = "v1-multi-country"
     ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
-    cache_key = (product, tuple(countries), PROMPT_VER, ai_sig)
+    # 缓存 key 含各国证据链签名：某国数据从无到有时缓存自动失效，避免命中"数据不足"旧结果
+    def _ev_sig(ev):
+        te = ev.get("trade_evidence") or {}
+        comp = ev.get("competitiveness") or {}
+        return (tuple(sorted(te.get("trend", {}).items())),
+                comp.get("tc"), comp.get("market_share"))
+    ev_sig = tuple(_ev_sig(per_country.get(c) or {}) for c in countries)
+    cache_key = (product, tuple(countries), PROMPT_VER, ai_sig, ev_sig)
     if cache_key in _compare_cache:
         return _compare_cache[cache_key]
 

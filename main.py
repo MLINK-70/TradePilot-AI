@@ -163,10 +163,17 @@ def analyze_compare(req: AnalyzeCompareRequest):
     if len(countries) > 5:
         raise HTTPException(status_code=400, detail="对比国家最多 5 个")
 
-    # 并行聚合各国证据链（每个国家独立查贸易/经济/竞争力）
-    per_country = {}
-    for c in countries:
-        per_country[c] = _collect_country_evidence(product, c)
+    # 并行聚合各国证据链（每国独立查贸易/经济/竞争力，网络等待不阻塞）
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        with ThreadPoolExecutor(max_workers=len(countries)) as pool:
+            per_country = dict(zip(
+                countries,
+                pool.map(lambda c: _collect_country_evidence(product, c), countries),
+            ))
+    except Exception:
+        # 并行聚合异常兜底：退回串行（单国失败已被内部捕获，此路径极罕见）
+        per_country = {c: _collect_country_evidence(product, c) for c in countries}
 
     # AI 对比解读（基于程序计算的各国指标，数据不足时返回降级结果）
     try:

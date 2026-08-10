@@ -322,16 +322,18 @@
   // ===== 多市场对比（高级选项） =====
   const compareResult = document.getElementById('compare-result');
   const multiMarketBtn = document.getElementById('multi-market');
+  const addCountryBtn = document.getElementById('add-country');
 
   // 精致 toggle 开关：点击切换状态 + 展开国家输入区
   multiMarketBtn.addEventListener('click', () => {
     const on = multiMarketBtn.getAttribute('aria-checked') === 'true';
     multiMarketBtn.setAttribute('aria-checked', String(!on));
     document.getElementById('multi-countries').hidden = on;
+    // 开关重新打开时恢复"添加"按钮（若上次已隐藏）
+    if (!on) { addCountryBtn.hidden = false; }
   });
 
   // "+ 添加"动态加国家输入框（最多到第 5 个国家后隐藏按钮）
-  const addCountryBtn = document.getElementById('add-country');
   addCountryBtn.addEventListener('click', () => {
     const wrap = document.getElementById('compare-countries');
     if (wrap.querySelectorAll('.compare-country').length >= 4) { addCountryBtn.hidden = true; return; }
@@ -375,6 +377,7 @@
     // 新请求开始即清空旧对比结果
     reportEl.hidden = true;
     reportEl.innerHTML = '';
+    document.getElementById('dash').hidden = true;  // 隐藏单国仪表盘（避免与对比结果混显）
     compareResult.hidden = true;
     // 保留初始 DOM 结构（table 骨架等），仅清空动态内容区
     document.querySelector('#compare-table tbody').innerHTML = '';
