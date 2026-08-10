@@ -231,3 +231,30 @@ def generate_listing(product: str, platform: str, analysis: dict) -> dict:
         {"role": "user", "content": user_msg},
     ], use_json=True)
     return _parse_json(content)
+
+
+PRODUCT_ANALYSIS_SYSTEM = """你是跨境电商选品分析师。根据商品画像数据（采集自商品页面），输出选品评估。
+
+输出 JSON：
+{
+  "assessment": "商品评估（2-3 句，基于规格/价格/卖点/卖家）",
+  "price_position": "价格定位（高/中/低性价比，引用价格与规格对比）",
+  "seller_trust": "卖家可信度评估（基于卖家信息，缺失则说明）",
+  "selling_point_analysis": ["AI 提炼的核心卖点 1", "卖点 2", "卖点 3"],
+  "risk_flags": ["规格信息缺失", "无卖家信息", "价格缺失"],
+  "zh_summary": "中文总结（面向选品决策）"
+}
+
+要求：
+- 只基于给定画像字段，禁止编造不存在的信息
+- 缺失的字段（规格/卖家/价格）在 risk_flags 中明确标注
+- 所有数字来自画像，不自行计算"""
+
+
+def analyze_product_profile(item: dict) -> dict:
+    """商品画像 → AI 选品分析（输入为采集的 Product schema）"""
+    content = _chat([
+        {"role": "system", "content": PRODUCT_ANALYSIS_SYSTEM},
+        {"role": "user", "content": json.dumps(item, ensure_ascii=False)},
+    ], use_json=True)
+    return _parse_json(content)

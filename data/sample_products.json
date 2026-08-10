@@ -1,0 +1,50 @@
+{
+  "products": [
+    {
+      "platform": "amazon",
+      "source": "sample",
+      "product_id": "B0DEMO0001",
+      "url": "https://www.amazon.com/dp/B0DEMO0001",
+      "title": "Wireless Earbuds ANC Pro 5.3 Bluetooth Headphones with Noise Cancelling",
+      "brand": "SoundWave",
+      "category": "消费电子/耳机",
+      "price": "US $39.99",
+      "currency": "USD",
+      "specifications": [
+        {"name": "蓝牙版本", "value": "5.3"},
+        {"name": "续航", "value": "单次 8 小时 / 总 32 小时"},
+        {"name": "主动降噪", "value": "ANC -35dB"},
+        {"name": "防水", "value": "IPX5"},
+        {"name": "充电", "value": "Type-C 快充"}
+      ],
+      "description": "支持主动降噪和蓝牙 5.3 的真无线耳机，32 小时总续航，适合通勤和运动场景。",
+      "selling_points": ["ANC 主动降噪", "蓝牙 5.3 低延迟", "32 小时长续航", "IPX5 防水"],
+      "images": [],
+      "seller": "SoundWave Official Store",
+      "collected_at": "2026-08-10T00:00:00"
+    },
+    {
+      "platform": "aliexpress",
+      "source": "sample",
+      "product_id": "100500DEMO0002",
+      "url": "https://www.aliexpress.com/item/100500DEMO0002.html",
+      "title": "Smart Watch 2026 Ultra GPS Fitness Tracker Heart Rate Monitor",
+      "brand": "FitPlus",
+      "category": "消费电子/智能手表",
+      "price": "US $45.50",
+      "currency": "USD",
+      "specifications": [
+        {"name": "屏幕", "value": "1.96 英寸 AMOLED"},
+        {"name": "定位", "value": "GPS + GLONASS"},
+        {"name": "健康监测", "value": "心率/血氧/睡眠"},
+        {"name": "防水", "value": "5ATM"},
+        {"name": "续航", "value": "10 天"}
+      ],
+      "description": "带 GPS 定位和全面健康监测的智能手表，AMOLED 屏幕，10 天长续航。",
+      "selling_points": ["GPS 精准定位", "AMOLED 高清屏", "10 天续航", "5ATM 防水"],
+      "images": [],
+      "seller": "FitPlus Global Store",
+      "collected_at": "2026-08-10T00:00:00"
+    }
+  ]
+}

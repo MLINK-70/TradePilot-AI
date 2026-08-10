@@ -155,15 +155,61 @@
       </div>
     </details>
 
+    <!-- 商品采集：URL/粘贴文本 → 画像 + AI 选品分析 -->
+    <section class="card">
+      <form id="collect-form" autocomplete="off">
+        <div class="form-row">
+          <label for="product-url">商品链接</label>
+          <input type="text" id="product-url" placeholder="粘贴商品链接（亚马逊等），留空则用下方粘贴内容" autocomplete="off">
+        </div>
+        <div class="form-row">
+          <label for="pasted-text">页面内容</label>
+          <textarea id="pasted-text" placeholder="可选：粘贴商品页面内容（反爬/登录墙时用），AI 提取字段" rows="3"></textarea>
+        </div>
+        <div class="btn-row-inline">
+          <button type="submit" id="collect-btn" class="btn-primary">采集商品数据</button>
+          <button type="button" id="collect-sample-btn" class="btn-inline">演示画像</button>
+        </div>
+        <p class="meta" style="margin-top:0.4rem;">优先读取商品页公开数据；页面无法访问时可粘贴页面内容让 AI 提取。不破解反爬。</p>
+      </form>
+      <p id="collect-status" class="status"></p>
+      <div id="collect-result" class="listing-box" hidden>
+        <div class="listing-title" id="collect-title"></div>
+        <p class="meta" id="collect-meta"></p>
+        <div class="analysis-section">
+          <div class="analysis-label">规格参数</div>
+          <table class="pain-table" id="collect-specs"></table>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">卖点</div>
+          <ul id="collect-points"></ul>
+        </div>
+        <div class="analysis-section">
+          <div class="analysis-label">AI 选品分析</div>
+          <p id="collect-assess" class="analysis-overview"></p>
+          <p class="meta" id="collect-price-pos"></p>
+          <p class="meta" id="collect-trust"></p>
+          <div class="analysis-section">
+            <div class="analysis-label">风险提示</div>
+            <ul id="collect-risks"></ul>
+          </div>
+          <p class="meta" id="collect-summary"></p>
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <form id="review-form" autocomplete="off">
         <div class="form-row">
           <label for="reviews-input">评论粘贴</label>
-          <textarea id="reviews-input" placeholder="粘贴评论文本，每行一条…（或点下方按钮用演示数据）"></textarea>
+          <textarea id="reviews-input" placeholder="粘贴评论文本，每行一条…（或选品类点下方按钮载入真实评论样本）"></textarea>
         </div>
         <div class="btn-row-inline">
           <button type="submit" id="submit-btn" class="btn-primary">分析评论</button>
-          <button type="button" id="sample-btn" class="btn-inline">使用演示数据</button>
+          <select id="sample-slug" class="year-pair" style="max-width:220px;padding:0.5rem 0.6rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.85rem;">
+            <option value="">默认演示数据</option>
+          </select>
+          <button type="button" id="sample-btn" class="btn-inline">载入样本</button>
         </div>
       </form>
       <p id="status" class="status"></p>
@@ -245,6 +291,126 @@
     (function () {
       'use strict';
 
+      // ===== 商品采集（URL/粘贴文本 → 画像 + AI 分析）=====
+      const collectForm = document.getElementById('collect-form');
+      const collectBtn = document.getElementById('collect-btn');
+      const collectStatus = document.getElementById('collect-status');
+
+      // 演示画像：直接渲染示例商品（不依赖网络）
+      document.getElementById('collect-sample-btn').addEventListener('click', async () => {
+        try {
+          const resp = await fetch('/api/ecommerce/sample-products');
+          const data = await resp.json();
+          if (!resp.ok || !data.products || !data.products.length) {
+            collectStatus.textContent = '演示数据加载失败';
+            collectStatus.className = 'status error';
+            return;
+          }
+          renderCollect(data.products[0], {
+            assessment: '演示画像：中端定位，性价比突出，适合作为选品参考。',
+            price_position: '中性价比',
+            seller_trust: '官方店铺，可信度较高',
+            selling_point_analysis: ['ANC 主动降噪', '蓝牙 5.3', '32 小时续航'],
+            risk_flags: ['演示数据，非实时采集'],
+            zh_summary: '演示商品画像（示例数据）',
+          });
+          collectStatus.textContent = '';
+        } catch (_) {
+          collectStatus.textContent = '演示数据加载失败';
+          collectStatus.className = 'status error';
+        }
+      });
+
+      function renderCollect(item, analysis) {
+        const box = document.getElementById('collect-result');
+        document.getElementById('collect-title').textContent = item.title || '';
+        document.getElementById('collect-meta').textContent =
+          (item.brand ? '品牌: ' + item.brand + ' · ' : '') +
+          (item.price ? '价格: ' + item.price + ' · ' : '') +
+          (item.seller ? '卖家: ' + item.seller + ' · ' : '') +
+          '平台: ' + (item.platform || '') + ' · 来源: ' + (item.source || '');
+        // 规格表
+        const specs = item.specifications || [];
+        const specTbl = document.getElementById('collect-specs');
+        specTbl.innerHTML = '';
+        if (specs.length) {
+          specs.forEach(s => {
+            const tr = document.createElement('tr');
+            const td1 = document.createElement('td');
+            td1.textContent = s.name || '';
+            const td2 = document.createElement('td');
+            td2.textContent = s.value || '';
+            tr.appendChild(td1); tr.appendChild(td2);
+            specTbl.appendChild(tr);
+          });
+        } else {
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          td.textContent = '（无规格信息）';
+          tr.appendChild(td);
+          specTbl.appendChild(tr);
+        }
+        // 卖点
+        const pts = document.getElementById('collect-points');
+        pts.innerHTML = '';
+        (item.selling_points || []).forEach(p => {
+          const li = document.createElement('li');
+          li.textContent = p;
+          pts.appendChild(li);
+        });
+        // AI 分析
+        const an = analysis || {};
+        document.getElementById('collect-assess').textContent = an.assessment || '';
+        document.getElementById('collect-price-pos').textContent = '价格定位: ' + (an.price_position || '—');
+        document.getElementById('collect-trust').textContent = '卖家可信度: ' + (an.seller_trust || '—');
+        const risks = document.getElementById('collect-risks');
+        risks.innerHTML = '';
+        (an.risk_flags || []).forEach(r => {
+          const li = document.createElement('li');
+          li.textContent = r;
+          risks.appendChild(li);
+        });
+        document.getElementById('collect-summary').textContent = '总结: ' + (an.zh_summary || '');
+        box.hidden = false;
+      }
+
+      collectForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const url = document.getElementById('product-url').value.trim();
+        const pasted = document.getElementById('pasted-text').value.trim();
+        if (!url && !pasted) {
+          collectStatus.textContent = '请粘贴商品链接或页面内容';
+          collectStatus.className = 'status error';
+          return;
+        }
+        collectBtn.disabled = true;
+        collectBtn.textContent = '采集中…';
+        collectStatus.textContent = '正在采集商品数据…';
+        collectStatus.className = 'status info';
+        try {
+          const resp = await fetch('/api/ecommerce/collect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, pasted_text: pasted }),
+          });
+          let data = {};
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) {
+            collectStatus.textContent = data.detail || '采集失败';
+            collectStatus.className = 'status error';
+            return;
+          }
+          renderCollect(data.item || {}, data.analysis || {});
+          collectStatus.textContent = '';
+        } catch (_) {
+          collectStatus.textContent = '网络错误，采集失败';
+          collectStatus.className = 'status error';
+        } finally {
+          collectBtn.disabled = false;
+          collectBtn.textContent = '采集商品数据';
+        }
+      });
+
       const form = document.getElementById('review-form');
       const btn = document.getElementById('submit-btn');
       const statusEl = document.getElementById('status');
@@ -252,15 +418,32 @@
       let chart = null;
       let lastAnalysis = null;
 
-      // 演示数据
-      document.getElementById('sample-btn').addEventListener('click', async () => {
+      // 品类样本下拉填充（18 个 HS 品类真实评论库）
+      (async () => {
         try {
-          const resp = await fetch('/api/ecommerce/sample');
+          const resp = await fetch('/api/ecommerce/samples');
+          const list = await resp.json();
+          const sel = document.getElementById('sample-slug');
+          (list || []).forEach(it => {
+            const opt = document.createElement('option');
+            opt.value = it.slug;
+            opt.textContent = it.product + '（' + it.count + ' 条）';
+            sel.appendChild(opt);
+          });
+        } catch (_) { /* 样本库未就绪，下拉仅保留默认项 */ }
+      })();
+
+      // 载入样本（选中品类则取该品类真实评论，否则取默认演示数据）
+      document.getElementById('sample-btn').addEventListener('click', async () => {
+        const slug = document.getElementById('sample-slug').value;
+        try {
+          const url = slug ? '/api/ecommerce/sample?slug=' + encodeURIComponent(slug) : '/api/ecommerce/sample';
+          const resp = await fetch(url);
           const data = await resp.json();
           document.getElementById('reviews-input').value = (data.reviews || []).join('\n');
-          showStatus('已载入演示数据（' + (data.reviews || []).length + ' 条），点击分析', 'info');
+          showStatus('已载入' + (data.product ? '【' + data.product + '】' : '演示数据') + '（' + (data.reviews || []).length + ' 条），点击分析', 'info');
         } catch (_) {
-          showStatus('演示数据加载失败', 'error');
+          showStatus('样本加载失败', 'error');
         }
       });
 

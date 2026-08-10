@@ -30,7 +30,8 @@ from market_data import (get_competitive_landscape, get_market_context,
 from business import (generate_followup_email, generate_outreach_email,
                       generate_outreach_from_idea, generate_product_intro,
                       simulate_customer)
-from ecommerce import analyze_reviews, compare_products, generate_listing
+from ecommerce import analyze_product_profile, analyze_reviews, compare_products, generate_listing
+from collectors import collect_product, CollectorError
 from ebay import analyze_item, get_oauth_token, parse_ebay_url
 from aliexpress import analyze_product, parse_aliexpress_url
 import config as cfg
@@ -189,8 +190,13 @@ def _download_headers(filename: str) -> dict:
 def export_report(req: TradeExportRequest):
     """下载 Word 分析报告（执行摘要 + 趋势图 + 数据 + AI 分析）"""
     hs, rows = _fetch_trade_data(req)
+    # 复用市场分析的证据链采集，让 AI 分析基于真实数据
+    # （B7 修复：与 /api/analyze 一致，不再纯 LLM 估算；查询有缓存，重复调用代价小）
+    market_ctx, trade_evidence, competitiveness, background, landscape = _collect_evidence(
+        req.product.strip(), req.target.strip())
     try:
-        ai = analyze_market(req.product.strip(), req.target.strip())
+        ai = analyze_market(req.product.strip(), req.target.strip(),
+                            market_ctx, trade_evidence, competitiveness, background, landscape)
     except ValueError:
         ai = {}  # AI 分析失败不阻断报告下载，数据部分仍可用
     # 统计指标 + AI 趋势解读（供执行摘要引用）
@@ -535,6 +541,23 @@ def business_simulate(req: SimulateRequest):
     return data
 
 
+class ProductCollectRequest(BaseModel):
+    url: str = ""
+    pasted_text: str = ""
+
+
+@app.post("/api/ecommerce/collect")
+def ecommerce_collect(req: ProductCollectRequest):
+    """商品 URL/粘贴文本 → 采集画像 + AI 选品分析（无 Key 可独立工作）"""
+    try:
+        item = collect_product(req.url, req.pasted_text)
+        analysis = analyze_product_profile(item)
+    except CollectorError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logging.info("商品采集: %s", item.get("title", "")[:40])
+    return {"item": item, "analysis": analysis}
+
+
 class EcommerceAnalyzeRequest(BaseModel):
     reviews: list = []       # 用户粘贴的评论（每行一条）
     use_sample: bool = False  # 使用内置演示数据
@@ -583,9 +606,38 @@ def ecommerce_listing(req: EcommerceListingRequest):
     return data
 
 
+@app.get("/api/ecommerce/sample-products")
+def ecommerce_sample_products():
+    """返回商品采集演示画像（供前端演示按钮）"""
+    try:
+        with open(res_path("data/sample_products.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        raise HTTPException(status_code=500, detail="演示画像加载失败")
+
+
+@app.get("/api/ecommerce/samples")
+def ecommerce_samples():
+    """返回评论样本品类列表（data/samples/index.json，18 个 HS 品类真实评论库）"""
+    try:
+        with open(res_path("data/samples/index.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []  # 样本库未生成时返回空列表，前端降级为旧演示数据
+
+
 @app.get("/api/ecommerce/sample")
-def ecommerce_sample():
-    """返回内置演示数据"""
+def ecommerce_sample(slug: str = ""):
+    """返回演示数据：指定 slug 读对应品类样本，否则读旧 sample_reviews.json"""
+    if slug:
+        # 防路径穿越：slug 仅允许字母数字下划线连字符
+        if not slug.replace("-", "").replace("_", "").isalnum():
+            raise HTTPException(status_code=400, detail="非法 slug")
+        try:
+            with open(res_path(f"data/samples/{slug}.json"), encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            raise HTTPException(status_code=404, detail=f"未找到品类样本: {slug}")
     try:
         with open(res_path("data/sample_reviews.json"), encoding="utf-8") as f:
             return json.load(f)
