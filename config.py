@@ -61,12 +61,25 @@ RUNTIME_KEYS = {
 
 
 def set_key(name: str, value: str) -> bool:
-    """运行时更新 Key：写入 RUNTIME_KEYS + 追加到 .env（持久化）"""
+    """运行时更新 Key：写入 RUNTIME_KEYS + 追加到 .env（持久化）
+
+    联动别名：设置面板填 DeepSeek/Tavily key 时，同步到 AI_API_KEY/SEARCH_API_KEY
+    （llm 读 AI_API_KEY、market_data 读 SEARCH_API_KEY；默认 provider=deepseek/tavily）。
+    """
     if name not in RUNTIME_KEYS:
         return False
     value = (value or "").strip()
     RUNTIME_KEYS[name] = value
     globals()[name] = value  # 让引用处（llm/market_data/ebay）立即读到新值
+
+    # 联动别名：DeepSeek key -> AI_API_KEY（provider=deepseek 时跟随，避免设置面板填了不生效）
+    if name == "DEEPSEEK_API_KEY" and RUNTIME_KEYS.get("AI_PROVIDER", "deepseek") == "deepseek":
+        RUNTIME_KEYS["AI_API_KEY"] = value
+        globals()["AI_API_KEY"] = value
+    # 联动别名：Tavily key -> SEARCH_API_KEY（search_provider=tavily 时跟随）
+    elif name == "TAVILY_API_KEY" and RUNTIME_KEYS.get("SEARCH_PROVIDER", "tavily") == "tavily":
+        RUNTIME_KEYS["SEARCH_API_KEY"] = value
+        globals()["SEARCH_API_KEY"] = value
 
     # 持久化到 .env（更新或追加）
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")

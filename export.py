@@ -80,9 +80,11 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     total_wgt = sum(r.get("netWgt") or 0 for r in rows)
     hs_desc = f"（{hs_description}）" if hs_description else ""
 
-    # 趋势图 PNG（≥2 年才生成）
+    # 趋势图 PNG（≥2 年才生成）；用 summarize_trend 逐年累加，与执行摘要 stats 同口径
+    # （B2 修复：组织聚合时图表不再只显示单国值，而是成员国合计，与摘要数字一致）
     chart_buf = None
-    trend_map = {r.get("refYear"): {"value": r.get("primaryValue") or 0} for r in rows}
+    from trade import summarize_trend
+    trend_map = summarize_trend(rows)
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
 

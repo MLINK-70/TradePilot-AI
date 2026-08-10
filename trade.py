@@ -444,7 +444,8 @@ def summarize_stats(trend: dict) -> dict:
 
     # 年复合增长率 CAGR = (last/first)^(1/n) - 1
     n = len(years) - 1
-    cagr = ((last_v / first_v) ** (1 / n) - 1) * 100 if n > 0 and first_v else None
+    # 防负数开方崩溃（返回 complex -> round 抛 TypeError）：仅 first_v>0 且 last_v>=0 时计算（B8 修复）
+    cagr = ((last_v / first_v) ** (1 / n) - 1) * 100 if n > 0 and first_v > 0 and last_v >= 0 else None
 
     # 峰值/谷值
     peak_y = max(trend, key=lambda y: trend[y]["value"])

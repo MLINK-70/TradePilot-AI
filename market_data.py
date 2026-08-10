@@ -116,7 +116,7 @@ def _search_web(query: str, max_results: int = 5, depth: str = "basic") -> list:
     """
     import config as cfg
     provider = cfg.SEARCH_PROVIDER
-    api_key = cfg.SEARCH_API_KEY
+    api_key = cfg.SEARCH_API_KEY or cfg.TAVILY_API_KEY  # 回退：未单独配 SEARCH_API_KEY 时用 Tavily key
     if not api_key:
         return []
     try:
@@ -199,7 +199,7 @@ def get_trade_background(force_refresh: bool = False) -> dict:
             pass
 
     # 缓存过期/缺失 → 重新抓取
-    if not cfg.SEARCH_API_KEY:
+    if not (cfg.SEARCH_API_KEY or cfg.TAVILY_API_KEY):
         return {}
     try:
         snippets = [
@@ -264,8 +264,7 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
         except (ValueError, KeyError, IndexError):
             pass
 
-    from config import SEARCH_API_KEY
-    if not SEARCH_API_KEY:
+    if not (cfg.SEARCH_API_KEY or cfg.TAVILY_API_KEY):
         return {}
     try:
         # 两轮检索：①品牌份额 ②产业逻辑（上下游/变动原因）
@@ -302,7 +301,7 @@ def get_news(product: str, market: str) -> dict:
 
     返回：{headlines: [{title, url}], available: bool}
     """
-    if not cfg.SEARCH_API_KEY:
+    if not (cfg.SEARCH_API_KEY or cfg.TAVILY_API_KEY):
         return {"available": False}
 
     try:

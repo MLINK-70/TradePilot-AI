@@ -17,7 +17,7 @@ def _chat(messages: list, use_json: bool = True) -> str:
     提供商由 config 的 AI_PROVIDER 决定，.env 可配 AI_BASE_URL / AI_MODEL / AI_API_KEY。
     """
     provider = cfg.AI_PROVIDER
-    api_key = cfg.AI_API_KEY
+    api_key = cfg.AI_API_KEY or cfg.DEEPSEEK_API_KEY  # 回退：未单独配 AI_API_KEY 时用 DeepSeek key
     base_url = cfg.AI_BASE_URL.rstrip("/")
     model = cfg.AI_MODEL
     if not api_key:
@@ -80,6 +80,9 @@ def _chat(messages: list, use_json: bool = True) -> str:
                 raise ValueError(f"AI API 网络错误（重试后仍失败）：{e}")
             logging.warning("AI 请求失败，3 秒后自动重试: %s", e)
             time.sleep(3)
+        except (KeyError, IndexError, ValueError) as e:
+            # API 返回非预期结构（choices 缺失 / 非 JSON 等），转 ValueError 由上层转 502
+            raise ValueError(f"AI 返回格式异常：{e}")
 
 
 def _parse_json(content: str) -> dict:
@@ -154,11 +157,11 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     background: 全球宏观背景（WTO 展望，可选）
     landscape: 竞争格局（龙头品牌/份额，可选）
     """
-    if not cfg.RUNTIME_KEYS.get("AI_API_KEY"):
+    if not (cfg.RUNTIME_KEYS.get("AI_API_KEY") or cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY")):
         raise ValueError("未配置 AI_API_KEY（或 DEEPSEEK_API_KEY），请检查 .env 文件")
 
     cache_key = _market_cache_key(product, country, market_context, trade_evidence,
-                                  competitiveness, background)
+                                  competitiveness, background, landscape)
     if cache_key in _market_cache:
         return _market_cache[cache_key]
 
