@@ -12,10 +12,75 @@ import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 
 # 中文字体（Windows）
 plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
 plt.rcParams["axes.unicode_minus"] = False
+
+# Word 报告统一字体：微软雅黑（正文 10.5pt，标题分级）
+FONT_FAMILY = "微软雅黑"
+FONT_SIZES = {
+    "Title": Pt(20), "Heading 1": Pt(14), "Heading 2": Pt(12),
+    "Heading 3": Pt(11), "Normal": Pt(10.5), "List Bullet": Pt(10.5),
+}
+
+
+def _set_font_style(style, size: Pt, bold: bool = False) -> None:
+    """设置段落样式的字体（含 eastAsia，否则中文字符回退宋体导致大小不一）"""
+    style.font.name = FONT_FAMILY
+    style.font.size = size
+    style.font.bold = bold
+    # 关键：中文字体必须写到 rPr/w:eastAsia，python-docx 只设 name 对中文不生效
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    rfonts.set(qn("w:eastAsia"), FONT_FAMILY)
+    rfonts.set(qn("w:ascii"), FONT_FAMILY)
+    rfonts.set(qn("w:hAnsi"), FONT_FAMILY)
+
+
+def _apply_doc_fonts(doc: Document) -> None:
+    """统一整份文档的字体：Normal 正文 + 各级 Heading + Title
+
+    解决"字体大小不一"：默认模板 Heading 用 Calibri Light（英文），
+    中文回退宋体，与正文微软雅黑混用 → 统一为微软雅黑分级字号。
+    """
+    for name, size in FONT_SIZES.items():
+        try:
+            _set_font_style(doc.styles[name], size, bold=name.startswith("Heading") or name == "Title")
+        except KeyError:
+            continue
+
+
+def _force_runs_font(doc: Document) -> None:
+    """兜底：遍历所有段落 run 强制设置字体（模板渲染/样式继承不完全时仍生效）
+
+    样式表定义对 Word 大多数情况有效，但 docxtpl 渲染的模板段落可能带直接格式
+    （direct formatting），此时 run 级强制设置能覆盖，保证全文字体一致。
+    """
+    for p in doc.paragraphs:
+        for run in p.runs:
+            run.font.name = FONT_FAMILY
+            # 标题 run 保留样式字号（不覆盖），正文 run 无字号时给默认
+            if run.font.size is None and not p.style.name.startswith("Heading"):
+                run.font.size = Pt(10.5)
+            rpr = run._element.get_or_add_rPr()
+            rfonts = rpr.get_or_add_rFonts()
+            rfonts.set(qn("w:eastAsia"), FONT_FAMILY)
+            rfonts.set(qn("w:ascii"), FONT_FAMILY)
+            rfonts.set(qn("w:hAnsi"), FONT_FAMILY)
+    # 表格单元格文字也统一（python-docx 表格 run 不走 paragraphs）
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for run in p.runs:
+                        run.font.name = FONT_FAMILY
+                        rpr = run._element.get_or_add_rPr()
+                        rfonts = rpr.get_or_add_rFonts()
+                        rfonts.set(qn("w:eastAsia"), FONT_FAMILY)
+                        rfonts.set(qn("w:ascii"), FONT_FAMILY)
+                        rfonts.set(qn("w:hAnsi"), FONT_FAMILY)
 
 
 def build_trend_chart(trend: dict) -> io.BytesIO:
@@ -96,6 +161,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     tpl = DocxTemplate(res_path("templates/report_template_v2.docx"))
     tpl.render(context)
     doc = tpl.docx
+    # 统一字体（模板渲染后追加章节前应用，保证标题/正文一致）
+    _apply_doc_fonts(doc)
 
     # 一、执行摘要
     doc.add_heading("一、执行摘要", level=1)
@@ -161,6 +228,9 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     doc.add_heading("AI 总结", level=2)
     doc.add_paragraph(ai.get("summary", ""))
 
+    # 兜底：run 级强制统一字体（模板直接格式/样式继承不完全时仍生效）
+    _force_runs_font(doc)
+
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -173,8 +243,11 @@ def build_market_report(product: str, country: str, ai: dict,
                         background: dict | None = None) -> io.BytesIO:
     """生成市场分析 Word 报告（AI 结构化数据 + 真实数据证据链 → 文档）"""
     doc = Document()
+    # 统一字体：正文/标题全微软雅黑分级（修复"字体大小不一"）
+    _apply_doc_fonts(doc)
+    # 标题行内字体设置（docx 标题样式可能被模板覆盖，逐段兜底）
     style = doc.styles["Normal"]
-    style.font.name = "微软雅黑"
+    style.font.name = FONT_FAMILY
     style.font.size = Pt(10.5)
 
     h = doc.add_heading(f"{product}市场分析（{country}）", level=0)
@@ -266,6 +339,9 @@ def build_market_report(product: str, country: str, ai: dict,
     # AI 总结
     doc.add_heading("AI 总结", level=1)
     doc.add_paragraph(ai.get("summary", ""))
+
+    # 兜底：run 级强制统一字体（模板直接格式/样式继承不完全时仍生效）
+    _force_runs_font(doc)
 
     buf = io.BytesIO()
     doc.save(buf)
