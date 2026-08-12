@@ -622,15 +622,15 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         leader = matrix[0] if matrix else {}
         if leader.get("country"):
             _p(f"• {leader['country']}以 {leader.get('export_value', 0) / 1e8:.2f} 亿美元居首（占市场进口 {leader.get('market_share', 0)}%），"
-               f"CAGR {leader.get('cagr_pct', 0):+.1f}%（{leader.get('verdict', '')}）。", indent=False)
+               f"CAGR {(leader.get('cagr_pct') or 0):+.1f}%（{leader.get('verdict', '')}）。", indent=False)
         if rising:
             names = "、".join(m["country"] for m in rising[:3])
-            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"]) for m in rising[:3])
+            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"] or 0) for m in rising[:3])
             _p(f"• 上升方：{names}（CAGR {cagrs}）——"
                f"这些出口国份额在扩大，是{leader.get('country', '中国')}的主要追赶者。", indent=False)
         if falling:
             names = "、".join(m["country"] for m in falling[:3])
-            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"]) for m in falling[:3])
+            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"] or 0) for m in falling[:3])
             _p(f"• 下滑方：{names}（CAGR {cagrs}）——"
                f"份额收缩，竞争压力相对缓解。", indent=False)
     else:
@@ -1259,17 +1259,30 @@ def build_market_report(product: str, country: str, ai: dict,
         _h("龙头品牌财务画像", 2)
         _p("结合龙头品牌的公开财报，判断其投入能力与市场策略（数据源：SEC 财报 / 东方财富 / 公开报道）：")
         financials_available = False
+        # 进程内缓存：同公司 24h 内不重查（SEC 查询 ~15 秒/次，报告每次生成都调会拖慢）
+        _fin_cache = getattr(build_market_report, "_fin_cache", None)
+        if _fin_cache is None:
+            _fin_cache = {}
+            build_market_report._fin_cache = _fin_cache
         try:
             from financials import get_company_financials
-            # 品牌 → 财务查询名映射（兼容中英文品牌名）
+            # 品牌 → 财务查询名映射（兼容中英文品牌名，覆盖常见消费电子龙头）
             brand_cn = {"Apple": "苹果", "Huawei": "华为", "Xiaomi": "小米", "Sony": "索尼",
-                        "Samsung": "三星", "Edifier": "漫步者"}
+                        "Samsung": "三星", "Edifier": "漫步者", "JBL": "哈曼",
+                        "Anker": "安克创新", "DJI": "大疆", "GoPro": "GoPro",
+                        "Bose": "Bose", "Razer": "雷蛇", "Xiaomi": "小米"}
             for b in brands[:3]:
                 fname = brand_cn.get(b.get("name", ""), b.get("name", ""))
-                try:
-                    fin = get_company_financials(fname)
-                except Exception:
-                    continue
+                # 进程内缓存命中（24h 内不重查）
+                if fname in _fin_cache:
+                    fin = _fin_cache[fname]
+                else:
+                    try:
+                        fin = get_company_financials(fname)
+                        _fin_cache[fname] = fin
+                    except Exception:
+                        _fin_cache[fname] = {}
+                        continue
                 if not fin or not fin.get("available"):
                     continue
                 metrics = fin.get("metrics") or {}

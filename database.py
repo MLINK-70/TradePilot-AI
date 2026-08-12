@@ -139,16 +139,30 @@ def save_report_history(report_type: str, product: str, country: str,
 
 
 def get_report_history(report_type: str, product: str, country: str,
-                       params: str = "") -> dict | None:
-    """查报告历史：同参数命中返回结果 dict，未命中返回 None"""
+                       params: str = "", ttl_days: int = 7) -> dict | None:
+    """查报告历史：同参数命中且未过期返回结果 dict，未命中/过期返回 None
+
+    TTL：竞争格局等依赖 30 天增量缓存，历史结果超过 ttl_days 视为过期
+    （避免把一个月前的旧格局/旧经济数据当新鲜返回）。
+    """
     init_db()
+    from datetime import datetime, timedelta
     conn = get_conn()
     row = conn.execute(
-        "SELECT result_json FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
+        "SELECT result_json, created_at FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
         (report_type, product, country, params),
     ).fetchone()
     conn.close()
-    return json.loads(row["result_json"]) if row else None
+    if not row:
+        return None
+    # TTL 过期检查
+    try:
+        created = datetime.fromisoformat(row["created_at"])
+        if datetime.now() - created > timedelta(days=ttl_days):
+            return None
+    except (ValueError, TypeError):
+        pass
+    return json.loads(row["result_json"])
 
 
 def list_report_history(report_type: str = "", limit: int = 50) -> list:
