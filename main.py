@@ -437,6 +437,15 @@ def trade_query(req: TradeQueryRequest):
     if not years:
         raise HTTPException(status_code=400, detail="年份范围无效（截至年不能早于起始年）")
 
+    # 历史命中：同参数直接返回（不重复查询 UN Comtrade，省时间/限流额度）
+    from database import get_report_history
+    hist_params = json.dumps({"start_year": req.start_year, "end_year": req.end_year,
+                              "reporter": req.reporter}, ensure_ascii=False)
+    cached = get_report_history("trade", product, target, hist_params)
+    if cached:
+        logging.info("贸易历史命中: %s → %s", product, target)
+        return cached
+
     try:
         if len(years) == 1:
             hs, rows = query_trade(product, target, str(years[0]), reporter=req.reporter)
