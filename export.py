@@ -451,8 +451,12 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         if level == 1 and blank_before:
             for _ in range(2):
                 blank = doc.add_paragraph()
+                # 空行段落加极小 run（2pt 字）：被推到页首时只是微距而非空两行
+                br = blank.add_run(" ")
+                br.font.size = Pt(2)
                 blank.paragraph_format.space_before = Pt(0)
                 blank.paragraph_format.space_after = Pt(0)
+                blank.paragraph_format.line_spacing = Pt(2)
                 blank.paragraph_format.keepNext = True
         return doc.add_heading(text, level=level)
 
@@ -663,6 +667,27 @@ def _refresh_fields_docx(path: str) -> None:
                 word.DisplayAlerts = 0  # 防兼容性/恢复弹窗卡死
                 doc = word.Documents.Open(path)
                 doc.Repaginate()
+                # 清理页首空行段落（章节空行被推到新页首时删除，避免页首空两行）
+                for _ in range(3):
+                    doc.Repaginate()
+                    cleaned = False
+                    for pg in range(1, doc.ComputeStatistics(2) + 1):  # wdStatisticPages
+                        try:
+                            first_para = doc.Range(
+                                doc.GoTo(1, 1, 1, pg).Start,  # wdGoToPage
+                                doc.GoTo(1, 1, 1, pg).Start
+                            ).Paragraphs(1)
+                        except Exception:
+                            continue
+                        txt = first_para.Range.Text.strip()
+                        # 空行特征：无文字（可能含空格/极小字 run）且不是表格
+                        if txt in ("", " ") and first_para.Range.Tables.Count == 0:
+                            if first_para.Range.Information(3) == pg:
+                                first_para.Range.Delete()
+                                cleaned = True
+                                break
+                    if not cleaned:
+                        break
                 # 检测并修复表格跨页（最多 3 轮，插入分页符后分页变化需重新检查）
                 for _ in range(3):
                     doc.Repaginate()
@@ -737,8 +762,12 @@ def build_market_report(product: str, country: str, ai: dict,
         if level == 1 and blank_before:
             for _ in range(2):
                 blank = doc.add_paragraph()
+                # 空行段落加极小 run（2pt 字）：被推到页首时只是微距而非空两行
+                br = blank.add_run(" ")
+                br.font.size = Pt(2)
                 blank.paragraph_format.space_before = Pt(0)
                 blank.paragraph_format.space_after = Pt(0)
+                blank.paragraph_format.line_spacing = Pt(2)
                 blank.paragraph_format.keepNext = True  # 与下一段（标题）同页
         return doc.add_heading(text, level=level)
 
