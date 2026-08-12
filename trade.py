@@ -297,7 +297,9 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
             )
             if resp.status_code == 429:
                 last_error = f"429 限流（第 {attempt + 1} 次）"
-                wait = 2 * (attempt + 1)
+                # 指数退避：2/5/10 秒（preview 接口限流窗口通常 1 分钟，
+                # 快速重试只会加剧限流；等更久让窗口过去）
+                wait = (2, 5, 10)[attempt]
                 print(f"[限流] 429，{wait} 秒后重试...")
                 time.sleep(wait)
                 continue
