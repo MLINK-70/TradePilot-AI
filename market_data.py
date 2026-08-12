@@ -79,6 +79,49 @@ def get_worldbank(iso3: str, indicator: str, year: int = 0) -> float | None:
     return None
 
 
+def get_worldbank_series(iso3: str, indicator: str, years: list) -> dict:
+    """查 World Bank 指标多年序列（供报告趋势图；带缓存）
+
+    一次请求拉取区间数据（per_page=100），避免逐年请求。
+    返回 {year: value}，失败返回 {}（不阻断）。
+    """
+    if not years:
+        return {}
+    init_db()
+    cache_key = f"WB_SER:{iso3}:{indicator}:{min(years)}-{max(years)}"
+    cached = get_cached(cache_key, "0", "0", "X", "META")
+    if cached:
+        return {int(k): v for k, v in (cached[0].get("data") or {}).items()}
+
+    url = f"{WB_BASE}/{iso3}/indicator/{INDICATORS[indicator]}"
+    params = {
+        "format": "json",
+        "per_page": 100,
+        "date": f"{min(years)}:{max(years)}",
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=20,
+                            proxies={"http": None, "https": None})
+        resp.raise_for_status()
+        data = resp.json()
+        series = {}
+        if len(data) > 1 and data[1]:
+            for row in data[1]:
+                try:
+                    y = int(row.get("date"))
+                    if row.get("value") is not None and y in years:
+                        series[y] = row["value"]
+                except (ValueError, TypeError):
+                    continue
+        if series:
+            save_cache(cache_key, "0", "0", "X",
+                       [{"data": series}], "META")
+        return series
+    except Exception as e:
+        logging.warning("World Bank 序列查询失败 %s/%s: %s", iso3, indicator, e)
+        return {}
+
+
 def get_market_context(country: str) -> dict:
     """聚合市场环境：GDP/人口/人均/互联网 → dict（失败字段为 None，不阻断）"""
     iso3 = COUNTRY_ISO3.get(country.strip(), "")

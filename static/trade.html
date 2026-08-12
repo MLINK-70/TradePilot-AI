@@ -229,6 +229,7 @@
 
       <div class="download-row">
         <button id="dl-report">下载 Word 报告</button>
+        <button id="dl-report-pdf">下载 PDF</button>
         <button id="dl-data">下载 CSV 数据</button>
       </div>
     </section>
@@ -630,30 +631,45 @@
         });
       }
 
-      document.getElementById('dl-report').addEventListener('click', async () => {
+      // 通用下载（fmt 可选 docx/pdf）
+      async function downloadTradeReport(fmt, btnEl, btnText) {
         if (!lastQuery) return;
-        const resp = await fetch('/api/trade/export/report', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            product: lastQuery.product, target: lastQuery.target,
-            start_year: lastQuery.start_year, end_year: lastQuery.end_year,
-            reporter: lastQuery.reporter,
-          }),
-        });
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
-          const cd = resp.headers.get('Content-Disposition') || '';
-          const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-          a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-报告.docx';
-          a.click();
-        } else {
-          showStatus('报告下载失败', 'error');
+        btnEl.disabled = true;
+        btnEl.textContent = '生成中…';
+        try {
+          const resp = await fetch('/api/trade/export/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product: lastQuery.product, target: lastQuery.target,
+              start_year: lastQuery.start_year, end_year: lastQuery.end_year,
+              reporter: lastQuery.reporter, fmt,
+            }),
+          });
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
+            const cd = resp.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+            a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-报告.' + fmt;
+            a.click();
+          } else {
+            showStatus('报告下载失败', 'error');
+          }
+        } catch (_) {
+          showStatus('网络错误，下载失败', 'error');
+        } finally {
+          btnEl.disabled = false;
+          btnEl.textContent = btnText;
         }
-      });
+      }
+
+      document.getElementById('dl-report').addEventListener('click', () =>
+        downloadTradeReport('docx', document.getElementById('dl-report'), '下载 Word 报告'));
+      document.getElementById('dl-report-pdf').addEventListener('click', () =>
+        downloadTradeReport('pdf', document.getElementById('dl-report-pdf'), '下载 PDF'));
 
       document.getElementById('dl-data').addEventListener('click', async () => {
         if (!lastQuery) return;

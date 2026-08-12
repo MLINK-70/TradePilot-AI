@@ -7,17 +7,19 @@
   const statusEl = document.getElementById('status');
   const reportEl = document.getElementById('report');
   const dlBtn = document.getElementById('dl-report');
+  const dlPdfBtn = document.getElementById('dl-report-pdf');
   let lastQuery = null;
 
-  dlBtn.addEventListener('click', async () => {
+  // 通用下载：fmt=docx/pdf，按钮临时禁用 + 状态提示
+  async function downloadReport(fmt, btnEl, btnText) {
     if (!lastQuery) return;
-    dlBtn.disabled = true;
-    dlBtn.textContent = '生成中…';
+    btnEl.disabled = true;
+    btnEl.textContent = '生成中…';
     try {
       const resp = await fetch('/api/analyze/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(lastQuery),
+        body: JSON.stringify({ ...lastQuery, fmt }),
       });
       if (resp.ok) {
         const blob = await resp.blob();
@@ -26,7 +28,7 @@
         // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
         const cd = resp.headers.get('Content-Disposition') || '';
         const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.docx';
+        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.' + fmt;
         a.click();
       } else {
         showStatus('报告下载失败', 'error');
@@ -34,10 +36,13 @@
     } catch (_) {
       showStatus('网络错误，下载失败', 'error');
     } finally {
-      dlBtn.disabled = false;
-      dlBtn.textContent = '下载 Word 报告';
+      btnEl.disabled = false;
+      btnEl.textContent = btnText;
     }
-  });
+  }
+
+  dlBtn.addEventListener('click', () => downloadReport('docx', dlBtn, '下载 Word 报告'));
+  dlPdfBtn.addEventListener('click', () => downloadReport('pdf', dlPdfBtn, '下载 PDF'));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -61,7 +66,7 @@
     btn.disabled = true;
     btn.textContent = '分析中…';
     btn.classList.add('loading');
-    dlBtn.hidden = true;
+    dlBtn.hidden = true; dlPdfBtn.hidden = true;
     showStatus('正在生成市场分析报告，约需 10-30 秒…', 'info');
     // 新请求开始即清空旧报告，避免误读上次结果
     reportEl.hidden = true;
@@ -98,7 +103,7 @@
       reportEl.innerHTML = DOMPurify.sanitize(marked.parse(data.report));
       reportEl.hidden = false;
       lastQuery = { product, country };
-      dlBtn.hidden = false;
+      dlBtn.hidden = false; dlPdfBtn.hidden = false;
 
       // 行业动态（Tavily 搜索）
       const newsBox = document.getElementById('news-box');
@@ -373,7 +378,7 @@
     btn.disabled = true;
     btn.textContent = '分析中…（每市场独立查询，约 20-60 秒）';
     btn.classList.add('loading');
-    dlBtn.hidden = true;
+    dlBtn.hidden = true; dlPdfBtn.hidden = true;
     showStatus('正在生成多市场对比报告，请稍候…', 'info');
     // 新请求开始即清空旧对比结果
     reportEl.hidden = true;

@@ -8,6 +8,8 @@ import logging
 import json
 import os
 import sys
+import time
+import io
 from urllib.parse import quote
 
 # 资源路径：打包(exe)用 _MEIPASS，开发用项目目录
@@ -74,6 +76,7 @@ def _collect_evidence(product: str, country: str) -> tuple:
             trade_evidence = {
                 "hs_code": hs,
                 "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
                 "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
             }
         if len(rows):
@@ -197,13 +200,20 @@ def analyze_compare(req: AnalyzeCompareRequest):
     }
 
 
+class AnalyzeExportRequest(AnalyzeRequest):
+    fmt: str = "docx"  # docx / pdf
+
+
 @app.post("/api/analyze/export")
-def export_market_report(req: AnalyzeRequest):
-    """下载市场分析 Word 报告"""
+def export_market_report(req: AnalyzeExportRequest):
+    """下载市场分析报告（Word 或 PDF）"""
     product = req.product.strip()
     country = req.country.strip()
+    fmt = (req.fmt or "docx").lower()
     if not product or not country:
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
+    if fmt not in ("docx", "pdf"):
+        raise HTTPException(status_code=400, detail="fmt 仅支持 docx 或 pdf")
 
     try:
         # 完整证据链（与页面分析一致）
@@ -214,11 +224,15 @@ def export_market_report(req: AnalyzeRequest):
         raise HTTPException(status_code=502, detail=str(e))
 
     buf = build_market_report(product, country, data, trade_evidence,
-                              competitiveness, background)
-    filename = f"TradePilot-{product}-{country}-市场分析报告.docx"
+                              competitiveness, background, landscape, market_ctx)
+    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF
+    from export import finalize_docx
+    buf = finalize_docx(buf, as_pdf=(fmt == "pdf"))
+    filename = f"TradePilot-{product}-{country}-市场分析报告.{fmt}"
+    media_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return StreamingResponse(
         buf,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=media_type,
         headers=_download_headers(filename),
     )
 
@@ -229,6 +243,7 @@ class TradeExportRequest(BaseModel):
     start_year: int          # 起始年
     end_year: int | None = None  # 截至年（可选，留空默认到最新）
     reporter: str = "中国"  # 出口国（报告国），默认中国
+    fmt: str = "docx"       # docx / pdf
 
 
 def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
@@ -262,7 +277,10 @@ def _download_headers(filename: str) -> dict:
 
 @app.post("/api/trade/export/report")
 def export_report(req: TradeExportRequest):
-    """下载 Word 分析报告（执行摘要 + 趋势图 + 数据 + AI 分析）"""
+    """下载贸易数据报告（Word 或 PDF：封面/目录/趋势图/数据表/AI 分析）"""
+    fmt = (req.fmt or "docx").lower()
+    if fmt not in ("docx", "pdf"):
+        raise HTTPException(status_code=400, detail="fmt 仅支持 docx 或 pdf")
     hs, rows = _fetch_trade_data(req)
     # 复用市场分析的证据链采集，让 AI 分析基于真实数据
     # （B7 修复：与 /api/analyze 一致，不再纯 LLM 估算；查询有缓存，重复调用代价小）
@@ -288,10 +306,14 @@ def export_report(req: TradeExportRequest):
     year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis)
-    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.docx"
+    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF
+    from export import finalize_docx
+    buf = finalize_docx(buf, as_pdf=(fmt == "pdf"))
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.{fmt}"
+    media_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return StreamingResponse(
         buf,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=media_type,
         headers=_download_headers(filename),
     )
 
