@@ -368,7 +368,9 @@ def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
         with open(read_path, "rb") as f:
             return io.BytesIO(f.read()), fmt
     except Exception:
-        return buf, ("pdf" if as_pdf else "docx")
+        # COM 全部失败：返回原始 docx（域靠用户打开时自动更新）；PDF 请求强制降级 docx，
+        # 避免"docx 内容 + .pdf 后缀 + application/pdf"的损坏文件
+        return buf, "docx"
     finally:
         for p in (tmp_path, tmp_path.replace(".docx", ".pdf")):
             try:
@@ -497,8 +499,12 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         r.font.size = Pt(10.5)
         r.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
     _hr(space_before=True)
-    # 核心数据速览
-    _h("核心数据速览", 1)
+    # 核心数据速览（封面 KPI 区标题：非章节标题，用 Normal 加粗避免混进目录）
+    kpi_title = doc.add_paragraph()
+    kpi_title.paragraph_format.space_before = Pt(12)
+    ktr = kpi_title.add_run("核心数据速览")
+    ktr.font.size = Pt(14)
+    ktr.bold = True
     kpi_rows = []
     kpi_rows.append((f"对{target}出口总额（{year}）", f"{total_value / 1e8:.2f} 亿美元"))
     if total_wgt:
@@ -807,8 +813,12 @@ def build_market_report(product: str, country: str, ai: dict,
         r.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
     _hr(space_before=True)
 
-    # 核心数据速览（封面下半部，KPI 表填充不空）
-    _h("核心数据速览", 1)
+    # 核心数据速览（封面 KPI 区标题：非章节标题，用 Normal 加粗避免混进目录）
+    kpi_title = doc.add_paragraph()
+    kpi_title.paragraph_format.space_before = Pt(12)
+    ktr = kpi_title.add_run("核心数据速览")
+    ktr.font.size = Pt(14)
+    ktr.bold = True
     kpi_rows = []
     if trade_evidence and trade_evidence.get("trend"):
         trend = trade_evidence["trend"]
@@ -1082,10 +1092,15 @@ def build_market_report(product: str, country: str, ai: dict,
         years = sorted(trend.keys())
         if len(years) >= 2:
             first, last = trend[str(years[0])], trend[str(years[-1])]
-            cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
+            # 防 0 值（某年出口额为 0 时 pow(last/0) 崩溃）
+            if first > 0 and last > 0:
+                cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
+            else:
+                cagr = None
             # 标注"历史"：与第六章 AI 预测 CAGR 区分（避免同报告两个 CAGR 打架）
             factor_rows.append((f"出口 CAGR（{years[0]}-{years[-1]} 历史）",
-                                f"{cagr:+.1f}%", "出口动能方向（历史）"))
+                                f"{cagr:+.1f}%" if cagr is not None else "—",
+                                "出口动能方向（历史）"))
     if landscape and landscape.get("top_brands"):
         factor_rows.append(("龙头品牌份额", f"{landscape['top_brands'][0].get('share', '')}",
                             "市场集中度决定进入难度"))
@@ -1121,8 +1136,10 @@ def build_market_report(product: str, country: str, ai: dict,
         years = sorted(trend.keys())
         if len(years) >= 2:
             first, last = trend[str(years[0])], trend[str(years[-1])]
-            cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
-            _p(f"• {years[0]}-{years[-1]} 出口 CAGR {cagr:+.1f}%（历史）：反映该品类在目标市场的整体出口动能。", indent=False)
+            # 防 0 值（某年出口额为 0 时 pow(last/0) 崩溃）
+            if first > 0 and last > 0:
+                cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
+                _p(f"• {years[0]}-{years[-1]} 出口 CAGR {cagr:+.1f}%（历史）：反映该品类在目标市场的整体出口动能。", indent=False)
     _h("竞争侧（格局与份额）", 2)
     if landscape and landscape.get("top_brands"):
         brands = landscape["top_brands"]
