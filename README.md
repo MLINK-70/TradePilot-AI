@@ -1,10 +1,12 @@
 # TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告 + 多国横向对比，基于真实数据证据链）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（商品采集 / 评论分析 / 竞品对比 / 平台 Listing / 财报画像 / eBay + 速卖通商品分析）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告 + 多国横向对比 + 历史记录）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标 + 驱动因素分析）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（商品采集 / 评论分析 / 竞品对比 / 平台 Listing / 财报画像 / eBay + 速卖通商品分析）。
 
-**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · 多 AI 提供商（DeepSeek 默认 / GPT / Claude / 自定义）· UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API
+**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · matplotlib（报告图表）· 多 AI 提供商（DeepSeek 默认 / GPT / Claude / 自定义）· UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API
 
-> ⚠️ **数据声明**：市场分析基于**多重真实数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 引用并解读这些数据；统计指标（CAGR/峰值/竞争力）由程序精确计算，AI 不参与算数；数据不足处 AI 估算并标注"估算"；评论分析基于用户提供的评论样本。
+**报告导出**：Word（学术论文式：封面/目录/字体分级/页码/表格防切分）+ PDF，两种格式均可下载。
+
+> ⚠️ **数据声明**：市场分析基于**多重数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 引用并解读这些数据；统计指标（CAGR/峰值/竞争力）由程序精确计算，AI 不参与算数；数据不足处 AI 估算并标注"估算"；评论分析基于用户提供的评论样本。
 
 ---
 
@@ -80,6 +82,17 @@
 
 **说明**：每国独立聚合真实数据证据链（UN Comtrade 贸易趋势 + World Bank 经济环境 + TC 竞争力指标），对比表数字列全部程序精确计算，AI 只提供机会点/风险解读与入选建议，不参与算术。
 
+### `GET /api/history`
+
+最近 10 条查询历史（可选按类型过滤 `?report_type=market|trade`）。前端"历史"按钮调用，点击记录回填表单重新查询；同参数重复查询命中历史缓存（7 天 TTL）直接返回，不重复消耗 API。
+
+### 报告导出（支持 Word / PDF）
+
+- `POST /api/analyze/export`：市场分析报告，`fmt=docx|pdf`（默认 docx）
+- `POST /api/trade/export/report`：贸易数据报告，`fmt=docx|pdf`
+
+报告为学术论文式排版：封面 + 目录（点线页码 + 单击跳转）+ 章节空行 + 首行缩进 + 字体分级（黑体标题/宋体正文）+ 页脚页码 + 表格防切分 + 饼图/柱状图/折线图图表分析。
+
 ### `POST /api/ecommerce/collect`
 
 商品 URL 或粘贴文本 → 采集商品画像 + AI 选品分析（无 Key 可采集画像，AI 分析降级跳过）。
@@ -125,8 +138,8 @@
 ├── ebay.py          # eBay 商品分析（OAuth + Browse API，可选增强）
 ├── aliexpress.py    # 速卖通商品分析（联盟开放平台 API + HmacSHA256 签名）
 ├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
-├── database.py      # SQLite 缓存层（trade_cache / query_log）
-├── market_data.py   # 多数据源：World Bank 经济 + Tavily 搜索 + WTO 宏观背景 + 竞争格局
+├── database.py      # SQLite 缓存层（trade_cache / query_log / report_history 查询历史）
+├── market_data.py   # 多数据源：World Bank 经济（GDP/CPI/汇率/科技出口等）+ Tavily 搜索 + WTO 宏观背景 + 竞争格局
 ├── desktop.py       # 桌面版入口（PyWebView）
 ├── countries.py     # 完整国家清单（159 项 + 组织代码）
 ├── hs_descriptions.py # HS 编码品名描述
@@ -167,6 +180,8 @@
 | ✅ 已完成 | 财务画像 | SEC 美股 / 东方财富 A 股 / 非上市白名单兜底 → 供应商/竞品财报画像 |
 | ✅ 已完成 | 数据证据链 | 市场分析/贸易数据接入 5 层真实数据（UN Comtrade + World Bank + Tavily + WTO 宏观背景 + TC 竞争力指标） |
 | ✅ 已完成 | 多国市场对比 | 2-5 国横向对比（出口额/CAGR/TC/份额 + AI 入选建议），市场分析页高级选项 |
+| ✅ 已完成 | 报告升级 | Word/PDF 双格式：学术论文式排版 + 图表分析（饼图/柱状/折线）+ 驱动因素（CPI 趋势）+ 龙头财报画像 |
+| ✅ 已完成 | 历史记录 | 两页"历史"按钮：最近 10 条查询回看 + 同参数命中缓存（7 天 TTL，省 token） |
 | ✅ 已完成 | 设置与桌面版 | 页面设置面板（AI 提供商/搜索源/Key 即时生效）+ PyWebView 桌面版入口 |
 | 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
 
