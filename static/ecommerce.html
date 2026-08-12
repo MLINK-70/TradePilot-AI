@@ -8,6 +8,14 @@
   <title>TradePilot AI — 跨境电商</title>
   <link rel="stylesheet" href="style.css?v=11">
   <style>
+    .card-title {
+      color: var(--navy-deep);
+      font-family: var(--serif);
+      font-size: 1.05rem;
+      margin-bottom: 0.8rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
     /* 覆盖历史内联样式（圆角/边框/灰底 → 下划线式输入） */
     #reviews-input, #ebay-url, #aliexpress-url,
     #prod-a, #prod-b, #reviews-a, #reviews-b, #platform-select {
@@ -112,8 +120,9 @@
   </header>
 
   <main>
-    <!-- 公司财报画像：SEC/东方财富/公开报道 三层财务数据 -->
-    <section class="card">
+    <!-- 公司财报画像：SEC/东方财富/公开报道 三层财务数据（辅助功能，默认折叠） -->
+    <details class="company-optional">
+      <summary>公司财报画像 <span class="api-badge">辅助</span></summary>
       <form id="fin-form" autocomplete="off">
         <div class="form-row">
           <label for="fin-company">公司名称</label>
@@ -127,11 +136,15 @@
         <p class="meta" id="fin-source"></p>
         <table class="pain-table" id="fin-table"></table>
       </div>
-    </section>
+    </details>
 
-    <!-- 更多 API：eBay / 速卖通商品分析（默认折叠） -->
+    <!-- 更多 API：eBay / 速卖通商品分析（默认折叠，需平台审核 Key） -->
     <details class="company-optional api-more">
       <summary id="api-more-toggle">更多 API <span class="api-badge">eBay · 速卖通</span></summary>
+      <p class="meta" style="margin-top:0.4rem;color:var(--error);">
+        ⚠️ 需在设置面板配置 eBay App ID + Secret / 速卖通 App Key + Secret（需平台开发者审核）。
+        未配置时以下功能不可用——日常选品请用上方"商品采集"（无需 Key）。
+      </p>
       <div class="api-panel">
         <form id="ebay-form" autocomplete="off">
           <div class="form-row">
@@ -157,20 +170,21 @@
 
     <!-- 商品采集：URL/粘贴文本 → 画像 + AI 选品分析 -->
     <section class="card">
+      <h3 class="card-title">商品采集与选品分析</h3>
       <form id="collect-form" autocomplete="off">
         <div class="form-row">
           <label for="product-url">商品链接</label>
-          <input type="text" id="product-url" placeholder="粘贴商品链接（亚马逊等），留空则用下方粘贴内容" autocomplete="off">
+          <input type="text" id="product-url" placeholder="粘贴商品链接（亚马逊等）" autocomplete="off">
         </div>
         <div class="form-row">
           <label for="pasted-text">页面内容</label>
-          <textarea id="pasted-text" placeholder="可选：粘贴商品页面内容（反爬/登录墙时用），AI 提取字段" rows="3"></textarea>
+          <textarea id="pasted-text" placeholder="可选：粘贴商品页面内容（反爬/登录墙时用），AI 提取字段" rows="2"></textarea>
         </div>
         <div class="btn-row-inline">
           <button type="submit" id="collect-btn" class="btn-primary">采集商品数据</button>
           <button type="button" id="collect-sample-btn" class="btn-inline">演示画像</button>
         </div>
-        <p class="meta" style="margin-top:0.4rem;">优先读取商品页公开数据；页面无法访问时可粘贴页面内容让 AI 提取。不破解反爬。</p>
+        <p class="meta" style="margin-top:0.3rem;">优先读取商品页公开数据；页面无法访问时可粘贴页面内容让 AI 提取。不破解反爬。</p>
       </form>
       <p id="collect-status" class="status"></p>
       <div id="collect-result" class="listing-box" hidden>
@@ -199,6 +213,7 @@
     </section>
 
     <section class="card">
+      <h3 class="card-title">评论分析与痛点挖掘</h3>
       <form id="review-form" autocomplete="off">
         <div class="form-row">
           <label for="reviews-input">评论粘贴</label>

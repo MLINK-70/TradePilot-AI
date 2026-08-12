@@ -14,6 +14,54 @@
     .download-row { display: flex; gap: 0.8rem; margin-top: 1rem; }
     .download-row[hidden] { display: none; }  /* 防 display:flex 覆盖 hidden 属性 */
     .download-row button { flex: 1; }
+    /* 历史记录面板（与市场分析页一致） */
+    #history-panel {
+      margin-top: 1rem;
+      padding: 0.8rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card);
+    }
+    #history-panel[hidden] { display: none; }
+    .history-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+      font-weight: 700;
+      color: var(--navy-deep);
+    }
+    #history-close {
+      width: auto;
+      padding: 0.3rem 0.9rem;
+      font-size: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    #history-list { list-style: none; padding: 0; margin: 0; }
+    #history-list li {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px dashed var(--border);
+      cursor: pointer;
+      font-size: 0.92rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+    }
+    #history-list li:hover { background: rgba(18, 60, 92, 0.05); }
+    #history-list .h-type {
+      font-size: 0.72rem;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0 0.4rem;
+      white-space: nowrap;
+      align-self: center;
+    }
+    #history-list .h-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
     .analysis-title { color: var(--navy-deep); font-family: var(--serif); font-size: 1.05rem; margin-bottom: 0.5rem; }
     .pain-table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
     .pain-table th, .pain-table td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
@@ -118,8 +166,19 @@
             <datalist id="year-list"></datalist>
           </div>
         </div>
-        <button type="submit" id="submit-btn">查询数据</button>
+        <div class="btn-row">
+          <button type="submit" id="submit-btn">查询数据</button>
+          <button type="button" id="history-btn" class="btn-secondary">历史</button>
+        </div>
       </form>
+      <!-- 历史记录弹层（最近 10 条） -->
+      <div id="history-panel" hidden>
+        <div class="history-head">
+          <span>最近查询</span>
+          <button type="button" id="history-close">关闭</button>
+        </div>
+        <ul id="history-list"></ul>
+      </div>
       <!-- 下载区：独立一行（查询成功后显示），保留原三按钮 -->
       <div class="download-row" id="download-row" hidden>
         <button type="button" id="dl-report">下载 Word 报告</button>
@@ -760,6 +819,77 @@
         downloadTradeReport('docx', document.getElementById('dl-report'), '下载 Word 报告'));
       document.getElementById('dl-report-pdf').addEventListener('click', () =>
         downloadTradeReport('pdf', document.getElementById('dl-report-pdf'), '下载 PDF'));
+
+      // ===== 历史记录（最近 10 条，点击回填重新查询）=====
+      const historyBtn = document.getElementById('history-btn');
+      const historyPanel = document.getElementById('history-panel');
+      const historyList = document.getElementById('history-list');
+
+      historyBtn.addEventListener('click', async () => {
+        try {
+          const resp = await fetch('/api/history');
+          const items = await resp.json();
+          historyList.innerHTML = '';
+          if (!items.length) {
+            const li = document.createElement('li');
+            li.textContent = '暂无查询记录';
+            li.style.cursor = 'default';
+            historyList.appendChild(li);
+          } else {
+            items.forEach(it => {
+              const li = document.createElement('li');
+              const left = document.createElement('span');
+              const typeTag = document.createElement('span');
+              typeTag.className = 'h-type';
+              typeTag.textContent = it.report_type === 'trade' ? '贸易' : '市场';
+              let params = '';
+              try {
+                const p = JSON.parse(it.params || '{}');
+                if (p.start_year) params = ' ' + p.start_year + '-' + (p.end_year || '最新');
+                if (p.reporter) params += ' ' + p.reporter + '→';
+              } catch (_) {}
+              left.textContent = it.product + ' → ' + it.country + params;
+              const time = document.createElement('span');
+              time.className = 'h-time';
+              time.textContent = (it.created_at || '').slice(5, 16).replace('T', ' ');
+              li.appendChild(left);
+              li.appendChild(typeTag);
+              li.appendChild(time);
+              li.addEventListener('click', () => {
+                historyPanel.hidden = true;
+                if (it.report_type === 'trade') {
+                  // 贸易记录：回填表单并查询（解析 params）
+                  let start = '', end = '', reporter = '中国';
+                  try {
+                    const p = JSON.parse(it.params || '{}');
+                    start = p.start_year || '';
+                    end = p.end_year || '';
+                    reporter = p.reporter || '中国';
+                  } catch (_) {}
+                  document.getElementById('product').value = it.product;
+                  document.getElementById('target').value = it.country;
+                  document.getElementById('start-year').value = start;
+                  if (end) document.getElementById('end-year').value = end;
+                  document.getElementById('reporter').value = reporter;
+                  form.requestSubmit();
+                } else {
+                  // 市场记录：跳转市场分析页带参
+                  window.location.href = '/' + '?product=' + encodeURIComponent(it.product) +
+                    '&country=' + encodeURIComponent(it.country);
+                }
+              });
+              historyList.appendChild(li);
+            });
+          }
+          historyPanel.hidden = false;
+        } catch (_) {
+          showStatus('历史记录加载失败', 'error');
+        }
+      });
+
+      document.getElementById('history-close').addEventListener('click', () => {
+        historyPanel.hidden = true;
+      });
 
       document.getElementById('dl-data').addEventListener('click', async () => {
         if (!lastQuery) return;

@@ -105,6 +105,18 @@
     historyPanel.hidden = true;
   });
 
+  // 历史跳转回填（?product=&country= → 填表单自动查询）
+  (function autoFromHistory() {
+    const params = new URLSearchParams(window.location.search);
+    const product = params.get('product');
+    const country = params.get('country');
+    if (!product || !country) return;
+    document.getElementById('product').value = product;
+    document.getElementById('country').value = country;
+    history.replaceState({}, '', window.location.pathname);
+    form.requestSubmit();
+  })();
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
