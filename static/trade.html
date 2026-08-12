@@ -12,6 +12,7 @@
     #trend-chart { width: 100%; height: 360px; }
     .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
     .download-row { display: flex; gap: 0.8rem; margin-top: 1rem; }
+    .download-row[hidden] { display: none; }  /* 防 display:flex 覆盖 hidden 属性 */
     .download-row button { flex: 1; }
     .analysis-title { color: var(--navy-deep); font-family: var(--serif); font-size: 1.05rem; margin-bottom: 0.5rem; }
     .pain-table { width: 100%; border-collapse: collapse; margin: 0.4rem 0; font-size: 0.9rem; }
@@ -119,6 +120,12 @@
         </div>
         <button type="submit" id="submit-btn">查询数据</button>
       </form>
+      <!-- 下载区：独立一行（查询成功后显示），保留原三按钮 -->
+      <div class="download-row" id="download-row" hidden>
+        <button type="button" id="dl-report">下载 Word 报告</button>
+        <button type="button" id="dl-report-pdf">下载 PDF</button>
+        <button type="button" id="dl-data">下载 CSV 数据</button>
+      </div>
       <p id="status" class="status"></p>
     </section>
 
@@ -163,6 +170,12 @@
         <p class="meta" id="analysis-source"></p>
         <p class="meta" id="analysis-market" hidden></p>
         <p class="meta" id="competitiveness" hidden></p>
+
+        <!-- 数据构成解读（程序精确计算，行业报告式） -->
+        <div class="analysis-section" id="composition-box" hidden>
+          <div class="analysis-label">数据构成解读</div>
+          <ul id="composition-list"></ul>
+        </div>
 
         <!-- 入局策略（跟随出口国视角） -->
         <div id="entry-box" hidden>
@@ -225,12 +238,6 @@
         <h3 class="analysis-title">出口目的地排名</h3>
         <table class="pain-table" id="destination-table"></table>
         <p class="meta">目标市场（组织）内部各国进口排名（UN Comtrade）</p>
-      </div>
-
-      <div class="download-row">
-        <button id="dl-report">下载 Word 报告</button>
-        <button id="dl-report-pdf">下载 PDF</button>
-        <button id="dl-data">下载 CSV 数据</button>
       </div>
     </section>
   </main>
@@ -350,6 +357,7 @@
         btn.textContent = '查询中…';
         showStatus('正在从 UN Comtrade 获取数据，组织聚合可能需要 1-2 分钟…', 'info');
         resultEl.hidden = true;
+        document.getElementById('download-row').hidden = true;
 
         try {
           const resp = await fetch('/api/trade/query', {
@@ -367,6 +375,8 @@
 
           lastQuery = { product, reporter, target, start_year: startYear, end_year: endYear };
           render(data);
+          // 查询成功 → 显示下载区（独立一行，与市场分析一致）
+          document.getElementById('download-row').hidden = false;
           showStatus('', '');
         } catch (err) {
           showStatus('网络错误，请确认后端服务已启动', 'error');
@@ -500,6 +510,71 @@
             cpEl.hidden = false;
           } else {
             cpEl.hidden = true;
+          }
+          // 数据构成解读（程序精确计算：单价趋势/进出口结构/波动上下文）
+          const cmpBox = document.getElementById('composition-box');
+          const cmpList = document.getElementById('composition-list');
+          cmpList.innerHTML = '';
+          const compItems = [];
+          // 单价趋势（出口额 ÷ 净重）
+          const rows2 = data.rows || [];
+          const byYear = {};
+          rows2.forEach(r => {
+            const y = r.year;
+            if (y == null) return;
+            byYear[y] = byYear[y] || { value: 0, weight: 0 };
+            byYear[y].value += r.value || 0;
+            byYear[y].weight += r.weight || 0;
+          });
+          const ys = Object.keys(byYear).map(Number).sort((a, b) => a - b);
+          const unitPrices = [];
+          ys.forEach(y => {
+            const d = byYear[y];
+            if (d.value > 0 && d.weight > 0) unitPrices.push({ y, up: d.value / d.weight });
+          });
+          if (unitPrices.length >= 2) {
+            const first = unitPrices[0].up, last = unitPrices[unitPrices.length - 1].up;
+            if (first > 0) {
+              const chg = (last - first) / first * 100;
+              const trendDesc = chg > 5 ? '上升（向高价值产品结构演进）'
+                : chg < -5 ? '下降（低价值占比扩大或价格竞争加剧）' : '平稳';
+              compItems.push('单价趋势：' + unitPrices.map(u => u.y + ' 年 ' + u.up.toFixed(2) + ' 美元/公斤').join(' → ') +
+                '；区间变化 ' + (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%（' + trendDesc + '）');
+            }
+          }
+          // 进出口结构（TC 数据）
+          const cp2 = data.competitiveness || {};
+          if (cp2.available && cp2.tc != null) {
+            const ex = (cp2.export_value || 0) / 1e8, im = (cp2.import_value || 0) / 1e8;
+            const net = ex - im;
+            if (ex + im > 0) {
+              compItems.push('进出口结构：出口 ' + ex.toFixed(2) + ' 亿 vs 进口 ' + im.toFixed(2) + ' 亿美元，净' +
+                (net >= 0 ? '顺差' : '逆差') + ' ' + Math.abs(net).toFixed(2) + ' 亿美元，出口占比 ' +
+                (ex / (ex + im) * 100).toFixed(0) + '%（' + (ex > im ? '以出口为主导' : '进口依赖明显') + '）');
+            }
+          }
+          // 波动上下文（峰值/谷值/最大单年波动）
+          const vals = ys.map(y => ({ y, v: byYear[y].value }));
+          if (vals.length >= 3) {
+            const peak = vals.reduce((m, x) => x.v > m.v ? x : m, vals[0]);
+            const trough = vals.reduce((m, x) => x.v < m.v ? x : m, vals[0]);
+            let maxSwing = null;
+            for (let k = 1; k < vals.length; k++) {
+              const a = vals[k - 1].v, b = vals[k].v;
+              if (a > 0) {
+                const sw = (b - a) / a * 100;
+                if (!maxSwing || Math.abs(sw) > Math.abs(maxSwing.sw)) maxSwing = { y: vals[k].y, sw };
+              }
+            }
+            compItems.push('波动上下文：峰值 ' + peak.y + ' 年 ' + (peak.v / 1e8).toFixed(2) + ' 亿美元，谷值 ' +
+              trough.y + ' 年 ' + (trough.v / 1e8).toFixed(2) + ' 亿美元' +
+              (maxSwing ? '，最大单年波动 ' + maxSwing.y + ' 年 ' + (maxSwing.sw >= 0 ? '+' : '') + maxSwing.sw.toFixed(1) + '%' : ''));
+          }
+          if (compItems.length) {
+            compItems.forEach(t => { const li = document.createElement('li'); li.textContent = t; cmpList.appendChild(li); });
+            cmpBox.hidden = false;
+          } else {
+            cmpBox.hidden = true;
           }
           // 竞争对手出口对比（全球出口大国 → 对目标市场出口）
           const cpBox = document.getElementById('competitor-box');
