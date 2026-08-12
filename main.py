@@ -101,6 +101,13 @@ def analyze(req: AnalyzeRequest):
     if not product or not country:
         raise HTTPException(status_code=400, detail="product 和 country 不能为空")
 
+    # 历史命中：同产品同市场直接返回（不重复搜索/调 AI，省 token）
+    from database import get_report_history, save_report_history
+    cached = get_report_history("market", product, country)
+    if cached:
+        logging.info("历史命中: %s / %s", product, country)
+        return cached
+
     try:
         # 聚合真实数据证据链（经济 + 贸易 + 竞争力 + 宏观背景）
         market_ctx, trade_evidence, competitiveness, background, landscape = _collect_evidence(product, country)
@@ -116,7 +123,7 @@ def analyze(req: AnalyzeRequest):
     data["_competitiveness"] = competitiveness if competitiveness.get("available") else {}
 
     logging.info("分析完成: %s / %s", product, country)
-    return {
+    result = {
         "report": markdown_report(product, country, data),
         "news": data.get("_news"),
         "trade": data.get("_trade"),
@@ -124,6 +131,19 @@ def analyze(req: AnalyzeRequest):
         "market_context": market_ctx if market_ctx and market_ctx.get("available") else {},
         "background": background or {},
     }
+    # 保存历史（同参数覆盖，供 UI 回看 + 后续缓存命中）
+    try:
+        save_report_history("market", product, country, result)
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/history")
+def history_list(report_type: str = ""):
+    """最近 10 条查询历史（可选按类型过滤 market/trade）"""
+    from database import list_report_history
+    return list_report_history(report_type, limit=10)
 
 
 class AnalyzeCompareRequest(BaseModel):
@@ -304,8 +324,18 @@ def export_report(req: TradeExportRequest):
     # 年份标签：end_year 为空时解析出实际年份范围（默认到最新），避免只显示起始年误导
     years_actual = _years_from_range(req.start_year, req.end_year)
     year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
+    # 出口大国对比矩阵（程序计算，供报告第四章）
+    matrix = []
+    top_exporters = []
+    try:
+        from trade import get_competitiveness_matrix, get_top_exporters
+        matrix = get_competitiveness_matrix(req.product.strip(), req.target.strip(), years_actual, req.reporter)
+        top_exporters = get_top_exporters(req.product.strip(), str(years_actual[-1]))
+    except Exception:
+        pass
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
-                            hs, rows, ai, get_hs_description(hs), stats, analysis)
+                            hs, rows, ai, get_hs_description(hs), stats, analysis,
+                            landscape, market_ctx, matrix, top_exporters, background, competitiveness)
     # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF（失败降级 docx）
     from export import finalize_docx
     buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
@@ -471,7 +501,7 @@ def trade_query(req: TradeQueryRequest):
     except Exception:
         pass
 
-    return {
+    result = {
         "hs_code": hs,
         "hs_description": get_hs_description(hs),  # HS 编码品名解释
         "total_value": sum(r.get("primaryValue") or 0 for r in rows),
@@ -497,6 +527,15 @@ def trade_query(req: TradeQueryRequest):
             for r in rows
         ],
     }
+    # 保存历史（同参数覆盖，供 UI 回看 + 后续缓存命中）
+    try:
+        from database import save_report_history
+        params = json.dumps({"start_year": req.start_year, "end_year": req.end_year,
+                             "reporter": req.reporter}, ensure_ascii=False)
+        save_report_history("trade", product, target, result, params)
+    except Exception:
+        pass
+    return result
 
 
 class BusinessEmailRequest(BaseModel):

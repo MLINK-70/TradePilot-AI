@@ -104,6 +104,54 @@
       transition: all 0.15s ease;
     }
     #add-country:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+    /* 历史记录面板 */
+    #history-panel {
+      margin-top: 1rem;
+      padding: 0.8rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card);
+    }
+    #history-panel[hidden] { display: none; }  /* 防 display 覆盖 hidden */
+    .history-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+      font-weight: 700;
+      color: var(--navy-deep);
+    }
+    #history-close {
+      width: auto;
+      padding: 0.3rem 0.9rem;
+      font-size: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    #history-list { list-style: none; padding: 0; margin: 0; }
+    #history-list li {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px dashed var(--border);
+      cursor: pointer;
+      font-size: 0.92rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+    }
+    #history-list li:hover { background: rgba(18, 60, 92, 0.05); }
+    #history-list .h-type {
+      font-size: 0.72rem;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0 0.4rem;
+      white-space: nowrap;
+      align-self: center;
+    }
+    #history-list .h-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
     #compare-result .data-table {
       width: 100%;
       border-collapse: collapse;
@@ -193,8 +241,17 @@
           <button type="submit" id="submit-btn" class="btn-primary">开始分析</button>
           <button type="button" id="dl-report" class="btn-secondary" hidden>下载 Word 报告</button>
           <button type="button" id="dl-report-pdf" class="btn-secondary" hidden>下载 PDF</button>
+          <button type="button" id="history-btn" class="btn-secondary">历史</button>
         </div>
       </form>
+      <!-- 历史记录弹层（最近 10 条） -->
+      <div id="history-panel" hidden>
+        <div class="history-head">
+          <span>最近查询</span>
+          <button type="button" id="history-close" class="btn-secondary">关闭</button>
+        </div>
+        <ul id="history-list"></ul>
+      </div>
       <p id="status" class="status"></p>
     </section>
 
@@ -282,7 +339,7 @@
       window.DOMPurify = { sanitize: function (html) { return html; } };
     }
   </script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
   <script src="theme.js?v=11"></script>
   <script src="settings.js?v=18"></script>
 </body>

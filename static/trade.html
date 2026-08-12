@@ -260,6 +260,21 @@
       // 保存最近一次查询，供下载按钮使用
       let lastQuery = null;
 
+      // 历史跳转回填：?product=&target=&start=&reporter= → 填表单并自动查询
+      (function autoFromHistory() {
+        const params = new URLSearchParams(window.location.search);
+        const product = params.get('product');
+        const target = params.get('target');
+        if (!product || !target) return;
+        document.getElementById('product').value = product;
+        document.getElementById('target').value = target;
+        if (params.get('reporter')) document.getElementById('reporter').value = params.get('reporter');
+        if (params.get('start')) document.getElementById('start-year').value = params.get('start');
+        // 清掉 URL 参数（避免刷新重复触发）
+        history.replaceState({}, '', window.location.pathname);
+        form.requestSubmit();
+      })();
+
       // 图表配色跟随系统主题（暗色/亮色）
       function chartColors() {
         return window.matchMedia('(prefers-color-scheme: dark)').matches

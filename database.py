@@ -60,6 +60,19 @@ def init_db():
             created_at TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS report_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_type TEXT NOT NULL,      -- market / trade
+            product TEXT NOT NULL,
+            country TEXT NOT NULL,
+            params TEXT DEFAULT '',         -- 额外参数（年份区间/出口国/格式等，JSON）
+            result_json TEXT NOT NULL,      -- 完整查询结果（含证据链/AI 解读）
+            created_at TEXT NOT NULL,
+            UNIQUE(report_type, product, country, params)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_report_history ON report_history(report_type, product, country)")
     conn.commit()
     conn.close()
 
@@ -98,3 +111,61 @@ def log_query(product: str, hs_code: str, target: str):
     )
     conn.commit()
     conn.close()
+
+
+def save_report_history(report_type: str, product: str, country: str,
+                        result: dict, params: str = "") -> int:
+    """保存报告历史：市场/贸易查询完整结果 → report_history 表
+
+    同 (type, product, country, params) 存在则更新（覆盖旧结果），返回 id。
+    """
+    init_db()
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO report_history (report_type, product, country, params, result_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(report_type, product, country, params)
+           DO UPDATE SET result_json=excluded.result_json, created_at=excluded.created_at""",
+        (report_type, product, country, params,
+         json.dumps(result, ensure_ascii=False), datetime.now().isoformat()),
+    )
+    row = conn.execute(
+        "SELECT id FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
+        (report_type, product, country, params),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+    return row["id"] if row else 0
+
+
+def get_report_history(report_type: str, product: str, country: str,
+                       params: str = "") -> dict | None:
+    """查报告历史：同参数命中返回结果 dict，未命中返回 None"""
+    init_db()
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT result_json FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
+        (report_type, product, country, params),
+    ).fetchone()
+    conn.close()
+    return json.loads(row["result_json"]) if row else None
+
+
+def list_report_history(report_type: str = "", limit: int = 50) -> list:
+    """列出历史记录（倒序），可选按类型过滤"""
+    init_db()
+    conn = get_conn()
+    if report_type:
+        rows = conn.execute(
+            "SELECT id, report_type, product, country, params, created_at FROM report_history "
+            "WHERE report_type=? ORDER BY id DESC LIMIT ?",
+            (report_type, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, report_type, product, country, params, created_at FROM report_history "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

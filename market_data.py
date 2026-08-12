@@ -22,6 +22,10 @@ INDICATORS = {
     "population": "SP.POP.TOTL",        # 人口
     "gdp_per_capita": "NY.GDP.PCAP.CD", # 人均 GDP
     "internet": "IT.NET.USER.ZS",       # 互联网普及率 %
+    "cpi": "FP.CPI.TOTL.ZG",            # 通胀率 CPI（年变化 %）
+    "exchange_rate": "PA.NUS.FCRF",     # 官方汇率（本币/美元）
+    "high_tech_exports": "TX.VAL.TECH.MF.ZS",  # 高科技出口占制成品出口 %
+    "mobile": "IT.CEL.SETS.P2",         # 每百人手机订阅
 }
 
 # 国家名 → ISO3 码（World Bank 用 ISO3；内置主要 50 国）

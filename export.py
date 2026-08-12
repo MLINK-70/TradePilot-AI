@@ -404,11 +404,18 @@ def _convert_to_pdf(docx_path: str) -> None:
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
                       rows: list, ai: dict, hs_description: str = "",
-                      stats: dict | None = None, analysis: dict | None = None) -> io.BytesIO:
+                      stats: dict | None = None, analysis: dict | None = None,
+                      landscape: dict | None = None,
+                      market_ctx: dict | None = None,
+                      matrix: list | None = None,
+                      top_exporters: list | None = None,
+                      background: dict | None = None,
+                      competitiveness: dict | None = None) -> io.BytesIO:
     """生成贸易数据 Word 报告（与市场分析同套规范：封面/目录/字体/页码/表格防切）
 
     章节：封面 → 目录 → 一、执行摘要 → 二、出口趋势（图）→ 三、数据总览（表）
-    → 四、原始数据（表）→ 五、AI 市场分析 → 附录：数据来源。
+    → 四、出口大国对比（矩阵）→ 五、竞争格局 → 六、目标市场消费环境
+    → 七、原始数据（表）→ 八、AI 市场分析 → 附录：数据来源。
     """
     from docx.oxml import OxmlElement
     from docx.shared import RGBColor
@@ -419,7 +426,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
 
     # 趋势图 PNG（≥2 年才生成）；用 summarize_trend 逐年累加，与执行摘要 stats 同口径
     chart_buf = None
-    from trade import summarize_trend
+    from trade import summarize_trend, get_latest_year
     trend_map = summarize_trend(rows)
     if len(trend_map) >= 2:
         chart_buf = build_trend_chart(trend_map)
@@ -580,9 +587,189 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         prices = stats.get("unit_prices") or []
         if prices:
             _p("• 单价趋势：" + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in prices), indent=False)
+            # 单价柱状图（量价结构一眼看清）
+            _p("单价（美元/公斤）逐年变化：")
+            _add_bar_chart(doc, {p["year"]: p["price"] for p in prices}, "出口单价趋势", "美元/公斤")
 
-    # ===== 四、原始数据表 =====
-    _h("四、原始数据（UN Comtrade）", 1, blank_before=True)
+    # ===== 四、出口大国对比（饼图主角 + 表格作证）=====
+    _h("四、出口大国对比", 1, blank_before=True)
+    if matrix:
+        _p(f"该品类对{target}的出口大国竞争格局：")
+        # 饼图先放：份额结构一眼看清
+        share_labels = [m.get("country", "") for m in matrix if m.get("market_share") is not None]
+        share_vals = [m["market_share"] for m in matrix if m.get("market_share") is not None]
+        if share_labels:
+            _p(f"各出口国占 {target} 市场进口份额（%，<4% 合并为其他）：")
+            _add_pie_chart(doc, share_labels, share_vals, f"{product} 出口国份额结构")
+        # 饼图"其他"拆解 + 全量明细表（作证饼图 + 延伸分析）
+        _h("份额明细与「其他」拆解", 2)
+        _p("饼图中的「其他」包含以下出口国——份额虽小但增速与单价各不相同，值得单独观察：", indent=False)
+        mtbl = doc.add_table(rows=1 + len(matrix), cols=6)
+        mtbl.style = "Light Grid Accent 1"
+        for j, head in enumerate(["出口国", "最新出口(亿美元)", "占市场进口份额", "5年CAGR", "单价($/kg)", "判断"]):
+            mtbl.rows[0].cells[j].text = head
+        for i, m in enumerate(matrix, 1):
+            mtbl.rows[i].cells[0].text = str(m.get("country", ""))
+            mtbl.rows[i].cells[1].text = f"{m.get('export_value', 0) / 1e8:.2f}" if m.get("export_value") else "—"
+            mtbl.rows[i].cells[2].text = f"{m['market_share']}%" if m.get("market_share") is not None else "—"
+            mtbl.rows[i].cells[3].text = f"{m['cagr_pct']:+.1f}%" if m.get("cagr_pct") is not None else "—"
+            mtbl.rows[i].cells[4].text = f"${m['unit_price']:.2f}" if m.get("unit_price") is not None else "—"
+            mtbl.rows[i].cells[5].text = str(m.get("verdict", ""))
+        # 解读：谁在涨谁在跌（基于矩阵数据）
+        _h("竞争态势解读", 2)
+        rising = [m for m in matrix if (m.get("cagr_pct") or 0) > 5]
+        falling = [m for m in matrix if (m.get("cagr_pct") or 0) < -2]
+        leader = matrix[0] if matrix else {}
+        if leader.get("country"):
+            _p(f"• {leader['country']}以 {leader.get('export_value', 0) / 1e8:.2f} 亿美元居首（占市场进口 {leader.get('market_share', 0)}%），"
+               f"CAGR {leader.get('cagr_pct', 0):+.1f}%（{leader.get('verdict', '')}）。", indent=False)
+        if rising:
+            names = "、".join(m["country"] for m in rising[:3])
+            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"]) for m in rising[:3])
+            _p(f"• 上升方：{names}（CAGR {cagrs}）——"
+               f"这些出口国份额在扩大，是{leader.get('country', '中国')}的主要追赶者。", indent=False)
+        if falling:
+            names = "、".join(m["country"] for m in falling[:3])
+            cagrs = "、".join("{:+.1f}%".format(m["cagr_pct"]) for m in falling[:3])
+            _p(f"• 下滑方：{names}（CAGR {cagrs}）——"
+               f"份额收缩，竞争压力相对缓解。", indent=False)
+    else:
+        _p("（出口大国对比数据不足）")
+
+    # ===== 五、竞争格局（饼图主角 + 表格作证）=====
+    _h("五、竞争格局", 1, blank_before=True)
+    if landscape and landscape.get("top_brands"):
+        brands = landscape["top_brands"]
+        _p(f"{landscape.get('product_category', product)} 龙头品牌竞争格局（来源：{landscape.get('_source', '行业检索')}）。")
+        # 品牌份额饼图先放（解析 share 里的数字如 '18.2%'）
+        def _parse_share(s):
+            try:
+                return float(str(s).replace("%", "").split("（")[0].strip())
+            except (ValueError, TypeError):
+                return None
+        pie_labels = []
+        pie_vals = []
+        for b in brands[:8]:
+            v = _parse_share(b.get("share"))
+            if v is not None and v > 0:
+                pie_labels.append(b.get("name", ""))
+                pie_vals.append(v)
+        if pie_labels:
+            _p(f"龙头品牌市场份额结构（<4% 合并为其他）：")
+            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额")
+        # 份额排名表（作证饼图 + 地位说明）
+        _h("品牌份额排名", 2)
+        _p("饼图份额对应的品牌全量明细——排名、份额与市场地位：", indent=False)
+        btbl = doc.add_table(rows=1 + len(brands), cols=3)
+        btbl.style = "Light Grid Accent 1"
+        for j, head in enumerate(["品牌", "市场份额", "市场地位"]):
+            btbl.rows[0].cells[j].text = head
+        for i, b in enumerate(brands, 1):
+            btbl.rows[i].cells[0].text = str(b.get("name", ""))
+            btbl.rows[i].cells[1].text = str(b.get("share", ""))
+            btbl.rows[i].cells[2].text = str(b.get("position", ""))
+        if landscape.get("shift_reasons"):
+            _h("格局变动原因", 2)
+            for r in landscape["shift_reasons"]:
+                _p(f"• {r}", indent=False)
+        if landscape.get("chain_insight"):
+            _h("产业链洞察", 2)
+            _p(f"• {landscape['chain_insight']}", indent=False)
+    else:
+        _p("（竞争格局数据不足）")
+
+    # ===== 六、目标市场消费环境 =====
+    _h("六、目标市场消费环境", 1, blank_before=True)
+    if market_ctx and market_ctx.get("available"):
+        env = []
+        if market_ctx.get("gdp"):
+            env.append(f"GDP {market_ctx['gdp'] / 1e12:.2f} 万亿美元")
+        if market_ctx.get("population"):
+            env.append(f"人口 {market_ctx['population'] / 1e8:.2f} 亿")
+        if market_ctx.get("gdp_per_capita"):
+            env.append(f"人均 GDP {market_ctx['gdp_per_capita']:,.0f} 美元")
+        _p(f"{target} 经济环境（World Bank）：{'、'.join(env)}")
+        if market_ctx.get("gdp_per_capita"):
+            pc = market_ctx["gdp_per_capita"]
+            level = "高收入市场（消费力强，支撑中高端产品溢价）" if pc > 30000 else (
+                "中等收入市场（性价比敏感）" if pc > 10000 else "发展中市场（价格驱动）")
+            _p(f"• 需求判断：人均 GDP {pc:,.0f} 美元 → {level}。", indent=False)
+        if market_ctx.get("population"):
+            _p(f"• 人口 {market_ctx['population'] / 1e8:.2f} 亿：人口规模决定市场容量上限。", indent=False)
+        if background and background.get("global_trade_growth"):
+            _p(f"• 宏观背景：全球贸易增长预测 {background['global_trade_growth']}（{background.get('_source', 'WTO')}）。", indent=False)
+    else:
+        _p("（目标市场经济数据不足）")
+
+    # ===== 七、驱动因素分析（CPI/科技出口 + 需求/供给/竞争三侧）=====
+    _h("七、驱动因素分析", 1, blank_before=True)
+    _p("驱动出口与销量变化的因素可分为需求侧、供给侧、竞争侧：")
+    # 需求侧：CPI 通胀趋势（World Bank 免费 API）→ 趋势图
+    if market_ctx and market_ctx.get("available") and market_ctx.get("iso3"):
+        iso3 = market_ctx["iso3"]
+        cpi_series = {}
+        try:
+            from market_data import get_worldbank_series
+            years5 = list(range(get_latest_year() - 4, get_latest_year() + 1))
+            cpi_series = get_worldbank_series(iso3, "cpi", years5)
+        except Exception:
+            pass
+        if cpi_series:
+            _h("需求侧：通胀与消费环境", 2)
+            _p(f"{target} 通胀率（CPI 年变化 %，World Bank 官方数据）近 5 年趋势：")
+            _add_line_chart(doc, cpi_series, "CPI 通胀率变化", "%")
+            sorted_cpi = sorted(cpi_series.items())
+            latest_cpi = sorted_cpi[-1][1] if sorted_cpi else None
+            if latest_cpi is not None:
+                level = "低通胀（消费环境稳定，利于可选消费支出）" if latest_cpi < 3 else (
+                    "温和通胀（消费略有压力）" if latest_cpi < 5 else "高通胀（消费承压，可选消费萎缩）")
+                _p(f"• 最新通胀 {latest_cpi:.1f}%：{level}。", indent=False)
+            if len(sorted_cpi) >= 2:
+                first_cpi = sorted_cpi[0][1]
+                last_cpi = sorted_cpi[-1][1]
+                if first_cpi and first_cpi > 3 and last_cpi < first_cpi:
+                    _p(f"• 通胀从 {first_cpi:.1f}% 回落至 {last_cpi:.1f}%：购买力修复，"
+                       f"对消费电子产品需求是利好信号。", indent=False)
+    # 供给侧：高科技出口占比（出口能力结构）
+    if market_ctx and market_ctx.get("high_tech_exports") is not None:
+        _h("供给侧：出口能力结构", 2)
+        _p(f"• {target} 高科技出口占制成品出口 {market_ctx['high_tech_exports']:.1f}%"
+           f"（World Bank）——该市场自身科技产业基础，决定对进口消费电子的依赖度。", indent=False)
+    if market_ctx and market_ctx.get("mobile") is not None:
+        _p(f"• 每百人手机订阅 {market_ctx['mobile']:.0f} 部：移动设备渗透率支撑智能硬件需求。", indent=False)
+    # 驱动因素数据表（因素 / 数据 / 影响）
+    factor_rows = [("驱动因素", "数据", "影响方向")]
+    if market_ctx and market_ctx.get("gdp_per_capita"):
+        factor_rows.append(("人均 GDP（消费力）", f"{market_ctx['gdp_per_capita']:,.0f} 美元", "高收入市场支撑中高端溢价"))
+    if market_ctx and market_ctx.get("cpi") is not None:
+        factor_rows.append(("通胀率 CPI", f"{market_ctx['cpi']:.1f}%", "低通胀利于可选消费支出"))
+    if market_ctx and market_ctx.get("high_tech_exports") is not None:
+        factor_rows.append(("高科技出口占比", f"{market_ctx['high_tech_exports']:.1f}%", "科技产业基础 → 进口依赖度"))
+    if competitiveness and competitiveness.get("tc") is not None:
+        factor_rows.append(("贸易竞争力 TC", f"{competitiveness['tc']}",
+                            "强则出口主导，弱则进口依赖"))
+    if competitiveness and competitiveness.get("market_share") is not None:
+        factor_rows.append(("占市场进口份额", f"{competitiveness['market_share']}%", "现有渗透率 = 增长基数"))
+    if stats and stats.get("cagr_pct") is not None:
+        factor_rows.append(("出口 CAGR", f"{stats['cagr_pct']}%", "出口动能方向"))
+    if landscape and landscape.get("top_brands"):
+        factor_rows.append(("龙头品牌份额", f"{landscape['top_brands'][0].get('share', '')}", "市场集中度决定进入难度"))
+    if len(factor_rows) > 1:
+        ftbl = doc.add_table(rows=len(factor_rows), cols=3)
+        ftbl.style = "Light Grid Accent 1"
+        for i, (a, b, c) in enumerate(factor_rows):
+            ftbl.rows[i].cells[0].text = a
+            ftbl.rows[i].cells[1].text = b
+            ftbl.rows[i].cells[2].text = c
+            if i == 0:
+                for cell in ftbl.rows[0].cells:
+                    if cell.paragraphs[0].runs:
+                        cell.paragraphs[0].runs[0].bold = True
+        _p()
+        _p("上表数据来源：UN Comtrade / World Bank / 行业检索。")
+
+    # ===== 八、原始数据表 =====
+    _h("八、原始数据（UN Comtrade）", 1, blank_before=True)
     raw_tbl = doc.add_table(rows=1 + len(rows), cols=5)
     raw_tbl.style = "Light Grid Accent 1"
     for j, head in enumerate(["年份", "流向", "HS编码", "金额(美元)", "净重(公斤)"]):
@@ -594,8 +781,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
         raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
 
-    # ===== 五、AI 市场分析 =====
-    _h("五、AI 市场分析", 1, blank_before=True)
+    # ===== 九、AI 市场分析 =====
+    _h("九、AI 市场分析", 1, blank_before=True)
     ms = ai.get("market_size") or {}
     gt = ai.get("growth_trend") or {}
     risks = ai.get("risks") or []
@@ -631,7 +818,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                 if cell.paragraphs[0].runs:
                     cell.paragraphs[0].runs[0].bold = True
     _p()
-    _p("免责声明：本报告由 AI 大模型基于真实数据生成，市场估算部分仅供参考，实际决策请以官方统计为准。")
+    _p("免责声明：本报告数据来源与统计口径见附录，市场估算部分仅供参考，实际决策请以官方统计为准。")
 
     # 收尾统一：页码 / 拼写检查 / 表格防切 / 目录 / 字体
     _add_page_numbers(doc)
@@ -887,7 +1074,7 @@ def build_market_report(product: str, country: str, ai: dict,
 
     # ===== 一、执行摘要（关键数字速览表）=====
     _h("一、执行摘要", 1, blank_before=True)
-    _p("本报告基于多重真实数据证据链生成：联合国商品贸易数据库（UN Comtrade）提供出口贸易数据，"
+    _p("本报告数据来源：联合国商品贸易数据库（UN Comtrade）提供出口贸易数据，"
        "世界银行（World Bank）提供经济环境数据，行业检索提供竞争格局与宏观背景。"
        "所有统计指标（CAGR、贸易竞争力指数、市场出口份额）由程序精确计算，AI 仅作解读，数据可溯源。")
     es = ai.get("executive_summary") or {}
@@ -1028,12 +1215,31 @@ def build_market_report(product: str, country: str, ai: dict,
     else:
         _p("（该品类竞争力数据不足）")
 
-    # ===== 五、竞争格局（龙头品牌 + 份额表）=====
+    # ===== 五、竞争格局（饼图主角 + 表格作证 + 龙头财报）=====
     _h("五、竞争格局", 1, blank_before=True)
     if landscape and landscape.get("top_brands"):
         brands = landscape["top_brands"]
         _p(f"{landscape.get('product_category', product)} 龙头品牌竞争格局"
-           f"（来源：{landscape.get('_source', 'Tavily 行业检索')}）：")
+           f"（来源：{landscape.get('_source', 'Tavily 行业检索')}）。")
+        # 品牌份额饼图先放（解析 share 里的数字）
+        def _parse_share(s):
+            try:
+                return float(str(s).replace("%", "").split("（")[0].strip())
+            except (ValueError, TypeError):
+                return None
+        pie_labels = []
+        pie_vals = []
+        for b in brands[:8]:
+            v = _parse_share(b.get("share"))
+            if v is not None and v > 0:
+                pie_labels.append(b.get("name", ""))
+                pie_vals.append(v)
+        if pie_labels:
+            _p(f"龙头品牌市场份额结构（<4% 合并为其他）：")
+            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额")
+        # 份额排名表（作证饼图）
+        _h("品牌份额排名", 2)
+        _p("饼图份额对应的品牌全量明细——排名、份额与市场地位：", indent=False)
         tbl = doc.add_table(rows=1 + len(brands), cols=3)
         tbl.style = "Light Grid Accent 1"
         for j, head in enumerate(["品牌", "市场份额", "地位"]):
@@ -1049,6 +1255,48 @@ def build_market_report(product: str, country: str, ai: dict,
         if landscape.get("chain_insight"):
             _h("产业链洞察", 2)
             _p(landscape["chain_insight"])
+        # 龙头财报（结合财务画像：SEC 美股 / A 股 / 非上市公开报道）
+        _h("龙头品牌财务画像", 2)
+        _p("结合龙头品牌的公开财报，判断其投入能力与市场策略（数据源：SEC 财报 / 东方财富 / 公开报道）：")
+        financials_available = False
+        try:
+            from financials import get_company_financials
+            # 品牌 → 财务查询名映射（兼容中英文品牌名）
+            brand_cn = {"Apple": "苹果", "Huawei": "华为", "Xiaomi": "小米", "Sony": "索尼",
+                        "Samsung": "三星", "Edifier": "漫步者"}
+            for b in brands[:3]:
+                fname = brand_cn.get(b.get("name", ""), b.get("name", ""))
+                try:
+                    fin = get_company_financials(fname)
+                except Exception:
+                    continue
+                if not fin or not fin.get("available"):
+                    continue
+                metrics = fin.get("metrics") or {}
+                rev_series = metrics.get("revenue") or []
+                if not rev_series:
+                    continue
+                financials_available = True
+                latest = rev_series[-1]
+                rev_val = latest.get("value")
+                rev_unit = "美元" if fin.get("source", "").startswith("SEC") else "元"
+                _p(f"• {fname}（份额 {b.get('share', '')}）：", indent=False)
+                if rev_val:
+                    _p(f"  最新营收 {rev_val / 1e8:.2f} 亿{rev_unit}（{latest.get('year', '')}年）"
+                       f"——体量支撑其市场投入与研发（来源：{fin.get('source', '')}）。", indent=False)
+                # 近 3 年营收趋势（扩张/收缩判断）
+                if len(rev_series) >= 3:
+                    first_v = rev_series[0].get("value")
+                    last_v = rev_series[-1].get("value")
+                    if first_v and last_v and first_v > 0:
+                        chg = (last_v - first_v) / first_v * 100
+                        direction = "营收扩张，有持续投入能力" if chg > 10 else (
+                            "营收稳定，投入平稳" if chg > -5 else "营收收缩，投入承压")
+                        _p(f"  近 {len(rev_series)} 年营收变化 {chg:+.1f}%：{direction}。", indent=False)
+        except Exception:
+            pass
+        if not financials_available:
+            _p("（所选龙头品牌的公开财报数据暂缺，跳过财务画像）", indent=False)
         if landscape.get("key_insight"):
             _h("核心洞察", 2)
             _p(landscape["key_insight"])
@@ -1099,9 +1347,9 @@ def build_market_report(product: str, country: str, ai: dict,
 
     # ===== 七、驱动因素分析（整合数据）=====
     _h("七、驱动因素分析", 1, blank_before=True)
-    _p("驱动出口与销量变化的因素可分为三类——需求侧、供给侧、竞争侧，以下结合真实数据逐项说明：")
+    _p("驱动出口与销量变化的因素可分为需求侧、供给侧、竞争侧：")
     # 驱动因素数据表（因素 / 数据 / 影响方向）
-    factor_rows = [("驱动因素", "真实数据", "影响")]
+    factor_rows = [("驱动因素", "数据", "影响")]
     if market_context and market_context.get("gdp_per_capita"):
         factor_rows.append(("人均 GDP（消费力）", f"{market_context['gdp_per_capita']:,.0f} 美元",
                             "高收入市场支撑中高端产品溢价"))
@@ -1145,8 +1393,7 @@ def build_market_report(product: str, country: str, ai: dict,
                     if cell.paragraphs[0].runs:
                         cell.paragraphs[0].runs[0].bold = True
         _p()
-        _p("上表每一项均为程序基于真实数据计算（UN Comtrade / World Bank / 行业检索），"
-           "驱动因素分析基于真实数据而非主观判断。")
+        _p("上表数据来源：UN Comtrade / World Bank / 行业检索。")
 
     _h("需求侧（经济与消费力）", 2)
     if market_context and market_context.get("gdp_per_capita"):
@@ -1262,7 +1509,7 @@ def build_market_report(product: str, country: str, ai: dict,
                 if cell.paragraphs[0].runs:
                     cell.paragraphs[0].runs[0].bold = True
     _p()
-    _p("免责声明：本报告由 AI 大模型基于真实数据生成，市场估算部分（如市场规模数值）仅供参考，"
+    _p("免责声明：本报告数据来源与统计口径见附录，市场估算部分（如市场规模数值）仅供参考，"
        "实际决策请以官方统计与一手调研为准。所有可溯源的统计指标均由程序计算，AI 不参与算术。")
 
     # 页脚页码（第 X 页 / 共 Y 页）
@@ -1350,6 +1597,67 @@ def _add_gauge_chart(doc: Document, tc: float, title: str):
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
+    plt.close(fig)
+    buf.seek(0)
+    doc.add_picture(buf, width=Cm(13))
+
+
+def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
+    """饼图：名称 + 数值 → 占比 PNG，嵌入 Word
+
+    标签内嵌扇区（名称 + 百分比直接写在饼里），不靠图例猜；
+    小于 4% 的碎块合并为"其他"（不列明细，保持饼图干净）。
+    """
+    import matplotlib.pyplot as plt
+    if not labels or len(labels) != len(values) or not any(values):
+        return
+    total = sum(v for v in values if v > 0)
+    if total <= 0:
+        return
+    keep = [(l, v) for l, v in zip(labels, values) if v > 0]
+    keep.sort(key=lambda x: x[1], reverse=True)
+    main = [(l, v) for l, v in keep if v / total >= 0.04]
+    rest = [(l, v) for l, v in keep if v / total < 0.04]
+    if rest:
+        main.append(("其他", sum(v for _, v in rest)))
+    if not main:
+        main = keep[:6]  # 全都很小时兜底取前 6
+
+    fig, ax = plt.subplots(figsize=(9.5, 5.6))
+    labels_pie = [l for l, _ in main]
+    values_pie = [v for _, v in main]
+    colors = ["#2e5bff", "#e06a4c", "#12b886", "#f0a020", "#8e6fc0", "#5aa7d4", "#c0c0c0"]
+    wedges, texts, autotexts = ax.pie(
+        values_pie, labels=None,
+        autopct=lambda p: f"{p:.1f}%",
+        colors=colors[:len(main)], startangle=90,
+        pctdistance=0.68,
+        wedgeprops={"edgecolor": "white", "linewidth": 1.2})
+    # 百分比内嵌（大字号白粗）；名称用引线拉到扇区外（leader line），字号加大
+    import math
+    for w, at, l in zip(wedges, autotexts, labels_pie):
+        ang = math.radians((w.theta1 + w.theta2) / 2)
+        # 百分比：内嵌扇区中心偏外，大字号
+        at.set_position((0.72 * w.r * math.cos(ang), 0.72 * w.r * math.sin(ang)))
+        at.set_fontsize(13)
+        at.set_color("white")
+        at.set_fontweight("bold")
+        # 名称：引线拉到外圈，文字写在末端（加大字号）
+        edge_x = 1.05 * w.r * math.cos(ang)
+        edge_y = 1.05 * w.r * math.sin(ang)
+        label_x = 1.35 * w.r * math.cos(ang)
+        label_y = 1.35 * w.r * math.sin(ang)
+        ax.plot([edge_x, label_x], [edge_y, label_y], color="#999", lw=0.9)
+        ax.text(label_x, label_y, l, ha="center", va="center", fontsize=12.5,
+                color="#333", fontweight="bold")
+    # 标题放在图内顶部（加大画布，引线标签不与标题重叠）
+    ax.set_title(title, fontsize=13, pad=18)
+    ax.axis("equal")
+    ax.set_xlim(-1.85, 1.85)
+    ax.set_ylim(-1.5, 1.6)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     doc.add_picture(buf, width=Cm(13))

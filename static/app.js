@@ -44,6 +44,67 @@
   dlBtn.addEventListener('click', () => downloadReport('docx', dlBtn, '下载 Word 报告'));
   dlPdfBtn.addEventListener('click', () => downloadReport('pdf', dlPdfBtn, '下载 PDF'));
 
+  // ===== 历史记录（最近 10 条，点击回填重新查询）=====
+  const historyBtn = document.getElementById('history-btn');
+  const historyPanel = document.getElementById('history-panel');
+  const historyList = document.getElementById('history-list');
+
+  historyBtn.addEventListener('click', async () => {
+    try {
+      const resp = await fetch('/api/history');
+      const items = await resp.json();
+      historyList.innerHTML = '';
+      if (!items.length) {
+        const li = document.createElement('li');
+        li.textContent = '暂无查询记录';
+        li.style.cursor = 'default';
+        historyList.appendChild(li);
+      } else {
+        items.forEach(it => {
+          const li = document.createElement('li');
+          const left = document.createElement('span');
+          const typeTag = document.createElement('span');
+          typeTag.className = 'h-type';
+          typeTag.textContent = it.report_type === 'trade' ? '贸易' : '市场';
+          // 贸易记录带年份参数
+          let params = '';
+          try {
+            const p = JSON.parse(it.params || '{}');
+            if (p.start_year) params = ' ' + p.start_year + '-' + (p.end_year || '最新');
+          } catch (_) {}
+          left.textContent = it.product + ' → ' + it.country + params;
+          const time = document.createElement('span');
+          time.className = 'h-time';
+          time.textContent = (it.created_at || '').slice(5, 16).replace('T', ' ');
+          li.appendChild(left);
+          li.appendChild(typeTag);
+          li.appendChild(time);
+          li.addEventListener('click', () => {
+            // 回填表单：市场记录填产品/国家，贸易记录跳转贸易页
+            if (it.report_type === 'trade') {
+              window.location.href = '/trade.html?product=' + encodeURIComponent(it.product) +
+                '&target=' + encodeURIComponent(it.country) + '&start=' + (JSON.parse(it.params || '{}').start_year || '') +
+                '&reporter=' + encodeURIComponent(JSON.parse(it.params || '{}').reporter || '中国');
+            } else {
+              document.getElementById('product').value = it.product;
+              document.getElementById('country').value = it.country;
+              historyPanel.hidden = true;
+              form.requestSubmit();
+            }
+          });
+          historyList.appendChild(li);
+        });
+      }
+      historyPanel.hidden = false;
+    } catch (_) {
+      showStatus('历史记录加载失败', 'error');
+    }
+  });
+
+  document.getElementById('history-close').addEventListener('click', () => {
+    historyPanel.hidden = true;
+  });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
