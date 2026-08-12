@@ -339,28 +339,36 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
     return "\n".join(lines) if lines else f"（{product} → {target} {year}，暂无摘要数据）"
 
 
-def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> io.BytesIO:
+def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
     """报告收尾（共用）：写临时文件 → COM 更新域/修表格跨页 → 可选转 PDF → 返回
 
+    返回 (buf, fmt)：fmt 为实际生成格式（'docx'/'pdf'），调用方按 fmt 定 media_type 和文件名。
     - docx: COM 更新 PAGEREF 页码、页脚 PAGE、表格防切分，补写拼写检查隐藏
-    - pdf: 在上一步基础上 Word 导出 PDF
-    - 无 Word/COM 失败时原样返回 docx（域可在用户打开时自动更新）
+    - pdf: 在上一步基础上 Word 导出 PDF；转换失败降级返回 docx（fmt='docx'）
+    - COM 全部失败：原样返回输入 buf（fmt 按请求，docx 域靠用户打开时更新）
     """
     import os
     import tempfile
-    tmp_path = os.path.join(tempfile.gettempdir(), f"_tp_export_{int(time.time() * 1000)}.docx")
+    # mkstemp 原子创建唯一临时文件（时间戳在同毫秒并发时可能撞名覆盖）
+    fd, tmp_path = tempfile.mkstemp(suffix=".docx", prefix="_tp_export_")
+    os.close(fd)
     try:
         with open(tmp_path, "wb") as f:
             f.write(buf.getvalue())
         _refresh_fields_docx(tmp_path)
         read_path = tmp_path
+        fmt = "docx"
         if as_pdf:
             _convert_to_pdf(tmp_path)
-            read_path = tmp_path.replace(".docx", ".pdf")
+            pdf_path = tmp_path.replace(".docx", ".pdf")
+            if os.path.exists(pdf_path):
+                read_path = pdf_path
+                fmt = "pdf"
+            # PDF 转换失败：降级返回 COM 处理后的 docx
         with open(read_path, "rb") as f:
-            return io.BytesIO(f.read())
+            return io.BytesIO(f.read()), fmt
     except Exception:
-        return buf
+        return buf, ("pdf" if as_pdf else "docx")
     finally:
         for p in (tmp_path, tmp_path.replace(".docx", ".pdf")):
             try:

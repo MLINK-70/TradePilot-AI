@@ -225,11 +225,11 @@ def export_market_report(req: AnalyzeExportRequest):
 
     buf = build_market_report(product, country, data, trade_evidence,
                               competitiveness, background, landscape, market_ctx)
-    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF
+    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF（失败降级 docx）
     from export import finalize_docx
-    buf = finalize_docx(buf, as_pdf=(fmt == "pdf"))
-    filename = f"TradePilot-{product}-{country}-市场分析报告.{fmt}"
-    media_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
+    filename = f"TradePilot-{product}-{country}-市场分析报告.{actual_fmt}"
+    media_type = "application/pdf" if actual_fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return StreamingResponse(
         buf,
         media_type=media_type,
@@ -306,11 +306,11 @@ def export_report(req: TradeExportRequest):
     year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis)
-    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF
+    # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF（失败降级 docx）
     from export import finalize_docx
-    buf = finalize_docx(buf, as_pdf=(fmt == "pdf"))
-    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.{fmt}"
-    media_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
+    filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.{actual_fmt}"
+    media_type = "application/pdf" if actual_fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return StreamingResponse(
         buf,
         media_type=media_type,
