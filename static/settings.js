@@ -151,8 +151,10 @@
       } else {
         status.textContent = '';
       }
-    } catch (_) {}
-    status.textContent = '';
+    } catch (_) {
+      // 设置读取失败：静默（面板仍打开，字段留空）
+    }
+    // 清空状态提示不再无条件执行（避免覆盖上面设置的 Tavily 提示）
     mask.style.display = 'block';
     panel.style.display = 'block';
   }
@@ -180,7 +182,7 @@
       ai_base_url: document.getElementById('set-ai-base').value.trim(),
       search_provider: document.getElementById('set-search-provider').value,
     };
-    if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
+    if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url && !payload.ai_provider && !payload.search_provider) {
       status.textContent = '没有要保存的内容';
       return;
     }
