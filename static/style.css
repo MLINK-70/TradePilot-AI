@@ -268,6 +268,63 @@ main { max-width: var(--max-w); margin: 0 auto; }
   letter-spacing: 0.03em;
 }
 
+/* ============ AI Agent 一句话全流程（首页第一入口） ============ */
+
+.agent-hero {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-soft), var(--card) 45%);
+}
+.agent-title {
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0 0 0.3rem;
+  letter-spacing: 0.02em;
+}
+.agent-sub {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0 0 0.9rem;
+  line-height: 1.6;
+}
+.agent-input-row { display: flex; gap: 0.6rem; }
+.agent-input-row input {
+  flex: 1;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font-size: 1.05rem;
+  font-family: inherit;
+}
+.agent-input-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.agent-input-row .btn-primary { flex: none; padding: 0.85rem 1.6rem; font-size: 1rem; }
+
+/* Agent 进度与结果（首页内嵌，样式与 agent.html 一致） */
+.step-line { padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
+.step-line:last-child { border-bottom: none; }
+.result-section h3 { margin: 0.9rem 0 0.4rem; color: var(--accent); }
+.result-section pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  font-size: 0.88rem;
+  font-family: inherit;
+  color: var(--text);
+}
+.lead-line { font-size: 0.88rem; margin: 0.25rem 0; color: var(--text); }
+.lead-line a { color: var(--accent); font-size: 0.8rem; }
+.summary-line { margin-top: 0.5rem; color: var(--teal); font-weight: 600; }
+
 /* ============ 表单（独立输入框式） ============ */
 
 .form-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.1rem; }
