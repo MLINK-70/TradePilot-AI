@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 客户线索</title>
+  <link rel="stylesheet" href="style.css?v=15">
+  <style>
+    .leads-form { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .leads-form input {
+      flex: 1; min-width: 160px; padding: 0.7rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--card); color: var(--text); font-size: 0.95rem;
+    }
+    .lead-card {
+      border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.8rem;
+      background: var(--card);
+    }
+    .lead-card h3 { margin: 0 0 0.4rem; color: var(--text); font-size: 1.02rem; }
+    .lead-card .scope { color: var(--text); font-size: 0.88rem; margin-bottom: 0.3rem; }
+    .lead-card .meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .lead-card .src a { color: var(--accent); font-size: 0.78rem; word-break: break-all; }
+    .lead-card .actions { margin-top: 0.6rem; }
+    .btn-outreach {
+      padding: 0.4rem 1rem; border: none; border-radius: 6px; background: var(--accent);
+      color: #fff; cursor: pointer; font-size: 0.85rem;
+    }
+    .btn-outreach:disabled { opacity: 0.5; cursor: wait; }
+    #outreach-box { margin-top: 1.2rem; }
+    #outreach-box pre {
+      white-space: pre-wrap; word-break: break-word; background: var(--card-2);
+      border: 1px solid var(--border); border-radius: 10px; padding: 1rem; font-size: 0.88rem;
+      font-family: inherit; color: var(--text);
+    }
+    .status-line { font-size: 0.85rem; color: var(--muted); margin: 0.5rem 0; }
+    .status-line.error { color: var(--error); }
+    .disclaimer { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html">开发信</a>
+    <a href="/leads.html" class="active">客户线索</a>
+    <a href="/admin.html">管理面板</a>
+  </nav>
+  <main style="max-width:860px;margin:0 auto;padding:1.2rem 1rem;">
+    <h2 style="margin-bottom:0.4rem;color:var(--text);">客户线索检索</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem;">
+      输入产品与目标市场，检索潜在进口商/分销商/零售商线索，一键生成针对性开发信。
+    </p>
+
+    <div class="leads-form">
+      <input type="text" id="leads-product" placeholder="产品，如 蓝牙耳机">
+      <input type="text" id="leads-country" placeholder="目标市场，如 德国">
+      <button class="btn-outreach" id="leads-search" style="flex:none;">🔍 检索线索</button>
+    </div>
+
+    <div class="status-line" id="leads-status"></div>
+    <div id="leads-result"></div>
+    <div id="outreach-box"></div>
+    <p class="disclaimer" id="leads-disclaimer"></p>
+  </main>
+
+  <script>
+    // 主题按钮（与 theme.js 风格一致：手动切换）
+    (function () {
+      const btn = document.getElementById('theme-toggle');
+      const saved = localStorage.getItem('tradepilot-theme');
+      if (saved === 'dark') document.documentElement.classList.add('dark');
+      btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      btn.addEventListener('click', () => {
+        const dark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('tradepilot-theme', dark ? 'dark' : 'light');
+        btn.textContent = dark ? '☀️' : '🌙';
+      });
+    })();
+
+    const statusEl = document.getElementById('leads-status');
+    const resultEl = document.getElementById('leads-result');
+    const outreachBox = document.getElementById('outreach-box');
+
+    function setStatus(msg, isError) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status-line' + (isError ? ' error' : '');
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/</g, '&lt;');
+    }
+
+    document.getElementById('leads-search').addEventListener('click', async () => {
+      const product = document.getElementById('leads-product').value.trim();
+      const country = document.getElementById('leads-country').value.trim();
+      if (!product || !country) { setStatus('请填写产品和目标市场', true); return; }
+      setStatus('正在检索客户线索（多组查询词 + AI 画像）…');
+      resultEl.innerHTML = '';
+      outreachBox.innerHTML = '';
+      document.getElementById('leads-disclaimer').textContent = '';
+      try {
+        const resp = await fetch('/api/leads/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: product, country: country }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) { setStatus('检索失败：' + (data.detail || resp.status), true); return; }
+        if (data.message) { setStatus(data.message, true); return; }
+        if (!data.leads || !data.leads.length) { setStatus('未找到匹配的客户线索，可尝试更换产品/市场表述', true); return; }
+        setStatus('找到 ' + data.leads.length + ' 条线索（按匹配度排序）');
+        document.getElementById('leads-disclaimer').textContent = data.disclaimer || '';
+        data.leads.forEach((ld, idx) => {
+          const card = document.createElement('div');
+          card.className = 'lead-card';
+          card.innerHTML =
+            '<h3>' + escapeHtml(ld.company) + '</h3>' +
+            (ld.business_scope ? '<div class="scope">' + escapeHtml(ld.business_scope) + '</div>' : '') +
+            (ld.size_signal ? '<div class="meta">规模信号：' + escapeHtml(ld.size_signal) + '</div>' : '') +
+            (ld.match_reason ? '<div class="meta">匹配理由：' + escapeHtml(ld.match_reason) + '</div>' : '') +
+            '<div class="src">来源：<a href="' + escapeHtml(ld.source_url) + '" target="_blank" rel="noopener">' + escapeHtml(ld.source_url) + '</a></div>' +
+            '<div class="actions"><button class="btn-outreach" data-idx="' + idx + '">✉️ 生成开发信</button></div>';
+          card.querySelector('button').addEventListener('click', () => outreach(ld, product, country, card.querySelector('button')));
+          resultEl.appendChild(card);
+        });
+      } catch (_) {
+        setStatus('网络错误，请重试', true);
+      }
+    });
+
+    async function outreach(lead, product, country, btn) {
+      btn.disabled = true;
+      outreachBox.innerHTML = '<div class="status-line">正在生成针对「' + escapeHtml(lead.company) + '」的开发信…</div>';
+      try {
+        const resp = await fetch('/api/leads/outreach', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: product, country: country, lead: lead }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          outreachBox.innerHTML = '<div class="status-line error">生成失败：' + escapeHtml(data.detail || resp.status) + '</div>';
+          return;
+        }
+        outreachBox.innerHTML =
+          '<h3 style="margin-bottom:0.5rem;color:var(--text);">开发信（' + escapeHtml(lead.company) + '）</h3>' +
+          '<div class="status-line">主题：<strong>' + escapeHtml(data.subject || '') + '</strong></div>' +
+          '<pre>' + escapeHtml(data.greeting || '') + '\n\n' + escapeHtml(data.body || '') + '\n\n' + escapeHtml(data.closing || '') + '\n' + escapeHtml(data.signature || '') + '</pre>' +
+          '<div class="status-line" style="margin-top:0.6rem;">中文要点：' + (data.zh_notes || []).map(escapeHtml).join('；') + '</div>';
+      } catch (_) {
+        outreachBox.innerHTML = '<div class="status-line error">网络错误，请重试</div>';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+  <script src="settings.js?v=19"></script>
+</body>
+</html>

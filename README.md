@@ -121,25 +121,53 @@
 
 **说明**：三层数据源——SEC EDGAR（苹果/索尼/特斯拉/戴尔等美股）、东方财富 A 股（歌尔/立讯/漫步者等 12 家）、非上市白名单 Tavily 兜底（华为/OPPO/大疆等 8 家）。白名单外公司拒绝，杜绝幻觉数据。
 
+### `POST /api/leads/search`（客户线索，v1.0）
+
+产品 + 目标市场 → 潜在客户线索（Tavily 多组查询词 + LLM 画像）。
+
+**请求示例：** `{ "product": "蓝牙耳机", "country": "德国" }`
+
+**响应（200）：** `{ leads: [{company, business_scope, size_signal, match_reason, source_url}], disclaimer }`
+
+**防幻觉硬约束**：无公司名 / 无来源 URL / URL 不在搜索结果中 → 一律剔除；输出带"公开检索、需人工核实"免责声明。
+
+### `POST /api/leads/outreach`（线索闭环）
+
+线索画像 → 针对该公司的英文开发信（画像注入 business 模块）。
+
+### `POST /api/agent/run`（AI Agent 一句话全流程，SSE 流式，v1.0）
+
+**请求示例：** `{ "input": "蓝牙耳机去德国卖" }`
+
+**响应（200，text/event-stream）**：逐步推送 6 步进度事件（意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信），每步失败跳过继续，最后 `result` 事件含 `{report, leads, outreach, summary}`。
+
+### 管理员（v1.0）
+
+- `POST /api/admin/login`：密码（.env `ADMIN_PASSWORD`，未配置时启动日志打印随机密码）→ httpOnly session cookie
+- `POST /api/admin/logout`、`GET /api/admin/access-log`（拦截记录，仅管理员）
+- `POST /api/settings` 仅管理员可调用（未登录 401）；`GET /api/settings` 公开（只回状态不返回值）
+
 ---
 
 ## 目录结构
 
 ```
-├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）
-├── config.py        # 读取 .env 配置（AI/搜索/eBay/速卖通密钥，运行时热更新）
-├── llm.py           # 多 AI 提供商调用层（DeepSeek/GPT/Claude/自定义）：重试、JSON 解析、证据链注入、缓存
-├── prompts.py       # 系统提示词（9 字段 JSON 协议，IDC/学术报告风格）
-├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合、统计指标、HS 编码 AI 自动解析
+├── main.py          # FastAPI 入口：路由 + 报告渲染（含 null 兜底）+ 安全中间件
+├── config.py        # 读取 .env 配置（AI/搜索/eBay/速卖通密钥，运行时热更新）+ base_url 白名单校验
+├── llm.py           # 多 AI 提供商调用层：重试分流、JSON 解析、证据链注入、LRU 缓存 + single-flight
+├── prompts.py       # 系统提示词（9 字段 JSON 协议，IDC/学术报告风格 + 指令层级声明）
+├── trade.py         # 贸易数据模块：UN Comtrade 查询、组织聚合（并发）、统计指标、HS 编码 AI 解析
 ├── business.py      # 外贸业务模块：开发信 / 跟进 / 产品介绍 / 模拟客户
 ├── ecommerce.py     # 跨境电商模块：评论分析 / 商品画像分析 / 竞品对比 / Listing
-├── collectors.py    # 商品数据采集层：URL 抓取 / JSON-LD / 粘贴 AI 提取（无 Key）
-├── financials.py    # 财务画像：SEC 美股 / 东方财富 A 股 / 非上市白名单兜底
+├── collectors.py    # 商品数据采集层：URL 抓取（SSRF 逐跳校验）/ JSON-LD / 粘贴 AI 提取
+├── financials.py    # 财务画像：SEC 美股 / 东方财富 A 股 / 非上市白名单兜底（带单位标注）
 ├── ebay.py          # eBay 商品分析（OAuth + Browse API，可选增强）
 ├── aliexpress.py    # 速卖通商品分析（联盟开放平台 API + HmacSHA256 签名）
-├── export.py        # 报告导出：Word（docxtpl 模板）+ CSV 原始数据
-├── database.py      # SQLite 缓存层（trade_cache / query_log / report_history 查询历史）
-├── market_data.py   # 多数据源：World Bank 经济（GDP/CPI/汇率/科技出口等）+ Tavily 搜索 + WTO 宏观背景 + 竞争格局
+├── agent.py         # AI Agent 编排层：一句话 → 市场分析 → 报告 → 线索 → 开发信（SSE 进度）
+├── leads.py         # 客户线索模块：Tavily 多组查询 + LLM 画像 + 防幻觉硬约束 + 定向开发信
+├── export.py        # 报告导出：Word（python-docx 程序化排版）+ PDF + CSV + 图表
+├── database.py      # SQLite 缓存层（TTL/空结果缓存/WAL/访问日志/管理员会话）
+├── market_data.py   # 多数据源：World Bank 经济（并发拉取）+ Tavily 搜索 + WTO 宏观背景 + 竞争格局
 ├── desktop.py       # 桌面版入口（PyWebView）
 ├── countries.py     # 完整国家清单（159 项 + 组织代码）
 ├── hs_descriptions.py # HS 编码品名描述
@@ -147,20 +175,23 @@
 │   ├── sample_products.json  # 商品采集演示画像
 │   ├── sample_reviews.json   # 旧演示评论数据
 │   └── samples/              # 18 品类真实评论样本库（McAuley 公开数据集）
-├── templates/
-│   └── report_template_v2.docx  # Word 报告模板
-├── scripts/         # 工具脚本（样本构建/清洗，不打包发行版）
-├── static/          # 前端（四个页面 + 主题切换 + 书签工具）
-│   ├── index.html       # 市场分析（含多国对比高级选项）
+├── scripts/         # 工具脚本（样本构建/清洗/测试脚本，不打包发行版）
+├── tests/           # pytest 单元测试（统计指标/安全校验/缓存/LLM/导出，无网络）
+├── static/          # 前端（六页面 + 主题切换 + 书签工具）
+│   ├── index.html       # 市场分析 + AI Agent 一句话全流程（首页）
 │   ├── trade.html       # 贸易数据
 │   ├── business.html    # 开发信
 │   ├── ecommerce.html   # 跨境电商
+│   ├── leads.html       # 客户线索
+│   ├── admin.html       # 管理面板（拦截记录 / Key 状态）
 │   ├── app.js           # 市场分析页逻辑（单国/多国分流）
 │   ├── bookmarklet.js   # 一键复制评论书签工具
 │   ├── theme.js         # 双主题切换（☀️/🌙）
-│   ├── settings.js      # 设置面板（API Key / AI 提供商 / 搜索源配置）
+│   ├── settings.js      # 设置面板（API Key / AI 提供商 / 管理员登录）
 │   └── style.css        # 设计系统（亮色/暗色）
-├── requirements.txt
+├── requirements.txt   # 运行时依赖（锁版本）
+├── requirements-dev.txt  # 测试/构建工具（pytest/ruff/pyinstaller）
+├── requirements-win.txt # Windows 专属（pywin32/pywebview）
 └── .env             # 密钥（已被 .gitignore 排除，不提交）
 ```
 

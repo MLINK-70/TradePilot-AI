@@ -17,8 +17,21 @@ from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
-# 中文字体（Windows）
-plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
+# 中文字体：运行时探测可用 CJK 字体（Linux/CI 无微软雅黑时回退，防图表豆腐块）
+def _pick_cjk_font() -> list:
+    """按优先级探测本机可用中文字体；找不到时警告并回退"""
+    import logging
+    import matplotlib.font_manager as fm
+    candidates = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Noto Sans CJK",
+                  "WenQuanYi Zen Hei", "PingFang SC", "Source Han Sans SC"]
+    available = {f.name for f in fm.fontManager.ttflist}
+    chosen = [c for c in candidates if c in available]
+    if not chosen:
+        logging.warning("未找到中文字体（已探测 %s），图表中文可能显示为方块", "、".join(candidates))
+    return chosen
+
+
+plt.rcParams["font.sans-serif"] = _pick_cjk_font() or ["DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 # Word 报告字体（学术论文规范）：
@@ -1260,10 +1273,15 @@ def build_market_report(product: str, country: str, ai: dict,
         _p("结合龙头品牌的公开财报，判断其投入能力与市场策略（数据源：SEC 财报 / 东方财富 / 公开报道）：")
         financials_available = False
         # 进程内缓存：同公司 24h 内不重查（SEC 查询 ~15 秒/次，报告每次生成都调会拖慢）
+        # 阶段 4：补真 TTL（24h 时间戳过期，原实现注释写了 TTL 但代码没有）
         _fin_cache = getattr(build_market_report, "_fin_cache", None)
         if _fin_cache is None:
             _fin_cache = {}
             build_market_report._fin_cache = _fin_cache
+        _fin_ts = getattr(build_market_report, "_fin_ts", None)
+        if _fin_ts is None:
+            _fin_ts = {}
+            build_market_report._fin_ts = _fin_ts
         try:
             from financials import get_company_financials
             # 品牌 → 财务查询名映射（兼容中英文品牌名，覆盖常见消费电子龙头）
@@ -1273,15 +1291,18 @@ def build_market_report(product: str, country: str, ai: dict,
                         "Bose": "Bose", "Razer": "雷蛇", "Xiaomi": "小米"}
             for b in brands[:3]:
                 fname = brand_cn.get(b.get("name", ""), b.get("name", ""))
-                # 进程内缓存命中（24h 内不重查）
-                if fname in _fin_cache:
+                # 进程内缓存命中（24h 内不重查；超时重新拉取）
+                _now = time.time()
+                if fname in _fin_cache and _now - _fin_ts.get(fname, 0) < 86400:
                     fin = _fin_cache[fname]
                 else:
                     try:
                         fin = get_company_financials(fname)
                         _fin_cache[fname] = fin
+                        _fin_ts[fname] = _now
                     except Exception:
                         _fin_cache[fname] = {}
+                        _fin_ts[fname] = _now
                         continue
                 if not fin or not fin.get("available"):
                     continue
@@ -1677,10 +1698,10 @@ def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
 
 
 def build_csv(rows: list) -> io.BytesIO:
-    """生成 CSV 原始数据：完整导出 UN Comtrade 返回的每条记录（所有字段）"""
-    if not rows:
-        return io.BytesIO("暂无数据".encode("utf-8-sig"))
+    """生成 CSV 原始数据：完整导出 UN Comtrade 返回的每条记录（所有字段）
 
+    空数据返回带表头的空文件（标准 CSV），不再返回 "暂无数据" 文本（审查 #17）。
+    """
     # 取所有记录并集字段（保持顺序），UN 返回啥导啥
     all_keys: list[str] = []
     seen = set()

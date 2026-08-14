@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 贸易数据</title>
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
   <style>
     .chart-box { margin-top: 1.5rem; background: var(--card); border: var(--line-w) solid var(--border); border-radius: var(--radius); padding: 1rem; }
     #trend-chart { width: 100%; height: 360px; }
@@ -129,6 +129,8 @@
     <a href="/trade.html" class="active">贸易数据</a>
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
+    <a href="/leads.html">客户线索</a>
+    <a href="/admin.html">管理面板</a>
   </nav>
   <header class="hero">
     <span class="eyebrow">UN Comtrade · Export Intelligence</span>
@@ -185,7 +187,7 @@
         <button type="button" id="dl-report-pdf">下载 PDF</button>
         <button type="button" id="dl-data">下载 CSV 数据</button>
       </div>
-      <p id="status" class="status"></p>
+      <p id="status" class="status" aria-live="polite"></p>
     </section>
 
     <section id="result" hidden>
@@ -303,9 +305,9 @@
 
   <footer>数据来源：UN Comtrade 公共 API · 出口流向数据</footer>
 
-  <script src="echarts.min.js?v=14"></script>
-  <script src="theme.js?v=14"></script>
-  <script src="settings.js?v=18"></script>
+  <script src="echarts.min.js?v=15"></script>
+  <script src="theme.js?v=15"></script>
+  <script src="settings.js?v=19"></script>
   <script>
     (function () {
       'use strict';
@@ -512,12 +514,31 @@
         const ab = document.getElementById('analysis-box');
         const a = data.analysis || {};
         // 数字高亮：把解读里的数字（含%、亿、年等）标成醒目色
+        // 纯 DOM 操作（遍历文本节点包 <mark>），不拼 innerHTML，杜绝 XSS
         function hlNum(text) {
-          const div = document.createElement('div');
-          div.textContent = text || '';
-          // 数字整体匹配（含小数/千分位/可选%），避免"2024.5"被拆断
-          div.innerHTML = div.innerHTML.replace(/([-+]?\d[\d,]*(?:\.\d+)?%?)/g, '<mark class="num-hl">$1</mark>');
-          return div.innerHTML;
+          const root = document.createElement('div');
+          root.textContent = text || '';
+          const textNodes = [];
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) textNodes.push(walker.currentNode);
+          textNodes.forEach(function (node) {
+            const parts = (node.nodeValue || '').split(/([-+]?\d[\d,]*(?:\.\d+)?%?)/);
+            if (parts.length <= 1) return;
+            const frag = document.createDocumentFragment();
+            parts.forEach(function (p) {
+              if (p === '') return;
+              if (/^[-+]?\d[\d,]*(?:\.\d+)?%?$/.test(p)) {
+                const m = document.createElement('mark');
+                m.className = 'num-hl';
+                m.textContent = p;
+                frag.appendChild(m);
+              } else {
+                frag.appendChild(document.createTextNode(p));
+              }
+            });
+            node.parentNode.replaceChild(frag, node);
+          });
+          return root.innerHTML;
         }
         if (a.overview) {
           document.getElementById('analysis-overview').innerHTML = hlNum(a.overview);
@@ -893,26 +914,33 @@
 
       document.getElementById('dl-data').addEventListener('click', async () => {
         if (!lastQuery) return;
-        const resp = await fetch('/api/trade/export/data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            product: lastQuery.product, target: lastQuery.target,
-            start_year: lastQuery.start_year, end_year: lastQuery.end_year,
-            reporter: lastQuery.reporter,
-          }),
-        });
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
-          const cd = resp.headers.get('Content-Disposition') || '';
-          const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-          a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-原始数据.csv';
-          a.click();
-        } else {
-          showStatus('数据下载失败', 'error');
+        try {
+          const resp = await fetch('/api/trade/export/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product: lastQuery.product, target: lastQuery.target,
+              start_year: lastQuery.start_year, end_year: lastQuery.end_year,
+              reporter: lastQuery.reporter,
+            }),
+          });
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
+            const cd = resp.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+            a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-原始数据.csv';
+            a.click();
+            // blob URL 用后回收（防内存泄漏）
+            setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+          } else {
+            showStatus('数据下载失败', 'error');
+          }
+        } catch (_) {
+          showStatus('数据下载失败（网络错误）', 'error');
         }
       });
 

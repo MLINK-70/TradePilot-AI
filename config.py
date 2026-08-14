@@ -2,7 +2,12 @@
 
 支持运行时更新（set_key）：设置面板保存后立即生效，无需重启。
 """
+import ipaddress
+import logging
 import os
+import secrets
+import socket
+import urllib.parse
 
 from dotenv import load_dotenv
 
@@ -59,16 +64,81 @@ RUNTIME_KEYS = {
     "SEARCH_BASE_URL": SEARCH_BASE_URL,
 }
 
+# 本地模型（Ollama 等 http://localhost）需显式放行才允许非 https/内网地址
+ALLOW_LOCAL_AI_BASE_URL = os.getenv("ALLOW_LOCAL_AI_BASE_URL", "") == "1"
+
+# 管理员密码（保护 POST /api/settings 等写 Key 的接口）
+# 以 .env 显式配置为准；未配置时生成随机密码并打日志（仅本次运行有效，重启即变）
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+if not ADMIN_PASSWORD:
+    ADMIN_PASSWORD = secrets.token_urlsafe(12)
+    logging.warning(
+        "未配置 ADMIN_PASSWORD，已生成临时管理员密码：%s（仅本次运行有效；建议写入 .env 固定）",
+        ADMIN_PASSWORD,
+    )
+ADMIN_SESSION_TTL_DAYS = 7
+
+
+def validate_ai_base_url(url: str) -> str:
+    """校验 AI 服务地址（SSRF/密钥泄露防线第一层）
+
+    规则：必须 http(s)://；IP 字面量或域名解析结果命中内网/环回/链路本地/保留地址一律拒绝；
+    公网地址必须 https（防止明文把 API Key 发给中间人）。
+    本地模型（http://localhost:11434 等）需 .env 设 ALLOW_LOCAL_AI_BASE_URL=1 显式放行。
+    返回去除尾部斜杠的规范化地址；不合法抛 ValueError。
+    """
+    url = (url or "").strip().rstrip("/")
+    if not url:
+        raise ValueError("AI 服务地址不能为空")
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("https", "http"):
+        raise ValueError("AI 服务地址必须以 http(s):// 开头")
+    host = (u.hostname or "").lower()
+    if not host:
+        raise ValueError("AI 服务地址缺少主机名")
+
+    def _is_local(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+
+    if not ALLOW_LOCAL_AI_BASE_URL and u.scheme != "https":
+        raise ValueError("AI 服务地址必须使用 https（本地模型需在 .env 设 ALLOW_LOCAL_AI_BASE_URL=1）")
+
+    try:
+        ip = ipaddress.ip_address(host)  # 纯 IP 字面量
+    except ValueError:
+        ip = None  # 域名，走下方解析校验
+    if ip is not None:
+        if _is_local(ip) and not ALLOW_LOCAL_AI_BASE_URL:
+            raise ValueError("AI 服务地址不允许指向内网/本机地址")
+    else:
+        # 域名：解析后逐 IP 校验（防 DNS rebinding 绕过字面量检查）
+        try:
+            infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror:
+            raise ValueError("AI 服务地址域名无法解析")
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if _is_local(ip) and not ALLOW_LOCAL_AI_BASE_URL:
+                raise ValueError("AI 服务地址解析到内网地址（已拒绝）")
+    return url
+
 
 def set_key(name: str, value: str) -> bool:
     """运行时更新 Key：写入 RUNTIME_KEYS + 追加到 .env（持久化）
 
     联动别名：设置面板填 DeepSeek/Tavily key 时，同步到 AI_API_KEY/SEARCH_API_KEY
     （llm 读 AI_API_KEY、market_data 读 SEARCH_API_KEY；默认 provider=deepseek/tavily）。
+    安全校验：值含换行/# 直接拒绝（防 .env 配置注入）；AI_BASE_URL 过白名单校验（防 SSRF/密钥泄露）。
+    返回 True 表示已生效；写 .env 失败时返回 False（运行时仍生效）。
     """
     if name not in RUNTIME_KEYS:
         return False
     value = (value or "").strip()
+    # 配置注入防线：换行可拼出新的配置行（如 \nAI_BASE_URL=https://attacker），# 会截断行
+    if any(ch in value for ch in ("\n", "\r", "#")):
+        raise ValueError(f"配置项 {name} 的值不能包含换行或 # 字符")
+    if name == "AI_BASE_URL":
+        value = validate_ai_base_url(value)
     RUNTIME_KEYS[name] = value
     globals()[name] = value  # 让引用处（llm/market_data/ebay）立即读到新值
 
@@ -105,7 +175,9 @@ def set_key(name: str, value: str) -> bool:
         with open(env_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
     except OSError:
-        pass  # 写 .env 失败不影响运行时生效
+        # 写 .env 失败（如 exe 目录无写权限）：运行时已生效，但持久化失败要让人知道
+        logging.exception("写入 .env 失败（%s），设置仅本次运行生效", name)
+        return False
     return True
 
 

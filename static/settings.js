@@ -77,6 +77,14 @@
         </div>
       </div>
     </details>
+    <div id="set-admin-box" style="display:none;margin-bottom:12px;border:1px solid var(--error);border-radius:8px;padding:10px;background:rgba(220,38,38,.06);">
+      <div style="font-size:.85rem;color:var(--error);margin-bottom:6px;">🔒 仅管理员可修改设置</div>
+      <div style="display:flex;gap:6px;">
+        <input type="password" id="set-admin-pw" placeholder="管理员密码" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        <button id="set-admin-login" style="padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">登录</button>
+      </div>
+      <div id="set-admin-hint" style="font-size:.72rem;color:var(--muted);margin-top:4px;">密码在服务器 .env 的 ADMIN_PASSWORD 中配置（未配置时查看服务启动日志）</div>
+    </div>
     <div style="display:flex;gap:8px;">
       <button id="set-save" style="flex:1;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">保存</button>
       <button id="set-close" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;">关闭</button>
@@ -151,6 +159,17 @@
       } else {
         status.textContent = '';
       }
+      // 管理端状态：未登录时锁定保存按钮，显示登录框
+      const adminBox = document.getElementById('set-admin-box');
+      const saveBtn = document.getElementById('set-save');
+      if (s.is_admin) {
+        adminBox.style.display = 'none';
+        saveBtn.disabled = false;
+      } else {
+        adminBox.style.display = 'block';
+        saveBtn.disabled = true;
+        document.getElementById('set-admin-pw').value = '';
+      }
     } catch (_) {
       // 设置读取失败：静默（面板仍打开，字段留空）
     }
@@ -166,6 +185,31 @@
 
   mask.addEventListener('click', close);
   document.getElementById('set-close').addEventListener('click', close);
+
+  // 管理员登录：成功后解锁保存按钮（会话走 httpOnly cookie，前端不存任何凭据）
+  document.getElementById('set-admin-login').addEventListener('click', async () => {
+    const pw = document.getElementById('set-admin-pw').value;
+    const hint = document.getElementById('set-admin-hint');
+    if (!pw) { hint.textContent = '请输入密码'; return; }
+    try {
+      const resp = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (resp.ok) {
+        document.getElementById('set-admin-box').style.display = 'none';
+        document.getElementById('set-save').disabled = false;
+        status.style.color = 'var(--teal)';
+        status.textContent = '管理员已登录，可修改设置';
+      } else {
+        hint.style.color = 'var(--error)';
+        hint.textContent = '密码错误';
+      }
+    } catch (_) {
+      hint.textContent = '网络错误';
+    }
+  });
 
   document.getElementById('set-save').addEventListener('click', async () => {
     const provider = document.getElementById('set-ai-provider').value;
@@ -192,14 +236,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const s = await resp.json();
+      let s = {};
+      try { s = await resp.json(); } catch (_) {}
       if (resp.ok) {
         status.style.color = 'var(--teal)';
         status.textContent = '已保存，立即生效';
         setTimeout(close, 1000);
       } else {
         status.style.color = 'var(--error)';
-        status.textContent = '保存失败';
+        status.textContent = s.detail || ('保存失败（HTTP ' + resp.status + '）');
       }
     } catch (_) {
       status.textContent = '网络错误';

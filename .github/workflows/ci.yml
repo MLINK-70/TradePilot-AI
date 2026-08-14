@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check . --exclude venv,build,dist --ignore E501,W291,W293
+        # E501 行长/空白类先不拦（历史代码），仅拦真实错误级别
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest tests/ -q
+      - run: python -m compileall -q main.py export.py llm.py trade.py market_data.py agent.py leads.py
+
+  build:
+    needs: [lint, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller pywin32 pywebview
+      - run: pyinstaller TradePilot-AI.spec --noconfirm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TradePilot-AI-exe
+          path: dist/TradePilot-AI.exe

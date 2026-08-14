@@ -83,9 +83,15 @@ def get_product_info(app_key: str, app_secret: str, product_id: str, currency: s
     """
     raw = request_product_detail(app_key, app_secret, product_id, currency)
 
+    # 失败时网关返回 {"error_response": {"code":..., "msg":...}}：
+    # 必须先显式检查，否则 code=None 会落入下方放行白名单，报误导性错误（B 类审查 #6）
+    err = raw.get("error_response")
+    if err:
+        raise ValueError(f"速卖通 API 错误: {err.get('code', '')} {err.get('msg', '')}")
+
     # 联盟响应按 resp_result.code 判断成败（0 成功）
     resp_result = raw.get("aliexpress_affiliate_productdetail_get_response", {}).get("resp_result", {})
-    if resp_result.get("code") not in (None, 0, "0"):
+    if not resp_result or resp_result.get("code") not in (0, "0"):
         raise ValueError(f"速卖通 API 返回错误: {resp_result.get('code')} {resp_result.get('msg')}")
 
     # 商品对象可能在 products / result / 直接挂在 resp_result 下（不同文档版本）

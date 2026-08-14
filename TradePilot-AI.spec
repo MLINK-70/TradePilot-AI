@@ -8,7 +8,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('static', 'static'),        # 前端页面
-        ('templates', 'templates'),  # Word 模板
         ('data', 'data'),            # 演示数据
         ('.env.example', '.env.example'),  # Key 模板（setup_env 复制用）
     ],
@@ -17,6 +16,7 @@ a = Analysis(
         'main', 'config', 'llm', 'prompts', 'trade', 'database',
         'countries', 'hs_descriptions', 'business', 'ecommerce',
         'ebay', 'aliexpress', 'export', 'market_data',
+        'agent', 'leads', 'financials', 'collectors',
         # uvicorn 子模块
         'uvicorn.logging',
         'uvicorn.loops',

@@ -52,7 +52,8 @@ def get_worldbank(iso3: str, indicator: str, year: int = 0) -> float | None:
     国家今年还是旧值）。90 天过期后重新拉取。
     """
     init_db()
-    cache_key = f"WB:{iso3}:{indicator}"
+    # 缓存 key 含年份（year=0 取最新用 "latest" 占位）：不同年份查询不再串缓存（B 类审查 #2）
+    cache_key = f"WB:{iso3}:{indicator}:{year if year else 'latest'}"
     cached = get_cached(cache_key, "0", "0", "X", "META")
     if cached:
         # TTL 检查：缓存超 90 天视为过期
@@ -147,14 +148,25 @@ def get_worldbank_series(iso3: str, indicator: str, years: list) -> dict:
 
 
 def get_market_context(country: str) -> dict:
-    """聚合市场环境：GDP/人口/人均/互联网 → dict（失败字段为 None，不阻断）"""
+    """聚合市场环境：GDP/人口/人均/互联网 → dict（失败字段为 None，不阻断）
+
+    阶段 4：8 个指标并发拉取（World Bank 免费接口无并发限制），
+    原来串行最长 8×15s ≈ 2 分钟 → 一轮 ~15s。
+    """
     iso3 = COUNTRY_ISO3.get(country.strip(), "")
     if not iso3:
         return {"country": country, "available": False}
 
     result = {"country": country, "iso3": iso3, "available": True}
-    for name in INDICATORS:
-        result[name] = get_worldbank(iso3, name)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {name: pool.submit(get_worldbank, iso3, name) for name in INDICATORS}
+        for name, fut in futures.items():
+            try:
+                result[name] = fut.result()
+            except Exception as e:
+                logging.warning("指标 %s 获取失败（不阻断）: %s", name, e)
+                result[name] = None
     return result
 
 

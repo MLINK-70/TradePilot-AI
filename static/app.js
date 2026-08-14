@@ -241,6 +241,11 @@
 
   // ===== 双栏仪表盘 =====
   let dashChart = null;
+  // 窗口缩放时重绘图表（审查第六批顺手项；防重复注册）
+  if (!window.__dashResizeBound) {
+    window.__dashResizeBound = true;
+    window.addEventListener('resize', () => { if (dashChart) dashChart.resize(); });
+  }
 
   function dashColors() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches

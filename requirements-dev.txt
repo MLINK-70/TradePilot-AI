@@ -1,0 +1,5 @@
+# 开发/测试/构建工具（CI 安装）
+pytest>=8.0
+ruff>=0.5
+pyinstaller>=6.0
+responses>=0.25

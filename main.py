@@ -7,9 +7,13 @@ llm.py / prompts.py 是所有模块共用的底座。
 import logging
 import json
 import os
+import secrets
 import sys
 import time
 import io
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from urllib.parse import quote
 
 # 资源路径：打包(exe)用 _MEIPASS，开发用项目目录
@@ -20,9 +24,8 @@ def res_path(name: str) -> str:
     """资源文件绝对路径（static/templates/data 下的文件）"""
     return os.path.join(BASE_DIR, name)
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -48,16 +51,100 @@ from export import build_csv, build_market_report, build_word_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-app = FastAPI(title="TradePilot AI", description="面向消费电子出海的 AI 市场分析平台")
+@asynccontextmanager
+async def lifespan(app):
+    """启动初始化（阶段 4）：建表 + WAL + 清理过期缓存，避免每请求重复 DDL"""
+    try:
+        from database import cleanup_expired_cache, enable_wal, init_db
+        init_db()
+        enable_wal()
+        cleanup_expired_cache()
+    except Exception:
+        logging.exception("启动数据库初始化失败")
+    yield
 
-# 仅开发用：允许直接双击打开 index.html（file:// 跨源）；未来前后端分离时收紧
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],  # 跨源下载时前端能读到文件名
-)
+
+app = FastAPI(title="TradePilot AI", description="面向消费电子出海的 AI 市场分析平台",
+              lifespan=lifespan)
+
+# 安全加固（v1.0 审查第一批）：
+# 1) 移除宽 CORS（allow_origins=["*"] 曾允许任意网页跨源调用本机 API 烧 token/读历史）。
+#    前端由下方 app.mount("/") 同源提供，无跨源需求；LAN 演示需放行时加 ALLOWED_HOSTS 环境变量。
+# 2) Host 头白名单校验：防 DNS rebinding / 恶意 Host 注入（返回 400 而非处理请求）。
+_ALLOWED_HOSTS = {h.strip().lower() for h in
+                  os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()}
+
+# 匿名限流（v1.0 阶段 1.2）：消耗 token 的接口按 IP 滑动窗口限频，管理员会话豁免。
+# 限额宽松（默认每小时 30 次），超限提示而非拒绝业务本身。
+_RATE_LIMIT = int(os.getenv("ANON_RATE_LIMIT", "30"))   # 每窗口次数
+_RATE_WINDOW = 3600                                      # 1 小时
+_RATE_PREFIXES = ("/api/analyze", "/api/trade/query", "/api/trade/export",
+                  "/api/business/", "/api/ecommerce/", "/api/ebay/", "/api/aliexpress/",
+                  "/api/leads/", "/api/agent/")
+_rate_hits: dict = {}
+
+
+def _rate_allowed(ip: str) -> bool:
+    """滑动窗口：窗口内命中数 <= 限额则放行"""
+    now = time.time()
+    hits = [t for t in _rate_hits.get(ip, []) if now - t < _RATE_WINDOW]
+    hits.append(now)
+    _rate_hits[ip] = hits
+    return len(hits) <= _RATE_LIMIT
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def _is_admin_request(request: Request) -> bool:
+    """检查请求是否携带有效管理员会话（httpOnly cookie）"""
+    token = request.cookies.get("admin_session")
+    if not token:
+        return False
+    try:
+        from database import check_admin_session
+        return check_admin_session(token)
+    except Exception:
+        return False
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    ip = _client_ip(request)
+    path = request.url.path
+    # Host 头校验（忽略端口，支持 127.0.0.1:8000 / localhost:8000 等形式）
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if host and host not in _ALLOWED_HOSTS:
+        logging.warning("拒绝非法 Host: %s", request.headers.get("host"))
+        try:
+            from database import log_access
+            log_access(ip, path, "Host校验", "blocked")
+        except Exception:
+            logging.exception("access_log 写入失败（Host校验）")
+        return JSONResponse(status_code=400, content={"detail": "非法 Host"})
+    # 匿名限流（管理员会话豁免）
+    if path.startswith(_RATE_PREFIXES) and not _is_admin_request(request):
+        if not _rate_allowed(ip):
+            try:
+                from database import log_access
+                log_access(ip, path, "限流", "blocked")
+            except Exception:
+                logging.exception("access_log 写入失败（限流）")
+            return JSONResponse(status_code=429,
+                                content={"detail": f"请求过于频繁，请稍后再试（每小时 {_RATE_LIMIT} 次，管理员不限）"})
+    resp = await call_next(request)
+    # 安全响应头：CSP（内联脚本兼容期先放行 unsafe-inline）/ 防嗅探 / 禁止被嵌 frame
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
+    )
+    return resp
 
 
 class AnalyzeRequest(BaseModel):
@@ -66,35 +153,73 @@ class AnalyzeRequest(BaseModel):
 
 
 def _collect_evidence(product: str, country: str) -> tuple:
-    """聚合真实数据证据链（经济/贸易/竞争力/宏观背景/竞争格局），失败不阻断"""
-    market_ctx = get_market_context(country)
-    trade_evidence = {}
-    competitiveness = {}
-    try:
-        hs, rows, trend = query_trend(product, country, list(range(get_latest_year() - 2, get_latest_year() + 1)))
-        if trend:
-            trade_evidence = {
-                "hs_code": hs,
-                "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
-                "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
-                "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
-            }
-        if len(rows):
-            competitiveness = get_competitiveness(product, country, str(get_latest_year()))
-    except Exception:
-        pass
-    background = get_trade_background()
-    # 竞争格局（龙头品牌/份额，30 天缓存）
-    landscape = get_competitive_landscape(product, country)
+    """聚合真实数据证据链（经济/贸易/竞争力/宏观背景/竞争格局），失败不阻断
+
+    阶段 4 优化：互不依赖的证据采集并行（ThreadPoolExecutor），
+    原本串行 3-5 次网络往返压缩为 1 轮；get_latest_year 只取一次。
+    """
+    from trade import get_latest_year
+
+    def _trade_part():
+        ly = get_latest_year()
+        try:
+            hs, rows, trend = query_trend(product, country, list(range(ly - 2, ly + 1)))
+            trade_evidence = {}
+            competitiveness = {}
+            if trend:
+                trade_evidence = {
+                    "hs_code": hs,
+                    "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                    "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
+                    "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+                }
+            if len(rows):
+                competitiveness = get_competitiveness(product, country, str(ly))
+            return trade_evidence, competitiveness
+        except Exception:
+            logging.exception("贸易证据链采集失败（不阻断）")
+            return {}, {}
+
+    def _ctx_part():
+        try:
+            return get_market_context(country)
+        except Exception:
+            logging.exception("市场环境采集失败（不阻断）")
+            return None
+
+    def _bg_part():
+        try:
+            return get_trade_background()
+        except Exception:
+            logging.exception("宏观背景采集失败（不阻断）")
+            return None
+
+    def _land_part():
+        try:
+            return get_competitive_landscape(product, country)
+        except Exception:
+            logging.exception("竞争格局采集失败（不阻断）")
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        trade_fut = pool.submit(_trade_part)
+        ctx_fut = pool.submit(_ctx_part)
+        bg_fut = pool.submit(_bg_part)
+        land_fut = pool.submit(_land_part)
+        trade_evidence, competitiveness = trade_fut.result()
+        market_ctx = ctx_fut.result()
+        background = bg_fut.result()
+        landscape = land_fut.result()
     return market_ctx, trade_evidence, competitiveness, background, landscape
 
 
 @app.post("/api/analyze")
-def analyze(req: AnalyzeRequest):
+def analyze(req: AnalyzeRequest, request: Request):
     """输入产品 + 目标国家 → 返回 Markdown 格式市场分析报告
 
     用同步 def（而非 async）：内部 analyze_market 是同步阻塞调用，
     FastAPI 会把同步端点放入线程池执行，不阻塞事件循环。
+    ?refresh=1 强制重新分析（跳过 7 天历史缓存，阶段 4）。
     """
     product = req.product.strip()
     country = req.country.strip()
@@ -103,10 +228,12 @@ def analyze(req: AnalyzeRequest):
 
     # 历史命中：同产品同市场直接返回（不重复搜索/调 AI，省 token）
     from database import get_report_history, save_report_history
-    cached = get_report_history("market", product, country)
-    if cached:
-        logging.info("历史命中: %s / %s", product, country)
-        return cached
+    refresh = request.query_params.get("refresh") == "1"
+    if not refresh:
+        cached = get_report_history("market", product, country)
+        if cached:
+            logging.info("历史命中: %s / %s", product, country)
+            return cached
 
     try:
         # 聚合真实数据证据链（经济 + 贸易 + 竞争力 + 宏观背景）
@@ -135,7 +262,7 @@ def analyze(req: AnalyzeRequest):
     try:
         save_report_history("market", product, country, result)
     except Exception:
-        pass
+        logging.warning("保存市场历史失败: %s / %s", product, country)
     return result
 
 
@@ -170,7 +297,7 @@ def _collect_country_evidence(product: str, country: str) -> dict:
         if len(rows):
             ev["competitiveness"] = get_competitiveness(product, country, str(latest))
     except Exception:
-        pass
+        logging.warning("单国证据链采集失败（不阻断）: %s / %s", product, country)
     return ev
 
 
@@ -332,7 +459,7 @@ def export_report(req: TradeExportRequest):
         matrix = get_competitiveness_matrix(req.product.strip(), req.target.strip(), years_actual, req.reporter)
         top_exporters = get_top_exporters(req.product.strip(), str(years_actual[-1]))
     except Exception:
-        pass
+        logging.warning("导出增强数据采集失败（不阻断）: %s / %s", req.product, req.target)
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis,
                             landscape, market_ctx, matrix, top_exporters, background, competitiveness)
@@ -508,7 +635,7 @@ def trade_query(req: TradeQueryRequest):
         # 竞争力矩阵：出口大国 × {出口额/份额/CAGR/单价/判断}（程序计算）
         matrix = get_competitiveness_matrix(product, target, years, req.reporter)
     except Exception:
-        pass
+        logging.warning("贸易增强数据采集失败（不阻断）: %s / %s", product, target)
 
     result = {
         "hs_code": hs,
@@ -543,7 +670,7 @@ def trade_query(req: TradeQueryRequest):
                              "reporter": req.reporter}, ensure_ascii=False)
         save_report_history("trade", product, target, result, params)
     except Exception:
-        pass
+        logging.warning("保存贸易历史失败: %s / %s", product, target)
     return result
 
 
@@ -889,43 +1016,190 @@ class SettingsRequest(BaseModel):
     search_provider: str = ""
 
 
+class LoginRequest(BaseModel):
+    password: str
+
+
+class LeadsRequest(BaseModel):
+    product: str
+    country: str
+
+
+class LeadOutreachRequest(BaseModel):
+    product: str
+    country: str
+    lead: dict = {}          # 线索画像（来自 /api/leads/search 结果）
+    company: str = ""
+    contact: str = ""
+    email: str = ""
+    hook: str = "免费样品"
+
+
+class AgentRequest(BaseModel):
+    input: str
+
+
+@app.post("/api/agent/run")
+async def agent_run(req: AgentRequest):
+    """AI Agent：一句话 → 全流程（SSE 流式进度 + 最终结果）
+
+    同步流水线跑在线程池（asyncio.to_thread），进度经 asyncio.Queue
+    + call_soon_threadsafe 桥接推送（修订 #2 方案），不阻塞事件循环。
+    """
+    import asyncio
+    from agent import run_agent_pipeline
+    text = (req.input or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请输入任务，如「蓝牙耳机去德国卖」")
+
+    async def gen():
+        aq = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def worker():
+            try:
+                for ev in run_agent_pipeline(text):
+                    loop.call_soon_threadsafe(aq.put_nowait, ev)
+            except Exception as e:  # 流水线级异常：作为错误事件推送，不让 SSE 挂死
+                logging.exception("Agent 流水线异常")
+                loop.call_soon_threadsafe(aq.put_nowait, {"type": "error", "detail": str(e)})
+            finally:
+                loop.call_soon_threadsafe(aq.put_nowait, None)  # 结束信号
+
+        loop.run_in_executor(None, worker)
+        while True:
+            ev = await aq.get()
+            if ev is None:
+                break
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/leads/search")
+def search_leads(req: LeadsRequest):
+    """客户线索检索：产品 + 目标市场 → 线索列表（Tavily 检索 + LLM 画像 + 防幻觉硬约束）"""
+    from leads import find_leads
+    try:
+        return find_leads(req.product, req.country)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/leads/outreach")
+def lead_outreach(req: LeadOutreachRequest):
+    """闭环：线索画像 → 针对该公司的开发信"""
+    from leads import build_lead_outreach
+    try:
+        return build_lead_outreach(req.lead, req.product, req.country,
+                                   req.company, req.contact, req.email, req.hook)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/admin/access-log")
+def admin_access_log(request: Request):
+    """管理面板：安全拦截记录（仅管理员；未登录 401）"""
+    if not _is_admin_request(request):
+        from database import log_access
+        log_access(_client_ip(request), "/api/admin/access-log", "查看拦截记录", "blocked")
+        raise HTTPException(status_code=401, detail="仅管理员可查看拦截记录")
+    from database import count_access, list_access
+    return {
+        "blocked_count": count_access("blocked"),
+        "ok_count": count_access("ok"),
+        "recent": list_access(limit=50),
+    }
+
+
+@app.post("/api/admin/login")
+def admin_login(req: LoginRequest, response: Response, request: Request):
+    """管理员登录：校验 ADMIN_PASSWORD，成功发 httpOnly session cookie
+
+    密码比对用 secrets.compare_digest（防时序攻击）；登录成败都记 access_log。
+    """
+    from database import create_admin_session, log_access
+    ip = _client_ip(request)
+    ok = secrets.compare_digest((req.password or "").encode("utf-8"),
+                                cfg.ADMIN_PASSWORD.encode("utf-8"))
+    log_access(ip, "/api/admin/login", "管理员登录", "ok" if ok else "blocked")
+    if not ok:
+        raise HTTPException(status_code=401, detail="密码错误")
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now() + timedelta(days=cfg.ADMIN_SESSION_TTL_DAYS)
+    create_admin_session(token, expires.isoformat())
+    response.set_cookie(
+        "admin_session", token,
+        httponly=True, samesite="strict", path="/",
+        max_age=cfg.ADMIN_SESSION_TTL_DAYS * 86400,
+    )
+    return {"ok": True}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(request: Request, response: Response):
+    """管理员登出：删除会话 + 清 cookie"""
+    from database import delete_admin_session
+    token = request.cookies.get("admin_session")
+    if token:
+        delete_admin_session(token)
+    response.delete_cookie("admin_session", path="/")
+    return {"ok": True}
+
+
 @app.get("/api/settings")
-def get_settings():
-    """返回各 Key 配置状态（不返回值，安全）"""
-    return cfg.get_keys_status()
+def get_settings(request: Request):
+    """返回各 Key 配置状态（不返回值，安全）+ 管理端状态（前端据此解锁设置面板）"""
+    st = cfg.get_keys_status()
+    st["admin_required"] = True
+    st["is_admin"] = _is_admin_request(request)
+    return st
 
 
 @app.post("/api/settings")
-def save_settings(req: SettingsRequest):
+def save_settings(req: SettingsRequest, request: Request):
     """保存设置：写入 config + .env，运行时立即生效
 
+    仅管理员可调用（httpOnly 会话 cookie 校验）；未登录返回 401 并记 access_log。
     AI Key 统一入口：ai_api_key 直接写 AI_API_KEY（provider 无关），
     兼容旧 deepseek_key 字段（仅 provider=deepseek 时联动）。
+    非法值（换行/# 注入、危险 AI_BASE_URL）返回 400 并说明原因。
     """
-    if req.ai_api_key:
-        cfg.set_key("AI_API_KEY", req.ai_api_key)
-    elif req.deepseek_key:
-        # 旧字段：provider=deepseek 时等价 AI Key（config 联动），其他 provider 时
-        # 视为兜底存 DeepSeek key（AI_API_KEY 优先于回退链，不覆盖已配置的）
-        cfg.set_key("DEEPSEEK_API_KEY", req.deepseek_key)
-    if req.tavily_key:
-        cfg.set_key("TAVILY_API_KEY", req.tavily_key)
-    if req.ebay_app_id:
-        cfg.set_key("EBAY_APP_ID", req.ebay_app_id)
-    if req.ebay_client_secret:
-        cfg.set_key("EBAY_CLIENT_SECRET", req.ebay_client_secret)
-    if req.aliexpress_app_key:
-        cfg.set_key("ALIEXPRESS_APP_KEY", req.aliexpress_app_key)
-    if req.aliexpress_app_secret:
-        cfg.set_key("ALIEXPRESS_APP_SECRET", req.aliexpress_app_secret)
-    if req.ai_provider:
-        cfg.set_key("AI_PROVIDER", req.ai_provider)
-    if req.ai_model:
-        cfg.set_key("AI_MODEL", req.ai_model)
-    if req.ai_base_url:
-        cfg.set_key("AI_BASE_URL", req.ai_base_url)
-    if req.search_provider:
-        cfg.set_key("SEARCH_PROVIDER", req.search_provider)
+    if not _is_admin_request(request):
+        from database import log_access
+        log_access(_client_ip(request), "/api/settings", "保存设置", "blocked")
+        raise HTTPException(status_code=401, detail="仅管理员可修改设置，请先登录")
+    try:
+        if req.ai_api_key:
+            cfg.set_key("AI_API_KEY", req.ai_api_key)
+        elif req.deepseek_key:
+            # 旧字段：provider=deepseek 时等价 AI Key（config 联动），其他 provider 时
+            # 视为兜底存 DeepSeek key（AI_API_KEY 优先于回退链，不覆盖已配置的）
+            cfg.set_key("DEEPSEEK_API_KEY", req.deepseek_key)
+        if req.tavily_key:
+            cfg.set_key("TAVILY_API_KEY", req.tavily_key)
+        if req.ebay_app_id:
+            cfg.set_key("EBAY_APP_ID", req.ebay_app_id)
+        if req.ebay_client_secret:
+            cfg.set_key("EBAY_CLIENT_SECRET", req.ebay_client_secret)
+        if req.aliexpress_app_key:
+            cfg.set_key("ALIEXPRESS_APP_KEY", req.aliexpress_app_key)
+        if req.aliexpress_app_secret:
+            cfg.set_key("ALIEXPRESS_APP_SECRET", req.aliexpress_app_secret)
+        if req.ai_provider:
+            cfg.set_key("AI_PROVIDER", req.ai_provider)
+        if req.ai_model:
+            cfg.set_key("AI_MODEL", req.ai_model)
+        if req.ai_base_url:
+            cfg.set_key("AI_BASE_URL", req.ai_base_url)
+        if req.search_provider:
+            cfg.set_key("SEARCH_PROVIDER", req.search_provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logging.info("设置已保存")
     return cfg.get_keys_status()
 

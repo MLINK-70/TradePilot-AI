@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 管理面板</title>
+  <link rel="stylesheet" href="style.css?v=15">
+  <style>
+    .admin-form { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .admin-form input {
+      flex: 1; min-width: 180px; padding: 0.7rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--card); color: var(--text); font-size: 0.95rem;
+    }
+    .stat-grid { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+    .stat-card {
+      flex: 1; min-width: 140px; border: 1px solid var(--border); border-radius: 10px;
+      padding: 0.8rem 1rem; background: var(--card); text-align: center;
+    }
+    .stat-card .num { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .stat-card .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
+    table.log-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.log-table th, table.log-table td {
+      border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; color: var(--text);
+    }
+    table.log-table th { background: var(--card-2); color: var(--muted); }
+    .tag { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.72rem; }
+    .tag.blocked { background: rgba(220,38,38,.12); color: var(--error); }
+    .tag.ok { background: rgba(13,148,136,.12); color: var(--teal); }
+    .key-row { display: flex; justify-content: space-between; padding: 0.3rem 0; font-size: 0.85rem; color: var(--text); border-bottom: 1px dashed var(--border); }
+    .key-row .ok { color: var(--teal); }
+    .key-row .no { color: var(--muted); }
+    .status-line { font-size: 0.85rem; color: var(--muted); margin: 0.5rem 0; }
+    .status-line.error { color: var(--error); }
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html">开发信</a>
+    <a href="/leads.html">客户线索</a>
+    <a href="/admin.html" class="active">管理面板</a>
+  </nav>
+  <main style="max-width:860px;margin:0 auto;padding:1.2rem 1rem;">
+    <h2 style="margin-bottom:0.4rem;color:var(--text);">🛡️ 管理面板</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem;">
+      安全事件拦截记录 · 服务器 Key 状态。未登录仅可查看状态，登录后可看拦截明细。
+    </p>
+
+    <div id="admin-login-box" style="display:none;margin-bottom:1rem;border:1px solid var(--error);border-radius:10px;padding:1rem;background:rgba(220,38,38,.06);">
+      <div style="font-size:.88rem;color:var(--error);margin-bottom:0.6rem;">🔒 请输入管理员密码查看拦截记录</div>
+      <div class="admin-form">
+        <input type="password" id="admin-pw" placeholder="管理员密码（.env 的 ADMIN_PASSWORD）">
+        <button class="btn-primary" id="admin-login" style="border:none;border-radius:6px;cursor:pointer;padding:0.7rem 1.4rem;">登录</button>
+      </div>
+      <div class="status-line error" id="admin-login-hint" style="margin:0;"></div>
+    </div>
+
+    <div id="admin-content" hidden>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="num" id="stat-blocked">—</div><div class="label">累计拦截未授权访问</div></div>
+        <div class="stat-card"><div class="num" id="stat-ok">—</div><div class="label">放行安全事件记录</div></div>
+        <div class="stat-card"><div class="num" id="stat-keys">—</div><div class="label">已配置 Key 数</div></div>
+      </div>
+      <h3 style="margin:1rem 0 0.5rem;color:var(--text);">服务器 Key 状态</h3>
+      <div id="key-status" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:0.8rem 1rem;margin-bottom:1rem;"></div>
+      <h3 style="margin:1rem 0 0.5rem;color:var(--text);">最近拦截/安全事件（50 条）</h3>
+      <div style="overflow-x:auto;">
+        <table class="log-table">
+          <thead><tr><th>时间</th><th>IP</th><th>动作</th><th>结果</th><th>路径</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="status-line" id="admin-status"></div>
+  </main>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('theme-toggle');
+      const saved = localStorage.getItem('tradepilot-theme');
+      if (saved === 'dark') document.documentElement.classList.add('dark');
+      btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      btn.addEventListener('click', () => {
+        const dark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('tradepilot-theme', dark ? 'dark' : 'light');
+        btn.textContent = dark ? '☀️' : '🌙';
+      });
+    })();
+
+    const loginBox = document.getElementById('admin-login-box');
+    const content = document.getElementById('admin-content');
+    const statusEl = document.getElementById('admin-status');
+    const loginHint = document.getElementById('admin-login-hint');
+
+    function esc(s) { return String(s == null ? '' : s).replace(/</g, '&lt;'); }
+
+    async function loadKeys() {
+      try {
+        const resp = await fetch('/api/settings');
+        const s = await resp.json();
+        const keyDefs = [
+          ['DEEPSEEK_API_KEY', 'DeepSeek Key'], ['AI_API_KEY', 'AI Key'],
+          ['TAVILY_API_KEY', 'Tavily/搜索 Key'], ['EBAY_APP_ID', 'eBay App ID'],
+          ['ALIEXPRESS_APP_KEY', '速卖通 Key'],
+        ];
+        const box = document.getElementById('key-status');
+        box.innerHTML = '';
+        let cnt = 0;
+        keyDefs.forEach(function (k) {
+          const ok = !!s[k[0]];
+          if (ok) cnt++;
+          const row = document.createElement('div');
+          row.className = 'key-row';
+          row.innerHTML = '<span>' + esc(k[1]) + '</span><span class="' + (ok ? 'ok' : 'no') + '">' + (ok ? '✅ 已配置' : '未配置') + '</span>';
+          box.appendChild(row);
+        });
+        const p = document.createElement('div');
+        p.className = 'key-row';
+        p.innerHTML = '<span>AI 提供商</span><span>' + esc(s.AI_PROVIDER || 'deepseek') + ' · ' + esc(s.AI_MODEL || '') + '</span>';
+        box.appendChild(p);
+        document.getElementById('stat-keys').textContent = cnt + '/5';
+        return !!s.is_admin;
+      } catch (_) { return false; }
+    }
+
+    async function loadLog() {
+      try {
+        const resp = await fetch('/api/admin/access-log');
+        if (resp.status === 401) { statusEl.textContent = '未登录，无法查看拦截记录'; return false; }
+        if (!resp.ok) { statusEl.textContent = '加载失败（HTTP ' + resp.status + '）'; return false; }
+        const data = await resp.json();
+        document.getElementById('stat-blocked').textContent = data.blocked_count;
+        document.getElementById('stat-ok').textContent = data.ok_count;
+        const tbody = document.getElementById('log-body');
+        tbody.innerHTML = '';
+        (data.recent || []).forEach(function (r) {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + esc((r.created_at || '').replace('T', ' ').slice(0, 19)) + '</td>' +
+            '<td>' + esc(r.ip) + '</td>' +
+            '<td>' + esc(r.action) + '</td>' +
+            '<td><span class="tag ' + (r.result === 'ok' ? 'ok' : 'blocked') + '">' + (r.result === 'ok' ? '放行' : '拦截') + '</span></td>' +
+            '<td>' + esc(r.path) + '</td>';
+          tbody.appendChild(tr);
+        });
+        return true;
+      } catch (_) { statusEl.textContent = '网络错误'; return false; }
+    }
+
+    async function refresh() {
+      const isAdmin = await loadKeys();
+      if (isAdmin) {
+        loginBox.style.display = 'none';
+        content.hidden = false;
+        await loadLog();
+      } else {
+        loginBox.style.display = 'block';
+        content.hidden = true;
+        document.getElementById('admin-login-hint').textContent = '';
+        document.getElementById('stat-blocked').textContent = '🔒';
+      }
+    }
+
+    document.getElementById('admin-login').addEventListener('click', async () => {
+      const pw = document.getElementById('admin-pw').value;
+      if (!pw) { loginHint.textContent = '请输入密码'; return; }
+      try {
+        const resp = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        if (resp.ok) {
+          loginHint.textContent = '';
+          await refresh();
+        } else {
+          loginHint.textContent = '密码错误';
+        }
+      } catch (_) { loginHint.textContent = '网络错误'; }
+    });
+    document.getElementById('admin-pw').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') document.getElementById('admin-login').click();
+    });
+
+    refresh();
+  </script>
+  <script src="settings.js?v=19"></script>
+</body>
+</html>

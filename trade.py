@@ -8,7 +8,9 @@
 """
 import logging
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -102,7 +104,8 @@ def get_latest_year() -> int:
     init_db()  # 确保缓存表存在（首次调用/无 db 文件时）
 
     meta_key = "LATEST_YEAR"
-    cached = get_cached(meta_key, "0", "0", "X", "META")
+    # 30 天 TTL：数据修订后能自动重新探测（阶段 4，B 类审查 #10）
+    cached = get_cached(meta_key, "0", "0", "X", "META", ttl_days=30)
     if cached:
         return int(cached[0]["year"])
 
@@ -131,8 +134,8 @@ def get_latest_year() -> int:
         except Exception:
             continue
         time.sleep(1)
-    logging.warning("最新年份探测失败，回退 2024")
-    return 2024  # 兜底
+    logging.warning("最新年份探测失败，回退 %d", this_year - 6)
+    return this_year - 6  # 动态兜底：探测范围的最后一年（不再是写死的 2024）
 
 
 # AI 辅助 HS 编码解析缓存（产品名 → 编码，避免重复调用）
@@ -264,16 +267,30 @@ def partner_lookup(name: str) -> str:
     return AREA_MAP.get(name.strip(), "")
 
 
+def _ttl_for_period(period: str) -> int:
+    """贸易数据动态 TTL：近期年份 90 天（数据每年修订），旧年份永久缓存"""
+    try:
+        y = int(str(period)[:4])
+    except (TypeError, ValueError):
+        return 0
+    import datetime
+    this_year = datetime.date.today().year
+    return 90 if this_year - y <= 2 else 0
+
+
 def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "中国",
                flow: str = "X") -> list:
     """查单年数据：先查缓存，未命中打 API 并写缓存
 
     reporter: 出口国（报告国），默认中国
     flow: X=出口 / M=进口（reporter 为报告国时的流向）
+    缓存：近期年份 90 天 TTL（UN Comtrade 每年修订数据）；空结果也写缓存
+    （30 天内不再重复打 API，避免 429 限流下反复撞墙）。
     """
     reporter_code = AREA_MAP.get(reporter, "156")
     flow_code = flow
-    cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code)
+    cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
+                        ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
 
@@ -310,10 +327,13 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 raise ValueError(f"UN Comtrade 返回非 JSON 响应（HTTP {resp.status_code}）")
             if len(data) >= 500:
                 # 触顶提示：preview 接口 4 位码返回聚合记录，理论上不会触发；
-                # 若触发说明可能有更细粒度数据被截断
-                print(f"[警告] HS{cmd_code} {period} 返回 {len(data)} 条，可能达到记录上限")
-            if data:
-                save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
+                # 若触发说明可能有更细粒度数据被截断，数值偏小（B 类审查 #9）。
+                # 用 logging 而非 print：web 部署下 print 无人可见。
+                logging.warning("[截断] HS%s %s 返回 %d 条，可能达到记录上限，统计数值偏小",
+                                cmd_code, period, len(data))
+            # 空结果也写缓存（30 天短 TTL 由读取侧 _ttl_for_period 控制）：
+            # 某国某年无贸易数据是合法结果，不缓存会导致每次查询都打 API
+            save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
             return data
         except requests.exceptions.RequestException as e:
             last_error = str(e)
@@ -326,41 +346,71 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
     raise ValueError(f"UN Comtrade 查询失败：{last_error}（重试 3 次仍失败）")
 
 
-def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "中国") -> list:
-    """组织聚合查询（欧盟/东盟/RCEP）：循环查成员国数据并缓存聚合结果
+def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "中国", flow: str = "X") -> list:
+    """组织聚合查询（欧盟/东盟/RCEP）：并发查成员国数据并缓存聚合结果
 
     preview 免费接口对组代码（97/948）不返回数据，统一走成员清单聚合。
-    聚合结果按 (cmd_code, group_code, period, reporter) 缓存，避免重复全量循环。
+    阶段 4 优化：3 线程并发（原串行 27 国 ≈ 30s+）；已缓存成员不重复请求；
+    限流只在 429 时由 fetch_year 内部退避（plan 修订 #3：并发撞窗再退串行）。
     """
     reporter_code = AREA_MAP.get(reporter, "156")
-    cached = get_cached(cmd_code, group_code, period, "X", reporter_code)
+    cached = get_cached(cmd_code, group_code, period, flow, reporter_code,
+                        ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
 
     members = GROUP_MEMBERS[group_code]
-    all_rows = []
-    failed = []
-    for i, country in enumerate(members):
+    todo = []
+    for country in members:
         code = AREA_MAP.get(country, "")
         if not code:
-            print(f"[跳过] {country}: 无代码")
+            logging.warning("[跳过] %s: 无代码", country)
             continue
+        # 已缓存成员不重复请求
+        if get_cached(cmd_code, code, period, flow, reporter_code,
+                      ttl_days=_ttl_for_period(period)) is not None:
+            continue
+        todo.append((country, code))
+
+    results = {}
+    failed = []
+    lock = threading.Lock()
+
+    def _fetch_one(item):
+        country, code = item
         try:
-            rows = fetch_year(cmd_code, code, period, reporter)
-            all_rows.extend(rows)
+            rows = fetch_year(cmd_code, code, period, reporter, flow=flow)
+            with lock:
+                results[country] = rows
         except ValueError as e:
-            failed.append(country)
-            print(f"[跳过] {country}: {e}")
-        time.sleep(1)  # 限流避让
-        if i % 10 == 9:
-            print(f"[进度] 已查 {i + 1}/{len(members)} 国")
+            with lock:
+                failed.append(f"{country}: {e}")
+            logging.warning("[跳过] %s: %s", country, e)
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(_fetch_one, todo))
+        logging.info("[进度] 组织聚合 %s 已查 %d/%d 国", group_code, len(results), len(members))
+
+    # 按成员顺序稳定输出（新请求结果 + 缓存命中成员）
+    all_rows = []
+    for country in members:
+        if country in results:
+            all_rows.extend(results[country])
+            continue
+        code = AREA_MAP.get(country, "")
+        if code:
+            cached_rows = get_cached(cmd_code, code, period, flow, reporter_code,
+                                     ttl_days=_ttl_for_period(period))
+            if cached_rows is not None:
+                all_rows.extend(cached_rows)
 
     if failed:
-        print(f"[警告] {len(failed)} 国查询失败: {', '.join(failed)}")
+        logging.warning("[警告] %d 国查询失败: %s", len(failed), "、".join(failed))
 
     # 有失败国时聚合数据残缺，不写缓存（防止残缺结果被永久缓存）
     if all_rows and not failed:
-        save_cache(cmd_code, group_code, period, "X", all_rows, reporter_code)
+        save_cache(cmd_code, group_code, period, flow, all_rows, reporter_code)
     return all_rows
 
 
@@ -445,7 +495,9 @@ def summarize_stats(trend: dict) -> dict:
     total = sum(v["value"] for v in trend.values())
 
     # 年复合增长率 CAGR = (last/first)^(1/n) - 1
-    n = len(years) - 1
+    # n 用实际年差（years[-1]-years[0]）：非连续年份（如 [2018,2020,2022]）时
+    # 用"数据点间隔数"会严重高估（修复：B 类审查 #1）。年份键为字符串，先转 int。
+    n = int(years[-1]) - int(years[0])
     # 防负数开方崩溃（返回 complex -> round 抛 TypeError）：仅 first_v>0 且 last_v>=0 时计算（B8 修复）
     cagr = ((last_v / first_v) ** (1 / n) - 1) * 100 if n > 0 and first_v > 0 and last_v >= 0 else None
 
@@ -541,7 +593,11 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
         tc = compute_tc(export_value, import_value)
 
         # 市场出口份额：目标市场该产品总进口（flow=M, partner=0 全球）
-        market_import_rows = fetch_year(hs, "0", year, target, flow="M")
+        # 组织目标（欧盟等）：preview 接口对组代码不返回数据，走成员聚合（B 类审查 #4）
+        if target_code in GROUP_MEMBERS:
+            market_import_rows = fetch_group(hs, year, target_code, reporter, flow="M")
+        else:
+            market_import_rows = fetch_year(hs, "0", year, target, flow="M")
         market_import_value = sum(r.get("primaryValue") or 0 for r in market_import_rows)
         market_share = round(export_value / market_import_value * 100, 2) if market_import_value else None
 
@@ -587,9 +643,14 @@ def get_competitor_comparison(product: str, target: str, year: str,
             pass
         results = []
         total = 0
+        target_code = partner_lookup(target)
         for country in competitors:
             try:
-                rows = fetch_year(hs, partner_lookup(target) or "0", year, reporter=country)
+                # 组织目标：成员聚合（partner 用组代码 preview 不返回数据，B 类审查 #4）
+                if target_code in GROUP_MEMBERS:
+                    rows = fetch_group(hs, year, target_code, country)
+                else:
+                    rows = fetch_year(hs, target_code or "0", year, reporter=country)
                 value = sum(r.get("primaryValue") or 0 for r in rows)
                 results.append({"country": country, "value": value})
                 total += value
@@ -616,8 +677,10 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
     返回 [{country, export_value, market_share, cagr_pct, unit_price, verdict}]，失败返回 []。
     """
     try:
-        # 结果缓存（HS+目标+年份范围+出口国 → 矩阵），避免每次查询重算多国多年
-        cache_k = f"V1|{target}|{years[0]}-{years[-1]}|{reporter}"
+        # 结果缓存（HS+目标+完整年份序列+出口国 → 矩阵），避免每次查询重算多国多年。
+        # key 用完整年份元组：中间年份不同（如 [2018,2019,2022] vs [2018,2020,2022]）
+        # 不再命中同一缓存（B 类审查 #3）
+        cache_k = f"V1|{target}|{'-'.join(map(str, years))}|{reporter}"
         try:
             from database import get_cached
             cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k)

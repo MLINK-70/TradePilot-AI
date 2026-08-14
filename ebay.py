@@ -77,14 +77,18 @@ def analyze_item(item_id: str, access_token: str) -> dict:
     """拉取 eBay 商品并生成分析"""
     item = fetch_item(item_id, access_token)
 
-    # 提取商品信息
+    # 提取商品信息（防御性取值：price/seller/condition 可能缺失或为 None，
+    # 下架/异常商品不会因 AttributeError 整条失败；condition 实际是 dict）
+    price = item.get("price") or {}
+    seller = item.get("seller") or {}
+    cond = item.get("condition") or {}
     info = {
         "title": item.get("title", ""),
-        "price": item.get("price", {}).get("value", ""),
-        "currency": item.get("price", {}).get("currency", ""),
-        "condition": item.get("condition", ""),
-        "seller": item.get("seller", {}).get("username", ""),
-        "seller_feedback": item.get("seller", {}).get("feedbackScore", 0),
+        "price": price.get("value", ""),
+        "currency": price.get("currency", ""),
+        "condition": cond.get("conditionDisplayName", "") if isinstance(cond, dict) else str(cond or ""),
+        "seller": seller.get("username", ""),
+        "seller_feedback": seller.get("feedbackScore", 0),
         "item_web_url": item.get("itemWebUrl", ""),
     }
 

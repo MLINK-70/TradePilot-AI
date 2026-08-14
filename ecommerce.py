@@ -58,16 +58,25 @@ REVIEW_SUMMARY_SYSTEM = """你是资深产品经理。根据评论分析结果�
 
 
 def _parse_reviews_batch(reviews: list) -> list:
-    """分批解析评论（每批 10 条，防超长）"""
+    """分批解析评论（每批 10 条，防超长）
+
+    解析数与输入数不一致（LLM 合并/遗漏评论）时重试一次，
+    仍不一致则以实际解析数为准（上层用 parse_mismatch 提示，B 类审查 #8）。
+    """
     parsed = []
     for i in range(0, len(reviews), 10):
         batch = reviews[i:i + 10]
-        content = _chat([
-            {"role": "system", "content": REVIEW_PARSE_SYSTEM},
-            {"role": "user", "content": "评论列表（每行一条）:\n" + "\n".join(f"{j + 1}. {r}" for j, r in enumerate(batch))},
-        ], use_json=True)
-        data = _parse_json(content)
-        parsed.extend(data.get("reviews", []))
+        batch_parsed = []
+        for attempt in range(2):
+            content = _chat([
+                {"role": "system", "content": REVIEW_PARSE_SYSTEM},
+                {"role": "user", "content": "评论列表（每行一条）:\n" + "\n".join(f"{j + 1}. {r}" for j, r in enumerate(batch))},
+            ], use_json=True)
+            data = _parse_json(content)
+            batch_parsed = data.get("reviews", [])
+            if len(batch_parsed) == len(batch):
+                break  # 数量一致，无需重试
+        parsed.extend(batch_parsed)
     return parsed
 
 
@@ -112,6 +121,7 @@ def analyze_reviews(reviews: list) -> dict:
     return {
         "total": len(reviews),
         "parsed_count": len(parsed),
+        "parse_mismatch": len(parsed) != len(reviews),  # 解析数与输入不一致时前端提示（B 类审查 #8）
         "sentiments": sentiments,
         "aspect_counts": aspect_counts,
         "top_pains": summary.get("top_pains", []),

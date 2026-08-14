@@ -8,6 +8,7 @@
 所有财务数字由程序解析（非 AI），AI 只解读引用——守住"AI 不参与算术"底线。
 """
 import logging
+import re
 import time
 
 import requests
@@ -59,13 +60,14 @@ def get_a_share_financials(company: str) -> dict:
             "Referer": "https://data.eastmoney.com/",
         }, timeout=30, proxies={"http": None, "https": None})
         resp.raise_for_status()
-        rows = resp.json().get("result", {}).get("data", [])
+        # 容错：result 为 null 时不再抛 AttributeError（B 类审查 #7）
+        rows = (resp.json().get("result") or {}).get("data") or []
         if not rows:
             return {"available": False, "reason": "A 股财报拉取失败"}
 
         # 年报序列（报告期 12-31）：营收/净利/毛利率/ROE
-        # REPORTDATE 形如 "2025-12-31 00:00:00"，用日期部分判断
-        annual = [r for r in rows if str(r.get("REPORTDATE", "")).startswith("20") and str(r.get("REPORTDATE", ""))[5:10] == "12-31"]
+        # REPORTDATE 形如 "2025-12-31 00:00:00"，用日期部分判断（不再依赖 20 开头 hack）
+        annual = [r for r in rows if re.match(r"^\d{4}-", str(r.get("REPORTDATE", ""))) and str(r.get("REPORTDATE", ""))[5:10] == "12-31"]
         annual.sort(key=lambda r: r.get("REPORTDATE", ""), reverse=True)
         annual = annual[:5]
 
@@ -82,6 +84,7 @@ def get_a_share_financials(company: str) -> dict:
             "company": company + "（" + code + "）",
             "source": "东方财富财报接口（A 股年报）",
             "available": True,
+            "unit": "CNY",
             "metrics": metrics,
         }
     except Exception as e:
@@ -179,7 +182,8 @@ def get_sec_financials(company: str) -> dict:
         return {"available": False, "reason": f"{company} 无 SEC 财报（非美股上市）"}
     cik = info[0]
 
-    result = {"company": info[1], "source": "SEC EDGAR (官方 XBRL)", "available": True, "metrics": {}}
+    result = {"company": info[1], "source": "SEC EDGAR (官方 XBRL)", "available": True,
+              "unit": "USD", "metrics": {}}
     for metric, tags in TAG_CANDIDATES.items():
         for tag in tags:
             try:
@@ -233,12 +237,16 @@ def get_private_company_financials(company: str) -> dict:
 
         metrics = {}
         if data.get("revenue"):
-            metrics["revenue"] = [{"year": r["year"], "value": r["value_billion"] * 1e8} for r in data["revenue"] if r.get("year")]
+            # LLM 数值强转 float：返回字符串时不再 TypeError 整条失败（B 类审查 #7）
+            metrics["revenue"] = [{"year": r["year"], "value": float(r.get("value_billion") or 0) * 1e8}
+                                  for r in data["revenue"] if r.get("year")]
         if data.get("rd_expense"):
-            metrics["rd_expense"] = [{"year": r["year"], "value": r["value_billion"] * 1e8} for r in data["rd_expense"] if r.get("year")]
+            metrics["rd_expense"] = [{"year": r["year"], "value": float(r.get("value_billion") or 0) * 1e8}
+                                     for r in data["rd_expense"] if r.get("year")]
         if not metrics:
             return {"available": False, "reason": "公开报道中未找到财务数据"}
-        return {"company": company, "source": "公开报道（Tavily 检索，非官方财报）", "available": True, "metrics": metrics}
+        return {"company": company, "source": "公开报道（Tavily 检索，非官方财报）",
+                "available": True, "unit": "CNY", "metrics": metrics}
     except Exception as e:
         logging.warning("非上市财报检索失败 %s: %s", company, e)
         return {"available": False, "reason": "检索失败"}

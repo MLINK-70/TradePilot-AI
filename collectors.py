@@ -13,8 +13,9 @@ import ipaddress
 import json
 import logging
 import re
+import socket
 import time
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -32,31 +33,60 @@ class CollectorError(Exception):
 
 
 def _safe_url(url: str) -> str:
-    """SSRF 防护：仅 https、拒内网/保留地址"""
+    """SSRF 防护：仅 https、拒绝内网/保留地址
+
+    域名会解析后逐 IP 校验（防 DNS rebinding）；纯 IP 字面量直接校验。
+    """
     u = urlparse(url)
     if u.scheme != "https":
         raise CollectorError("仅支持 https 链接")
     host = u.hostname or ""
+    if not host:
+        raise CollectorError("链接缺少主机名")
     try:
-        ip = ipaddress.ip_address(host)
+        ip = ipaddress.ip_address(host)  # 纯 IP 字面量
+    except ValueError:
+        ip = None  # 域名，走解析校验
+    if ip is not None:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             raise CollectorError("不支持内网地址")
-    except ValueError:
-        pass  # 域名，交由 DNS 解析层（requests 默认不解析内网重定向）
+    else:
+        try:
+            infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror:
+            raise CollectorError("链接域名无法解析")
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise CollectorError("链接解析到内网地址（已拒绝）")
     return url
 
 
 def _fetch_html(url: str, timeout: int = 15) -> str:
-    """抓取页面 HTML（强制直连，不重试，大小上限 2MB）"""
-    url = _safe_url(url)
-    resp = requests.get(url, headers=UA, timeout=timeout,
-                        proxies={"http": None, "https": None})
-    if resp.status_code != 200:
-        raise CollectorError(f"页面访问失败（HTTP {resp.status_code}）")
-    html = resp.text
-    if len(html) > 2 * 1024 * 1024:
-        raise CollectorError("页面过大")
-    return html
+    """抓取页面 HTML（强制直连，不重试，大小上限 2MB）
+
+    手动跟随重定向（最多 5 跳）：每一跳都重新过 _safe_url 校验，
+    防止 https 页面 302 跳到内网/非 https 地址绕过 SSRF 防线。
+    """
+    current = url
+    for _ in range(5):
+        current = _safe_url(current)
+        resp = requests.get(current, headers=UA, timeout=timeout,
+                            allow_redirects=False,
+                            proxies={"http": None, "https": None})
+        if resp.status_code in (301, 302, 303, 307, 308):
+            nxt = resp.headers.get("Location")
+            if not nxt:
+                raise CollectorError("重定向缺少目标地址")
+            current = urljoin(current, nxt)  # 相对重定向也要基于当前 URL 解析
+            continue
+        if resp.status_code != 200:
+            raise CollectorError(f"页面访问失败（HTTP {resp.status_code}）")
+        html = resp.text
+        if len(html) > 2 * 1024 * 1024:
+            raise CollectorError("页面过大")
+        return html
+    raise CollectorError("重定向次数过多")
 
 
 def detect_platform(url: str) -> str:

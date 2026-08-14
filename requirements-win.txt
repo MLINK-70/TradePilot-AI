@@ -1,0 +1,4 @@
+# Windows 专属依赖（桌面版 exe / PDF 域更新需要 Word COM）
+# Linux/CI 不装（export.py 内延迟 import win32com，Linux 走 LibreOffice）
+pywin32>=306
+pywebview>=5.0

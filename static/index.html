@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境市场分析</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=15">
   <style>
     .btn-row { display: flex; gap: 0.8rem; }
     .btn-row .btn-primary { flex: 1; }
@@ -189,15 +189,67 @@
     <a href="/trade.html">贸易数据</a>
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
+    <a href="/leads.html">客户线索</a>
+    <a href="/admin.html">管理面板</a>
   </nav>
   <header class="hero">
     <span class="eyebrow">AI-Powered Trade Intelligence</span>
     <h1>TradePilot AI</h1>
-    <p class="subtitle">输入产品与目标国家，一键生成市场调研报告</p>
+    <p class="subtitle">一句话，完成 市场分析 → 报告 → 客户线索 → 开发信 全流程</p>
     <div class="route-line"><span></span></div>
   </header>
 
   <main>
+    <section class="card" style="border-color:var(--accent);">
+      <h2 style="margin:0 0 0.3rem;color:var(--accent);">🤖 AI Agent 一句话全流程</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 0.8rem;">输入一句话，自动完成 市场分析 → 报告 → 客户线索 → 开发信（每步实时进度）</p>
+      <div class="form-row">
+        <input type="text" id="agent-input" placeholder="例如：蓝牙耳机去德国卖" autocomplete="off">
+      </div>
+      <div class="btn-row" style="margin-bottom:.8rem;">
+        <button type="button" id="agent-run" class="btn-primary">🚀 一句话全流程</button>
+      </div>
+      <div id="agent-progress" style="font-size:.85rem;margin-bottom:.6rem;"></div>
+      <div id="agent-result" hidden>
+        <h3 style="margin:.4rem 0 .3rem;color:var(--accent);">📊 市场报告</h3>
+        <div id="agent-report" class="markdown-body"></div>
+        <h3 style="margin:.6rem 0 .3rem;color:var(--accent);">🔗 客户线索</h3>
+        <div id="agent-leads" style="font-size:.85rem;"></div>
+        <h3 style="margin:.6rem 0 .3rem;color:var(--accent);">✉️ 开发信</h3>
+        <pre id="agent-outreach" style="white-space:pre-wrap;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:.8rem;font-size:.85rem;font-family:inherit;color:var(--text);"></pre>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:1rem;">
+      <h2 style="margin:0 0 0.8rem;color:var(--text);">📦 业务模块</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.8rem;">
+        <a href="#analyze-form" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">📊</div><div style="font-weight:600;margin-top:.2rem;">市场分析</div>
+          <small style="color:var(--muted);">产品+国家 → 结构化报告</small>
+        </a>
+        <a href="/trade.html" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">📈</div><div style="font-weight:600;margin-top:.2rem;">贸易数据</div>
+          <small style="color:var(--muted);">HS 编码 → 出口数据+趋势</small>
+        </a>
+        <a href="/ecommerce.html" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">🛒</div><div style="font-weight:600;margin-top:.2rem;">跨境电商</div>
+          <small style="color:var(--muted);">商品采集+评论分析+Listing</small>
+        </a>
+        <a href="/business.html" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">✉️</div><div style="font-weight:600;margin-top:.2rem;">外贸开发信</div>
+          <small style="color:var(--muted);">开发信/跟进/模拟客户</small>
+        </a>
+        <a href="/leads.html" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">🔗</div><div style="font-weight:600;margin-top:.2rem;">客户线索</div>
+          <small style="color:var(--muted);">检索线索+定向开发信</small>
+        </a>
+        <a href="/admin.html" style="text-decoration:none;border:1px solid var(--border);border-radius:10px;padding:.8rem;background:var(--card);color:var(--text);text-align:center;">
+          <div style="font-size:1.4rem;">🛡️</div><div style="font-weight:600;margin-top:.2rem;">管理面板</div>
+          <small style="color:var(--muted);">拦截记录+Key 状态</small>
+        </a>
+      </div>
+    </section>
+
     <section class="card">
       <form id="analyze-form" autocomplete="off">
         <div class="form-row">
@@ -252,7 +304,7 @@
         </div>
         <ul id="history-list"></ul>
       </div>
-      <p id="status" class="status"></p>
+      <p id="status" class="status" aria-live="polite"></p>
     </section>
 
     <!-- 双栏仪表盘：左 KPI + 趋势图，右证据链 -->
@@ -326,21 +378,121 @@
   <footer>数据来源：UN Comtrade · World Bank · Tavily 行业检索 · 统计指标程序精确计算</footer>
 
   <!-- marked + DOMPurify：本地文件（CDN 会被浏览器追踪防护拦截） -->
-  <script src="echarts.min.js?v=11"></script>
-  <script src="marked.min.js?v=11"></script>
-  <script src="dompurify.min.js?v=11"></script>
+  <script src="echarts.min.js?v=15"></script>
+  <script src="marked.min.js?v=12"></script>
+  <script src="dompurify.min.js?v=12"></script>
   <script>
     // marked 挂了：降级为纯文本渲染（转义 HTML，不破坏 DOMPurify）
     if (typeof marked === 'undefined') {
       window.marked = { parse: function (text) { return '<pre>' + text.replace(/</g, '&lt;') + '</pre>'; } };
     }
-    // DOMPurify 挂了：降级为透传（此时报告可渲染，但无 XSS 过滤）
+    // DOMPurify 挂了：降级为纯文本（转义所有 <，HTML 全部惰性化，绝不透传原始 HTML）
     if (typeof DOMPurify === 'undefined') {
-      window.DOMPurify = { sanitize: function (html) { return html; } };
+      window.DOMPurify = { sanitize: function (html) { return String(html).replace(/</g, '&lt;'); } };
     }
   </script>
-  <script src="app.js?v=21"></script>
-  <script src="theme.js?v=11"></script>
-  <script src="settings.js?v=18"></script>
+  <script src="app.js?v=22"></script>
+  <script src="theme.js?v=15"></script>
+  <script src="settings.js?v=19"></script>
+  <script>
+    // AI Agent 一句话全流程（SSE 流式进度）
+    (function () {
+      const runBtn = document.getElementById('agent-run');
+      const inputEl = document.getElementById('agent-input');
+      const prog = document.getElementById('agent-progress');
+      const resultBox = document.getElementById('agent-result');
+
+      function esc(s) { return String(s == null ? '' : s); }
+
+      runBtn.addEventListener('click', async () => {
+        const input = inputEl.value.trim();
+        if (!input) { prog.textContent = '请输入任务，如「蓝牙耳机去德国卖」'; return; }
+        prog.innerHTML = '';
+        resultBox.hidden = true;
+        runBtn.disabled = true;
+        // 5 分钟超时（Agent 全流程含证据链+LLM+搜索，正常 2-4 分钟）
+        const ctrl = new AbortController();
+        const timer = setTimeout(function () { ctrl.abort(); }, 300000);
+        try {
+          const resp = await fetch('/api/agent/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: input }),
+            signal: ctrl.signal,
+          });
+          if (!resp.ok || !resp.body) { prog.textContent = '启动失败（HTTP ' + resp.status + '）'; return; }
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const parts = buf.split('\n\n');
+            buf = parts.pop();
+            for (const part of parts) {
+              const line = part.split('\n').find(l => l.indexOf('data: ') === 0);
+              if (!line) continue;
+              let ev;
+              try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+              if (ev.type === 'progress') {
+                const key = 'agent-step-' + ev.step;
+                let el = document.getElementById(key);
+                if (!el) { el = document.createElement('div'); el.id = key; prog.appendChild(el); }
+                const icon = ev.status === 'done' ? '✅' : (ev.status === 'skipped' ? '⚠️' : '⏳');
+                el.textContent = icon + ' 步骤 ' + (ev.step + 1) + '/' + ev.total + '：' + ev.title +
+                  (ev.detail ? ' — ' + ev.detail : '');
+              } else if (ev.type === 'result') {
+                const sum = document.createElement('div');
+                sum.style.cssText = 'margin-top:.4rem;color:var(--teal);font-weight:600;';
+                sum.textContent = ev.summary || '';
+                prog.appendChild(sum);
+                if (ev.report) {
+                  document.getElementById('agent-report').innerHTML =
+                    DOMPurify.sanitize(marked.parse(ev.report));
+                }
+                const leadsEl = document.getElementById('agent-leads');
+                leadsEl.innerHTML = '';
+                (ev.leads || []).forEach(function (ld) {
+                  const d = document.createElement('div');
+                  const strong = document.createElement('strong');
+                  strong.textContent = esc(ld.company);
+                  const span = document.createElement('span');
+                  span.textContent = '（' + esc(ld.business_scope) + '）';
+                  const a = document.createElement('a');
+                  a.href = ld.source_url;
+                  a.target = '_blank';
+                  a.rel = 'noopener';
+                  a.textContent = '来源';
+                  d.appendChild(document.createTextNode('· '));
+                  d.appendChild(strong);
+                  d.appendChild(span);
+                  d.appendChild(a);
+                  leadsEl.appendChild(d);
+                });
+                const o = ev.outreach;
+                document.getElementById('agent-outreach').textContent = o ?
+                  (esc(o.subject) + '\n\n' + esc(o.greeting) + '\n' + esc(o.body) + '\n' + esc(o.closing) + '\n' + esc(o.signature)) : '（无线索或未生成）';
+                resultBox.hidden = false;
+              } else if (ev.type === 'error') {
+                const err = document.createElement('div');
+                err.style.color = 'var(--error)';
+                err.textContent = '出错：' + esc(ev.detail);
+                prog.appendChild(err);
+              }
+            }
+          }
+        } catch (e) {
+          clearTimeout(timer);
+          prog.textContent = e.name === 'AbortError' ? '任务超时（5 分钟），请重试' : ('网络错误：' + e.message);
+        } finally {
+          clearTimeout(timer);
+          runBtn.disabled = false;
+        }
+      });
+      // 回车触发
+      inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runBtn.click(); });
+    })();
+  </script>
 </body>
 </html>
