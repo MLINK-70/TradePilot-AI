@@ -142,6 +142,10 @@
         <div id="agent-leads"></div>
         <h3>✉️ 开发信</h3>
         <pre id="agent-outreach"></pre>
+        <div style="display:flex;gap:.8rem;margin-top:1.2rem;">
+          <button type="button" id="agent-dl-word" class="btn-primary" style="flex:1;">⬇️ 下载 Word 报告</button>
+          <button type="button" id="agent-dl-pdf" class="btn-primary" style="flex:1;">⬇️ 下载 PDF 报告</button>
+        </div>
       </div>
     </section>
   </main>
@@ -223,6 +227,8 @@
               el.textContent = icon + ' 步骤 ' + (ev.step + 1) + '/' + ev.total + '：' + ev.title +
                 (ev.detail ? ' — ' + ev.detail : '');
             } else if (ev.type === 'result') {
+              // 记录最新结果供下载按钮使用（导出 /api/agent/export）
+              if (window.__agentResult) window.__agentResult.set(ev);
               const sum = document.createElement('div');
               sum.className = 'summary-line';
               sum.textContent = ev.summary || '';
@@ -297,6 +303,59 @@
       });
       // 回车触发
       inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runBtn.click(); });
+    })();
+
+    // Agent 报告下载（Word / PDF）：把最新 markdown 报告发给 /api/agent/export 排版导出
+    (function () {
+      const dlWord = document.getElementById('agent-dl-word');
+      const dlPdf = document.getElementById('agent-dl-pdf');
+      let lastReport = '', lastProduct = '', lastCountry = '';
+
+      function setLatest(ev) {
+        lastReport = ev.report || '';
+        lastProduct = ev.product || '';
+        lastCountry = ev.country || '';
+      }
+      // SSE 脚本与下载脚本共享最新结果：通过全局钩子
+      window.__agentResult = { set: setLatest, get: function () { return { report: lastReport, product: lastProduct, country: lastCountry }; } };
+
+      async function download(fmt) {
+        const { report, product, country } = window.__agentResult.get();
+        if (!report) { alert('没有可下载的报告——请先跑一次全流程'); return; }
+        const btn = fmt === 'pdf' ? dlPdf : dlWord;
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = fmt === 'pdf' ? '⏳ 生成 PDF 中…' : '⏳ 生成 Word 中…';
+        try {
+          const resp = await fetch('/api/agent/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ report: report, product: product, country: country, fmt: fmt }),
+          });
+          if (!resp.ok) {
+            let detail = '';
+            try { detail = (await resp.json()).detail || ''; } catch (_) {}
+            alert('导出失败（HTTP ' + resp.status + '）' + (detail ? '：' + detail : ''));
+            return;
+          }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'TradePilot-Agent-' + (product || '报告') + '-' + (country || '') + '-市场分析报告.' + fmt;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+        } catch (e) {
+          alert('网络错误：' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = orig;
+        }
+      }
+      dlWord.addEventListener('click', function () { download('docx'); });
+      dlPdf.addEventListener('click', function () { download('pdf'); });
     })();
   </script>
   <script src="theme.js?v=15"></script>

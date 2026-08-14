@@ -1789,3 +1789,112 @@ def build_csv(rows: list) -> io.BytesIO:
         if isinstance(r, dict):
             writer.writerow([r.get(k, "") for k in all_keys])
     return io.BytesIO(buf.getvalue().encode("utf-8-sig"))  # BOM 防 Excel 中文乱码
+
+
+def build_agent_report(md: str, product: str, country: str) -> io.BytesIO:
+    """AI Agent 的 markdown 报告 → 学术式 Word（复用字体/封面/收尾体系）
+
+    markdown 按行解析：# 标题、## 子标题、- 列表、> 引用、普通段落。
+    封面复用 build_market_report 的品牌块 + 信息行；正文/标题字体与正式报告一致。
+    """
+    from docx.shared import RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    _apply_doc_fonts(doc)
+    style = doc.styles["Normal"]
+    style.font.name = FONT_BODY
+    style.font.size = Pt(12)
+
+    NAVY = RGBColor(0x12, 0x3C, 0x5C)
+    ACCENT = RGBColor(0xC4, 0x45, 0x2C)
+    MUTED = RGBColor(0x7A, 0x71, 0x5F)
+
+    # ===== 封面（品牌行 + 装饰线 + 标题 + 信息块）=====
+    p0 = doc.add_paragraph()
+    r0 = p0.add_run("TradePilot AI · EXPORT INTELLIGENCE")
+    r0.font.name = "Arial"
+    r0._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    r0.font.size = Pt(10)
+    r0.font.color.rgb = ACCENT
+    r0.bold = True
+
+    hr = doc.add_paragraph()
+    hr.paragraph_format.space_before = Pt(6)
+    hr.paragraph_format.space_after = Pt(18)
+    pPr = hr._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "12")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "C4452C")
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+    t = doc.add_paragraph()
+    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    tr = t.add_run(f"{product} 市场分析报告（{country}）")
+    tr.font.name = FONT_HEADING
+    tr._element.rPr.rFonts.set(qn("w:eastAsia"), FONT_HEADING)
+    tr.font.size = Pt(20)
+    tr.bold = True
+    tr.font.color.rgb = NAVY
+
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sr = sub.add_run("AI Agent 一句话全流程生成 · TradePilot AI")
+    sr.font.size = Pt(10)
+    sr.font.color.rgb = MUTED
+
+    info = doc.add_paragraph()
+    info.paragraph_format.space_before = Pt(24)
+    ir = info.add_run(f"生成日期：{datetime.date.today().isoformat()}    数据来源：UN Comtrade · World Bank · Tavily 行业检索\n统计指标由程序精确计算 · AI 估算处明确标注")
+    ir.font.size = Pt(9)
+    ir.font.color.rgb = MUTED
+    doc.add_page_break()
+
+    # ===== 正文：markdown → 段落 =====
+    def _h(text, level=1):
+        return doc.add_heading(text, level=level)
+
+    def _p(text=""):
+        para = doc.add_paragraph()
+        para.paragraph_format.first_line_indent = Pt(24)
+        r = para.add_run(text)
+        return para
+
+    def _li(text):
+        para = doc.add_paragraph()
+        para.paragraph_format.left_indent = Pt(18)
+        r = para.add_run("• " + text)
+        return para
+
+    for line in md.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("### "):
+            _h(line[4:], level=2)
+        elif line.startswith("## "):
+            _h(line[3:], level=1)
+        elif line.startswith("# "):
+            _h(line[2:], level=0)
+        elif line.startswith("> "):
+            para = doc.add_paragraph()
+            r = para.add_run(line[2:])
+            r.font.color.rgb = MUTED
+            r.italic = True
+        elif line.startswith("- ") or line.startswith("* "):
+            _li(line[2:])
+        elif line.startswith("1. ") or line.startswith("2. ") or line.startswith("3. "):
+            _li(line[3:])
+        else:
+            _p(line)
+
+    _buf = io.BytesIO()
+    doc.save(_buf)
+    # 不在函数内 finalize：路由统一调 finalize_docx（与 build_market_report 一致），
+    # 避免重复跑 COM 域更新
+    return _buf

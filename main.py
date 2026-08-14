@@ -1140,6 +1140,40 @@ async def agent_run(req: AgentRequest):
     )
 
 
+class AgentExportRequest(BaseModel):
+    report: str
+    product: str
+    country: str
+    fmt: str = "docx"
+
+
+@app.post("/api/agent/export")
+def export_agent_report(req: AgentExportRequest):
+    """AI Agent 的 markdown 报告 → 学术式 Word/PDF 下载
+
+    Agent 全流程在前端跑完后，把 markdown 报告发回这里排版导出
+    （复用 export.py 的字体/封面/收尾体系，与正式报告同风格）。
+    """
+    from export import build_agent_report, finalize_docx
+    report = (req.report or "").strip()
+    product = (req.product or "").strip()
+    country = (req.country or "").strip()
+    fmt = (req.fmt or "docx").lower()
+    if not report or not product:
+        raise HTTPException(status_code=400, detail="报告内容和产品名不能为空")
+    if fmt not in ("docx", "pdf"):
+        raise HTTPException(status_code=400, detail="fmt 仅支持 docx 或 pdf")
+
+    buf = build_agent_report(report, product, country)
+    buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
+    filename = f"TradePilot-Agent-{product}-{country}-市场分析报告.{actual_fmt}"
+    media_type = "application/pdf" if actual_fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    headers = _download_headers(filename)
+    if fmt == "pdf" and actual_fmt == "docx":
+        headers["X-Export-Fallback"] = "docx"
+    return StreamingResponse(buf, media_type=media_type, headers=headers)
+
+
 @app.post("/api/leads/search")
 def search_leads(req: LeadsRequest):
     """客户线索检索：产品 + 目标市场 → 线索列表（Tavily 检索 + LLM 画像 + 防幻觉硬约束）"""
