@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 跨境市场分析</title>
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=18">
   <style>
     .btn-row { display: flex; gap: 0.8rem; }
     .btn-row .btn-primary { flex: 1; }
@@ -185,8 +185,9 @@
     </div>
   </header>
   <nav class="nav-line">
-    <a href="/" class="active">市场分析</a>
     <a href="/agent.html">AI Agent</a>
+    <a href="/" class="active">市场分析</a>
+    
     <a href="/trade.html">贸易数据</a>
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
@@ -201,27 +202,8 @@
   </header>
 
   <main>
-    <!-- AI Agent 一句话全流程（首页第一入口） -->
-    <section class="card agent-hero" style="margin-top:0;">
-      <h2 class="agent-title">🤖 AI Agent 一句话全流程</h2>
-      <p class="agent-sub">输入一句话，自动执行：意图解析 → 市场证据链 → AI 市场分析 → 结构化报告 → 客户线索 → 定制开发信。每步实时进度；某步失败自动跳过。</p>
-      <div class="agent-input-row">
-        <input type="text" id="agent-input" placeholder="例如：蓝牙耳机去德国卖" autocomplete="off" aria-label="任务描述">
-        <button type="button" id="agent-run" class="btn-primary">🚀 一句话全流程</button>
-      </div>
-      <div id="agent-progress" style="margin-top:1rem;font-size:.88rem;"></div>
-      <div id="agent-result" class="result-section" hidden>
-        <h3>📊 市场报告</h3>
-        <div id="agent-report"></div>
-        <h3>🔗 客户线索</h3>
-        <div id="agent-leads"></div>
-        <h3>✉️ 开发信</h3>
-        <pre id="agent-outreach"></pre>
-      </div>
-    </section>
-
     <!-- 市场分析（本页主体） -->
-    <section class="card">
+    <section class="card" style="margin-top:0;">
       <h2 class="sec-title">市场分析</h2>
       <form id="analyze-form" autocomplete="off">
         <div class="form-row">
@@ -277,45 +259,6 @@
         <ul id="history-list"></ul>
       </div>
       <p id="status" class="status" aria-live="polite"></p>
-    </section>
-
-    <!-- 业务模块：网格卡片（一级入口） -->
-    <section class="module-grid">
-      <a class="module-card mod-ai" href="/agent.html">
-        <span class="mod-ico">🤖</span>
-        <span class="mod-name">AI Agent 全流程</span>
-        <span class="mod-desc">一句话 → 报告+线索+开发信</span>
-      </a>
-      <a class="module-card mod-active" href="#analyze-form">
-        <span class="mod-ico">📊</span>
-        <span class="mod-name">市场分析</span>
-        <span class="mod-desc">产品+国家 → 结构化报告</span>
-      </a>
-      <a class="module-card" href="/trade.html">
-        <span class="mod-ico">📈</span>
-        <span class="mod-name">贸易数据</span>
-        <span class="mod-desc">HS 编码 → 出口数据+趋势</span>
-      </a>
-      <a class="module-card" href="/ecommerce.html">
-        <span class="mod-ico">🛒</span>
-        <span class="mod-name">跨境电商</span>
-        <span class="mod-desc">商品采集+评论分析+Listing</span>
-      </a>
-      <a class="module-card" href="/business.html">
-        <span class="mod-ico">✉️</span>
-        <span class="mod-name">外贸开发信</span>
-        <span class="mod-desc">开发信/跟进/模拟客户</span>
-      </a>
-      <a class="module-card" href="/leads.html">
-        <span class="mod-ico">🔗</span>
-        <span class="mod-name">客户线索</span>
-        <span class="mod-desc">检索线索+定向开发信</span>
-      </a>
-      <a class="module-card" href="/admin.html">
-        <span class="mod-ico">🛡️</span>
-        <span class="mod-name">管理面板</span>
-        <span class="mod-desc">拦截记录+Key 状态</span>
-      </a>
     </section>
 
     <!-- 双栏仪表盘：左 KPI + 趋势图，右证据链 -->
@@ -403,142 +346,6 @@
     }
   </script>
   <script src="app.js?v=23"></script>
-  <script>
-    // AI Agent 一句话全流程（SSE 流式进度，与 agent.html 同逻辑）
-    (function () {
-      const runBtn = document.getElementById('agent-run');
-      const inputEl = document.getElementById('agent-input');
-      const prog = document.getElementById('agent-progress');
-      const resultBox = document.getElementById('agent-result');
-      if (!runBtn) return;
-
-      function esc(s) { return String(s == null ? '' : s); }
-
-      // 线索来源 URL 安全校验：仅 http/https（防 javascript: 协议）
-      function safeUrl(u) {
-        try {
-          const p = new URL(String(u || ''));
-          return (p.protocol === 'http:' || p.protocol === 'https:') ? p.href : '#';
-        } catch (_) { return '#'; }
-      }
-
-      runBtn.addEventListener('click', async () => {
-        const input = inputEl.value.trim();
-        if (!input) { prog.textContent = '请输入任务，如「蓝牙耳机去德国卖」'; return; }
-        prog.innerHTML = '';
-        resultBox.hidden = true;
-        runBtn.disabled = true;
-        // 5 分钟超时（Agent 全流程含证据链+LLM+搜索，正常 2-4 分钟）
-        const ctrl = new AbortController();
-        const timer = setTimeout(function () { ctrl.abort(); }, 300000);
-        try {
-          const resp = await fetch('/api/agent/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input: input }),
-            signal: ctrl.signal,
-          });
-          // 启动失败时透出后端 detail（如限流 429 的中文提示），不再只显示状态码
-          if (!resp.ok || !resp.body) {
-            let detail = '';
-            try { detail = (await resp.json()).detail || ''; } catch (_) {}
-            prog.textContent = '启动失败（HTTP ' + resp.status + '）' + (detail ? '：' + detail : '');
-            return;
-          }
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = '';
-
-          // 单条 SSE 事件解析（progress/result/error），供循环与收尾复用
-          function handleEvent(ev) {
-            if (ev.type === 'progress') {
-              const key = 'agent-step-' + ev.step;
-              let el = document.getElementById(key);
-              if (!el) {
-                el = document.createElement('div');
-                el.id = key;
-                el.className = 'step-line';
-                prog.appendChild(el);
-              }
-              const icon = ev.status === 'done' ? '✅' : (ev.status === 'skipped' ? '⚠️' : '⏳');
-              el.textContent = icon + ' 步骤 ' + (ev.step + 1) + '/' + ev.total + '：' + ev.title +
-                (ev.detail ? ' — ' + ev.detail : '');
-            } else if (ev.type === 'result') {
-              const sum = document.createElement('div');
-              sum.className = 'summary-line';
-              sum.textContent = ev.summary || '';
-              prog.appendChild(sum);
-              if (ev.report) {
-                document.getElementById('agent-report').innerHTML =
-                  DOMPurify.sanitize(marked.parse(ev.report));
-              }
-              const leadsEl = document.getElementById('agent-leads');
-              leadsEl.innerHTML = '';
-              (ev.leads || []).forEach(function (ld) {
-                const d = document.createElement('div');
-                d.className = 'lead-line';
-                const strong = document.createElement('strong');
-                strong.textContent = esc(ld.company);
-                const span = document.createElement('span');
-                span.textContent = '（' + esc(ld.business_scope) + '）';
-                const a = document.createElement('a');
-                a.href = safeUrl(ld.source_url);
-                a.target = '_blank';
-                a.rel = 'noopener';
-                a.textContent = '来源';
-                d.appendChild(strong);
-                d.appendChild(span);
-                d.appendChild(document.createTextNode(' '));
-                d.appendChild(a);
-                leadsEl.appendChild(d);
-              });
-              const o = ev.outreach;
-              document.getElementById('agent-outreach').textContent = o ?
-                (esc(o.subject) + '\n\n' + esc(o.greeting) + '\n' + esc(o.body) + '\n' + esc(o.closing) + '\n' + esc(o.signature)) : '（无线索或未生成）';
-              resultBox.hidden = false;
-            } else if (ev.type === 'error') {
-              const err = document.createElement('div');
-              err.style.color = 'var(--error)';
-              err.textContent = '出错：' + esc(ev.detail);
-              prog.appendChild(err);
-            }
-          }
-
-          function parseSseChunk(chunk) {
-            const parts = chunk.split('\n\n');
-            for (const part of parts) {
-              const line = part.split('\n').find(l => l.indexOf('data: ') === 0);
-              if (!line) continue;
-              let ev;
-              try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
-              handleEvent(ev);
-            }
-          }
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              // 流结束：flush 解码器残留（防中途断连时尾部事件静默丢失）
-              parseSseChunk(buf + decoder.decode());
-              break;
-            }
-            buf += decoder.decode(value, { stream: true });
-            const idx = buf.lastIndexOf('\n\n');
-            if (idx === -1) continue;
-            parseSseChunk(buf.slice(0, idx));
-            buf = buf.slice(idx + 2);
-          }
-        } catch (e) {
-          clearTimeout(timer);
-          prog.textContent = e.name === 'AbortError' ? '任务超时（5 分钟），请重试' : ('网络错误：' + e.message);
-        } finally {
-          clearTimeout(timer);
-          runBtn.disabled = false;
-        }
-      });
-      // 回车触发
-      inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runBtn.click(); });
-    })();
   </script>
   <script src="theme.js?v=15"></script>
   <script src="settings.js?v=19"></script>
