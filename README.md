@@ -1,10 +1,10 @@
 # TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 **AI 市场分析与业务辅助平台**。覆盖四个业务模块：**市场分析**（产品+国家 → 结构化市场报告 + 多国横向对比 + 历史记录）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标 + 驱动因素分析）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（商品采集 / 评论分析 / 竞品对比 / 平台 Listing / 财报画像 / eBay + 速卖通商品分析）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**（v1.0 正式版）。核心能力：**🤖 AI Agent 一句话全流程**（"蓝牙耳机去德国卖" → 自动完成 市场分析 → 报告 → 客户线索 → 定制开发信，SSE 实时进度）；另有五个业务模块：**市场分析**（产品+国家 → 结构化市场报告 + 多国横向对比 + 历史记录）、**贸易数据**（HS 编码 → 出口数据 + 趋势图 + AI 解读 + 竞争力指标）、**外贸业务**（英文开发信 / 跟进邮件 / 产品介绍 / AI 模拟客户）、**跨境电商**（商品采集 / 评论分析 / 竞品对比 / Listing / 财报画像 / eBay + 速卖通商品分析）、**客户线索**（Tavily 检索 + 防幻觉硬约束 + 定向开发信），以及**管理面板**（安全拦截记录 / 服务器 Key 状态）。
 
-**技术栈**：Python · FastAPI · SQLite · 原生 HTML/JS · ECharts · matplotlib（报告图表）· 多 AI 提供商（DeepSeek 默认 / GPT / Claude / 自定义）· UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API
+**技术栈**：Python · FastAPI · SQLite（WAL）· 原生 HTML/JS · ECharts · matplotlib（报告图表）· 多 AI 提供商（DeepSeek 默认 / GPT / Claude / 自定义）· UN Comtrade API · World Bank API · Tavily API · eBay Browse API · AliExpress 联盟开放平台 API · SSE 流式推送 · pytest / GitHub Actions CI · Docker
 
-**报告导出**：Word（学术论文式：封面/目录/字体分级/页码/表格防切分）+ PDF，两种格式均可下载。
+**报告导出**：Word（学术论文式：封面/目录/字体分级/页码/表格防切分）+ PDF（Word COM / LibreOffice 双引擎），市场分析、贸易数据、Agent 报告均可下载。
 
 > ⚠️ **数据声明**：市场分析基于**多重数据证据链**（UN Comtrade 贸易数据 / World Bank 经济环境 / Tavily 行业动态 / WTO 宏观背景 / TC 竞争力指数），AI 引用并解读这些数据；统计指标（CAGR/峰值/竞争力）由程序精确计算，AI 不参与算数；数据不足处 AI 估算并标注"估算"；评论分析基于用户提供的评论样本。
 
@@ -14,7 +14,7 @@
 
 1. **配置 API Key**
 
-   复制 `.env.example` 为 `.env`，填入 AI Key（[DeepSeek 获取地址](https://platform.deepseek.com/api_keys)，也可在页面右上角 ⚙️ 设置面板切换 GPT/Claude/自定义提供商并填对应 Key）。其余密钥可选：Tavily（行业动态/宏观背景/竞争格局）、eBay 与速卖通联盟（商品分析增强）：
+   复制 `.env.example` 为 `.env`，填入 AI Key（[DeepSeek 获取地址](https://platform.deepseek.com/api_keys)，也可在页面右上角 ⚙️ 设置面板切换 GPT/Claude/自定义提供商并填对应 Key）。其余密钥可选：Tavily（行业动态/宏观背景/竞争格局/客户线索）、eBay 与速卖通联盟（商品分析增强）。建议同时设置 `ADMIN_PASSWORD`（保护"保存设置"接口；不设则每次启动生成随机密码并打印到日志）：
 
    ```bash
    copy .env.example .env
@@ -35,7 +35,7 @@
    python -m uvicorn main:app --reload
    ```
 
-   浏览器打开 <http://127.0.0.1:8000> → 输入产品（如"蓝牙耳机"）和目标国家（如"德国"）→ 点击"开始分析"，10-30 秒后生成报告。
+   浏览器打开 <http://127.0.0.1:8000> → 输入产品（如"蓝牙耳机"）和目标国家（如"德国"）→ 点击"开始分析"，10-30 秒后生成报告；或打开导航 **AI Agent** 页，输入一句话（如"蓝牙耳机去德国卖"）体验全流程。
 
 ---
 
@@ -139,7 +139,19 @@
 
 **请求示例：** `{ "input": "蓝牙耳机去德国卖" }`
 
-**响应（200，text/event-stream）**：逐步推送 6 步进度事件（意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信），每步失败跳过继续，最后 `result` 事件含 `{report, leads, outreach, summary}`。
+**响应（200，text/event-stream）**：逐步推送 6 步进度事件（意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信），每步失败跳过继续，最后 `result` 事件含 `{report, leads, outreach, summary}`。客户端断开自动停止流水线（不再烧 token）。
+
+### `POST /api/agent/export`（Agent 报告下载，v1.0）
+
+Agent 生成的 Markdown 报告 → 学术式 Word/PDF 下载（复用正式报告排版体系）。
+
+**请求示例：**
+
+```json
+{ "report": "# 蓝牙耳机市场分析（德国）…", "product": "蓝牙耳机", "country": "德国", "fmt": "docx" }
+```
+
+**响应**：文件下载流；`fmt=pdf` 且本机无 Word/LibreOffice 时自动降级 docx 并带 `X-Export-Fallback: docx` 响应头。
 
 ### 管理员（v1.0）
 
@@ -177,8 +189,9 @@
 │   └── samples/              # 18 品类真实评论样本库（McAuley 公开数据集）
 ├── scripts/         # 工具脚本（样本构建/清洗/测试脚本，不打包发行版）
 ├── tests/           # pytest 单元测试（统计指标/安全校验/缓存/LLM/导出，无网络）
-├── static/          # 前端（六页面 + 主题切换 + 书签工具）
-│   ├── index.html       # 市场分析 + AI Agent 一句话全流程（首页）
+├── static/          # 前端（七页面 + 主题切换 + 书签工具）
+│   ├── index.html       # 市场分析（首页，含多国对比）
+│   ├── agent.html       # AI Agent 一句话全流程（SSE 进度 + 报告下载）
 │   ├── trade.html       # 贸易数据
 │   ├── business.html    # 开发信
 │   ├── ecommerce.html   # 跨境电商
@@ -189,6 +202,9 @@
 │   ├── theme.js         # 双主题切换（☀️/🌙）
 │   ├── settings.js      # 设置面板（API Key / AI 提供商 / 管理员登录）
 │   └── style.css        # 设计系统（亮色/暗色）
+├── .github/workflows/ci.yml  # GitHub Actions：lint + 双 OS 测试 + PyInstaller 构建
+├── Dockerfile         # 服务器镜像（含 LibreOffice + Noto CJK 字体，Linux PDF 导出）
+├── docker-compose.yml # 一键部署（env_file + 数据卷）
 ├── requirements.txt   # 运行时依赖（锁版本）
 ├── requirements-dev.txt  # 测试/构建工具（pytest/ruff/pyinstaller）
 ├── requirements-win.txt # Windows 专属（pywin32/pywebview）
@@ -214,7 +230,13 @@
 | ✅ 已完成 | 报告升级 | Word/PDF 双格式：学术论文式排版 + 图表分析（饼图/柱状/折线）+ 驱动因素（CPI 趋势）+ 龙头财报画像 |
 | ✅ 已完成 | 历史记录 | 两页"历史"按钮：最近 10 条查询回看 + 同参数命中缓存（7 天 TTL，省 token） |
 | ✅ 已完成 | 设置与桌面版 | 页面设置面板（AI 提供商/搜索源/Key 即时生效）+ PyWebView 桌面版入口 |
-| 远期 | AI Agent | 一句话 → 自动完成 查市场→查竞品→生成报告→生成开发信 全流程 |
+| ✅ v1.0 | AI Agent 一句话全流程 | 独立页面 + SSE 流式进度：意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信；报告可导出 Word/PDF；失败步骤自动跳过 |
+| ✅ v1.0 | 权限层与安全加固 | 管理员账户（设置保护）+ 匿名限流 + 访问日志/管理面板 + CORS 收紧 + SSRF 防线 + 提示词注入防护 |
+| ✅ v1.0 | 客户线索模块 | Tavily 多组查询 + LLM 画像 + 防幻觉硬约束（无来源 URL 剔除）+ 定向开发信闭环 |
+| ✅ v1.0 | 性能与健壮性 | 缓存 TTL 体系（动态/空结果）+ LLM LRU + single-flight + SQLite WAL + 重试分流 + 证据链并行 |
+| ✅ v1.0 | 测试与 CI | 54 项 pytest（无网络）+ GitHub Actions（lint/双 OS 测试/打包） |
+| ✅ v1.0 | 部署 | Dockerfile（LibreOffice + CJK 字体）+ docker-compose + Linux PDF 导出 |
+| 远期 v1.1 | 结构重构 | export.py / main.py 拆分（routers/ + export/ 包）、前端 common.js 抽取、移动端适配、无障碍完善、exe 安装包 |
 
 **演进方式**：新模块以独立业务模块（market_data / ebay 等）扁平扩展，`main.py` 保持路由入口；AI 调用底座（`llm.py` / `prompts.py`）复用。
 
