@@ -4,9 +4,11 @@
 """
 import csv
 import datetime
+import functools
 import io
 import os
 import tempfile
+import threading
 import time
 
 import matplotlib
@@ -16,6 +18,22 @@ from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+
+# matplotlib pyplot 全局状态非线程安全：FastAPI 线程池并发导出可能错图/偶发异常
+# （回归修复）。所有绘图函数经 _plot_locked 串行化，且 finally 关闭全部 Figure 防泄漏。
+_PLOT_LOCK = threading.Lock()
+
+
+def _plot_locked(func):
+    """装饰器：串行化 matplotlib 绘图 + 异常安全关闭所有 Figure"""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _PLOT_LOCK:
+            try:
+                return func(*args, **kwargs)
+            finally:
+                plt.close("all")
+    return wrapper
 
 # 中文字体：运行时探测可用 CJK 字体（Linux/CI 无微软雅黑时回退，防图表豆腐块）
 def _pick_cjk_font() -> list:
@@ -301,6 +319,7 @@ def _add_toc_field(doc: Document, anchor: object = None) -> None:
             settings.append(upd)
 
 
+@_plot_locked
 def build_trend_chart(trend: dict) -> io.BytesIO:
     """生成趋势折线图 PNG（内存流），供 Word 报告嵌入"""
     years = list(trend.keys())
@@ -352,14 +371,26 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
     return "\n".join(lines) if lines else f"（{product} → {target} {year}，暂无摘要数据）"
 
 
+def _is_valid_pdf(path: str) -> bool:
+    """PDF 有效性校验：文件存在、非 0 字节、%PDF 魔数开头（防半成品文件）"""
+    try:
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            return False
+        with open(path, "rb") as f:
+            return f.read(4) == b"%PDF"
+    except OSError:
+        return False
+
+
 def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
     """报告收尾（共用）：写临时文件 → COM 更新域/修表格跨页 → 可选转 PDF → 返回
 
     返回 (buf, fmt)：fmt 为实际生成格式（'docx'/'pdf'），调用方按 fmt 定 media_type 和文件名。
     - docx: COM 更新 PAGEREF 页码、页脚 PAGE、表格防切分，补写拼写检查隐藏
-    - pdf: 在上一步基础上 Word 导出 PDF；转换失败降级返回 docx（fmt='docx'）
+    - pdf: 在上一步基础上 Word/LibreOffice 导出 PDF；转换失败/结果无效降级返回 docx
     - COM 全部失败：原样返回输入 buf（fmt 按请求，docx 域靠用户打开时更新）
     """
+    import logging
     import os
     import tempfile
     # mkstemp 原子创建唯一临时文件（时间戳在同毫秒并发时可能撞名覆盖）
@@ -374,15 +405,17 @@ def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
         if as_pdf:
             _convert_to_pdf(tmp_path)
             pdf_path = tmp_path.replace(".docx", ".pdf")
-            if os.path.exists(pdf_path):
+            if _is_valid_pdf(pdf_path):
                 read_path = pdf_path
                 fmt = "pdf"
-            # PDF 转换失败：降级返回 COM 处理后的 docx
+            else:
+                logging.warning("PDF 转换结果无效或缺失，降级返回 docx")
         with open(read_path, "rb") as f:
             return io.BytesIO(f.read()), fmt
     except Exception:
         # COM 全部失败：返回原始 docx（域靠用户打开时自动更新）；PDF 请求强制降级 docx，
         # 避免"docx 内容 + .pdf 后缀 + application/pdf"的损坏文件
+        logging.exception("报告收尾处理失败，返回原始 docx")
         return buf, "docx"
     finally:
         for p in (tmp_path, tmp_path.replace(".docx", ".pdf")):
@@ -393,13 +426,21 @@ def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
 
 
 def _convert_to_pdf(docx_path: str) -> None:
-    """Word COM: docx → pdf（同目录同名 .pdf），失败静默。串行化（Word 单实例）。"""
+    """docx → pdf（同目录同名 .pdf）。Word COM 优先，LibreOffice headless 回退
+    （Linux/Docker/无 Word 环境），两者都失败记日志（回归修复：此前完全静默且
+    Linux 下 PDF 永远降级 docx——LibreOffice 白装）。
+    """
+    import logging
+    import shutil
+    import subprocess
     import threading
+
     _word_lock = getattr(_convert_to_pdf, "_lock", None)
     if _word_lock is None:
         _word_lock = threading.Lock()
         _convert_to_pdf._lock = _word_lock
     with _word_lock:
+        # 路径 1：Word COM（Windows + 已装 Word）
         try:
             import win32com.client
             word = win32com.client.Dispatch("Word.Application")
@@ -411,8 +452,22 @@ def _convert_to_pdf(docx_path: str) -> None:
                 doc.Close()
             finally:
                 word.Quit()
-        except Exception:
-            pass
+            return
+        except Exception as e:
+            logging.warning("Word COM 转 PDF 失败（尝试 LibreOffice 回退）: %s", e)
+        # 路径 2：LibreOffice headless（跨平台后备）
+        try:
+            soffice = shutil.which("soffice") or shutil.which("libreoffice")
+            if soffice is None:
+                logging.warning("未找到 soffice/libreoffice，PDF 转换不可用（将降级 docx）")
+                return
+            out_dir = os.path.dirname(os.path.abspath(docx_path))
+            subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
+                timeout=120, capture_output=True,
+            )
+        except Exception as e:
+            logging.warning("LibreOffice 转 PDF 失败（将降级 docx）: %s", e)
 
 
 def build_word_report(product: str, target: str, year: str, hs_code: str,
@@ -421,7 +476,6 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                       landscape: dict | None = None,
                       market_ctx: dict | None = None,
                       matrix: list | None = None,
-                      top_exporters: list | None = None,
                       background: dict | None = None,
                       competitiveness: dict | None = None) -> io.BytesIO:
     """生成贸易数据 Word 报告（与市场分析同套规范：封面/目录/字体/页码/表格防切）
@@ -634,7 +688,9 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         falling = [m for m in matrix if (m.get("cagr_pct") or 0) < -2]
         leader = matrix[0] if matrix else {}
         if leader.get("country"):
-            _p(f"• {leader['country']}以 {leader.get('export_value', 0) / 1e8:.2f} 亿美元居首（占市场进口 {leader.get('market_share', 0)}%），"
+            # market_share 可为 None（目标市场无进口数据），防 "None%" 渲染（回归修复）
+            share_txt = f"{leader['market_share']}%" if leader.get("market_share") is not None else "暂无数据"
+            _p(f"• {leader['country']}以 {leader.get('export_value', 0) / 1e8:.2f} 亿美元居首（占市场进口 {share_txt}），"
                f"CAGR {(leader.get('cagr_pct') or 0):+.1f}%（{leader.get('verdict', '')}）。", indent=False)
         if rising:
             names = "、".join(m["country"] for m in rising[:3])
@@ -941,6 +997,7 @@ def build_market_report(product: str, country: str, ai: dict,
     from market_data import get_worldbank_series, COUNTRY_ISO3
     from trade import get_latest_year
     from docx.shared import RGBColor
+    import logging
 
     doc = Document()
     # 统一字体：正文宋体小四 + 标题黑体（学术论文规范）
@@ -1273,7 +1330,7 @@ def build_market_report(product: str, country: str, ai: dict,
         _p("结合龙头品牌的公开财报，判断其投入能力与市场策略（数据源：SEC 财报 / 东方财富 / 公开报道）：")
         financials_available = False
         # 进程内缓存：同公司 24h 内不重查（SEC 查询 ~15 秒/次，报告每次生成都调会拖慢）
-        # 阶段 4：补真 TTL（24h 时间戳过期，原实现注释写了 TTL 但代码没有）
+        # 阶段 4：24h TTL；回归修复：模块级锁 double-check（防并发同品牌重复慢查询）
         _fin_cache = getattr(build_market_report, "_fin_cache", None)
         if _fin_cache is None:
             _fin_cache = {}
@@ -1282,6 +1339,10 @@ def build_market_report(product: str, country: str, ai: dict,
         if _fin_ts is None:
             _fin_ts = {}
             build_market_report._fin_ts = _fin_ts
+        _fin_lock = getattr(build_market_report, "_fin_lock", None)
+        if _fin_lock is None:
+            _fin_lock = threading.Lock()
+            build_market_report._fin_lock = _fin_lock
         try:
             from financials import get_company_financials
             # 品牌 → 财务查询名映射（兼容中英文品牌名，覆盖常见消费电子龙头）
@@ -1291,19 +1352,24 @@ def build_market_report(product: str, country: str, ai: dict,
                         "Bose": "Bose", "Razer": "雷蛇", "Xiaomi": "小米"}
             for b in brands[:3]:
                 fname = brand_cn.get(b.get("name", ""), b.get("name", ""))
-                # 进程内缓存命中（24h 内不重查；超时重新拉取）
+                # 进程内缓存命中（24h 内不重查；超时重新拉取）。double-check：
+                # 锁内再查一次，并发同品牌只发起一次 SEC 慢查询
                 _now = time.time()
                 if fname in _fin_cache and _now - _fin_ts.get(fname, 0) < 86400:
                     fin = _fin_cache[fname]
                 else:
-                    try:
-                        fin = get_company_financials(fname)
-                        _fin_cache[fname] = fin
-                        _fin_ts[fname] = _now
-                    except Exception:
-                        _fin_cache[fname] = {}
-                        _fin_ts[fname] = _now
-                        continue
+                    with _fin_lock:
+                        if fname in _fin_cache and _now - _fin_ts.get(fname, 0) < 86400:
+                            fin = _fin_cache[fname]
+                        else:
+                            try:
+                                fin = get_company_financials(fname)
+                                _fin_cache[fname] = fin
+                                _fin_ts[fname] = time.time()
+                            except Exception:
+                                # 瞬时故障不写缓存（否则被掩盖 24h），本次跳过该品牌
+                                logging.warning("财务画像拉取失败（本次跳过）: %s", fname)
+                                continue
                 if not fin or not fin.get("available"):
                     continue
                 metrics = fin.get("metrics") or {}
@@ -1566,6 +1632,7 @@ def build_market_report(product: str, country: str, ai: dict,
     return buf
 
 
+@_plot_locked
 def _add_bar_chart(doc: Document, series: dict, title: str, unit: str, divisor: float = 1.0):
     """柱状图：多年数据 → matplotlib PNG → 嵌入 Word"""
     import matplotlib.pyplot as plt
@@ -1587,6 +1654,7 @@ def _add_bar_chart(doc: Document, series: dict, title: str, unit: str, divisor: 
     doc.add_picture(buf, width=Cm(14))
 
 
+@_plot_locked
 def _add_line_chart(doc: Document, series: dict, title: str, unit: str, divisor: float = 1.0):
     """折线图：多年数据 → matplotlib PNG → 嵌入 Word"""
     import matplotlib.pyplot as plt
@@ -1609,6 +1677,7 @@ def _add_line_chart(doc: Document, series: dict, title: str, unit: str, divisor:
     doc.add_picture(buf, width=Cm(14))
 
 
+@_plot_locked
 def _add_gauge_chart(doc: Document, tc: float, title: str):
     """竞争力仪表图：TC 指数 → 半圆仪表 PNG"""
     import numpy as np
@@ -1636,6 +1705,7 @@ def _add_gauge_chart(doc: Document, tc: float, title: str):
     doc.add_picture(buf, width=Cm(13))
 
 
+@_plot_locked
 def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
     """饼图：名称 + 数值 → 占比 PNG，嵌入 Word
 

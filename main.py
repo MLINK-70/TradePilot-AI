@@ -16,6 +16,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
+from starlette.concurrency import run_in_threadpool
+
 # 资源路径：打包(exe)用 _MEIPASS，开发用项目目录
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 
@@ -90,6 +92,10 @@ def _rate_allowed(ip: str) -> bool:
     hits = [t for t in _rate_hits.get(ip, []) if now - t < _RATE_WINDOW]
     hits.append(now)
     _rate_hits[ip] = hits
+    # 防无界增长：超过 1000 个 IP 时清空窗口内无请求的 key（回归修复）
+    if len(_rate_hits) > 1000:
+        for k in [k for k, v in _rate_hits.items() if not [t for t in v if now - t < _RATE_WINDOW]]:
+            _rate_hits.pop(k, None)
     return len(hits) <= _RATE_LIMIT
 
 
@@ -109,32 +115,18 @@ def _is_admin_request(request: Request) -> bool:
         return False
 
 
-@app.middleware("http")
-async def security_middleware(request: Request, call_next):
-    ip = _client_ip(request)
-    path = request.url.path
-    # Host 头校验（忽略端口，支持 127.0.0.1:8000 / localhost:8000 等形式）
-    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
-    if host and host not in _ALLOWED_HOSTS:
-        logging.warning("拒绝非法 Host: %s", request.headers.get("host"))
-        try:
-            from database import log_access
-            log_access(ip, path, "Host校验", "blocked")
-        except Exception:
-            logging.exception("access_log 写入失败（Host校验）")
-        return JSONResponse(status_code=400, content={"detail": "非法 Host"})
-    # 匿名限流（管理员会话豁免）
-    if path.startswith(_RATE_PREFIXES) and not _is_admin_request(request):
-        if not _rate_allowed(ip):
-            try:
-                from database import log_access
-                log_access(ip, path, "限流", "blocked")
-            except Exception:
-                logging.exception("access_log 写入失败（限流）")
-            return JSONResponse(status_code=429,
-                                content={"detail": f"请求过于频繁，请稍后再试（每小时 {_RATE_LIMIT} 次，管理员不限）"})
-    resp = await call_next(request)
-    # 安全响应头：CSP（内联脚本兼容期先放行 unsafe-inline）/ 防嗅探 / 禁止被嵌 frame
+def _extract_host(host_header: str) -> str:
+    """从 Host 头提取主机名（去端口；支持 IPv6 [::1]:8000——回归修复）"""
+    h = (host_header or "").strip().lower()
+    if not h:
+        return ""
+    if h.startswith("[") and "]" in h:  # IPv6 字面量
+        return h[1:h.index("]")]
+    return h.split(":")[0]
+
+
+def _apply_security_headers(resp) -> None:
+    """安全响应头：CSP（内联脚本兼容期先放行 unsafe-inline）/ 防嗅探 / 禁止被嵌 frame"""
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -144,6 +136,39 @@ async def security_middleware(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
     )
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    ip = _client_ip(request)
+    path = request.url.path
+    # Host 头校验（去端口，支持 IPv6）：缺失或不在白名单一律 400（回归修复：
+    # 此前 Host 缺失放行、IPv6 [::1] 被误拒；早返回的响应也带安全头）
+    host = _extract_host(request.headers.get("host"))
+    if not host or host not in _ALLOWED_HOSTS:
+        logging.warning("拒绝非法/缺失 Host: %r", request.headers.get("host"))
+        try:
+            from database import log_access
+            await run_in_threadpool(log_access, ip, path, "Host校验", "blocked")
+        except Exception:
+            logging.exception("access_log 写入失败（Host校验）")
+        resp = JSONResponse(status_code=400, content={"detail": "非法 Host"})
+        _apply_security_headers(resp)
+        return resp
+    # 匿名限流（管理员会话豁免）
+    if path.startswith(_RATE_PREFIXES) and not _is_admin_request(request):
+        if not _rate_allowed(ip):
+            try:
+                from database import log_access
+                await run_in_threadpool(log_access, ip, path, "限流", "blocked")
+            except Exception:
+                logging.exception("access_log 写入失败（限流）")
+            resp = JSONResponse(status_code=429,
+                                content={"detail": f"请求过于频繁，请稍后再试（每小时 {_RATE_LIMIT} 次，管理员不限）"})
+            _apply_security_headers(resp)
+            return resp
+    resp = await call_next(request)
+    _apply_security_headers(resp)
     return resp
 
 
@@ -238,8 +263,9 @@ def analyze(req: AnalyzeRequest, request: Request):
     try:
         # 聚合真实数据证据链（经济 + 贸易 + 竞争力 + 宏观背景）
         market_ctx, trade_evidence, competitiveness, background, landscape = _collect_evidence(product, country)
+        # refresh=1 时跳过 LLM 内存缓存（report_history 已在上面跳过）
         data = analyze_market(product, country, market_ctx, trade_evidence,
-                              competitiveness, background, landscape)
+                              competitiveness, background, landscape, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -377,11 +403,11 @@ def export_market_report(req: AnalyzeExportRequest):
     buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
     filename = f"TradePilot-{product}-{country}-市场分析报告.{actual_fmt}"
     media_type = "application/pdf" if actual_fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    return StreamingResponse(
-        buf,
-        media_type=media_type,
-        headers=_download_headers(filename),
-    )
+    headers = _download_headers(filename)
+    # PDF 降级为 docx 时显式提示（本机无 Word/LibreOffice 时发生），前端可据此提示用户
+    if fmt == "pdf" and actual_fmt == "docx":
+        headers["X-Export-Fallback"] = "docx"
+    return StreamingResponse(buf, media_type=media_type, headers=headers)
 
 
 class TradeExportRequest(BaseModel):
@@ -453,26 +479,25 @@ def export_report(req: TradeExportRequest):
     year_label = f"{years_actual[0]}-{years_actual[-1]}" if len(years_actual) > 1 else str(years_actual[0])
     # 出口大国对比矩阵（程序计算，供报告第四章）
     matrix = []
-    top_exporters = []
     try:
-        from trade import get_competitiveness_matrix, get_top_exporters
+        from trade import get_competitiveness_matrix
         matrix = get_competitiveness_matrix(req.product.strip(), req.target.strip(), years_actual, req.reporter)
-        top_exporters = get_top_exporters(req.product.strip(), str(years_actual[-1]))
     except Exception:
         logging.warning("导出增强数据采集失败（不阻断）: %s / %s", req.product, req.target)
+    # build_word_report 已不再需要 top_exporters 参数（矩阵内部已算，去掉冗余的 16 国轮询）
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis,
-                            landscape, market_ctx, matrix, top_exporters, background, competitiveness)
+                            landscape, market_ctx, matrix, background, competitiveness)
     # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF（失败降级 docx）
     from export import finalize_docx
     buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
     filename = f"TradePilot-{req.product.strip()}-{req.target.strip()}-{year_label}-报告.{actual_fmt}"
     media_type = "application/pdf" if actual_fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    return StreamingResponse(
-        buf,
-        media_type=media_type,
-        headers=_download_headers(filename),
-    )
+    headers = _download_headers(filename)
+    # PDF 降级为 docx 时显式提示
+    if fmt == "pdf" and actual_fmt == "docx":
+        headers["X-Export-Fallback"] = "docx"
+    return StreamingResponse(buf, media_type=media_type, headers=headers)
 
 
 @app.post("/api/trade/export/data")
@@ -1016,6 +1041,28 @@ class SettingsRequest(BaseModel):
     search_provider: str = ""
 
 
+# 登录失败限速（防暴力破解）：同 IP 5 次失败/10 分钟（回归修复）
+_LOGIN_FAIL: dict = {}
+_LOGIN_FAIL_WINDOW = 600
+_LOGIN_FAIL_MAX = 5
+
+
+def _login_failed_too_many(ip: str) -> bool:
+    now = time.time()
+    fails = [t for t in _LOGIN_FAIL.get(ip, []) if now - t < _LOGIN_FAIL_WINDOW]
+    _LOGIN_FAIL[ip] = fails
+    return len(fails) >= _LOGIN_FAIL_MAX
+
+
+def _record_login_fail(ip: str):
+    _LOGIN_FAIL.setdefault(ip, []).append(time.time())
+    # 防无界增长：超过 500 个 IP 时清理过期项
+    if len(_LOGIN_FAIL) > 500:
+        now = time.time()
+        for k in [k for k, v in _LOGIN_FAIL.items() if not [t for t in v if now - t < _LOGIN_FAIL_WINDOW]]:
+            _LOGIN_FAIL.pop(k, None)
+
+
 class LoginRequest(BaseModel):
     password: str
 
@@ -1045,8 +1092,11 @@ async def agent_run(req: AgentRequest):
 
     同步流水线跑在线程池（asyncio.to_thread），进度经 asyncio.Queue
     + call_soon_threadsafe 桥接推送（修订 #2 方案），不阻塞事件循环。
+    回归修复：客户端断开（CancelledError）时置停止标记让流水线提前退出，
+    不再继续烧 token；空闲超 15s 发 SSE 心跳注释（防中间代理断流）。
     """
     import asyncio
+    import threading
     from agent import run_agent_pipeline
     text = (req.input or "").strip()
     if not text:
@@ -1055,10 +1105,13 @@ async def agent_run(req: AgentRequest):
     async def gen():
         aq = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        stop_event = threading.Event()
 
         def worker():
             try:
-                for ev in run_agent_pipeline(text):
+                for ev in run_agent_pipeline(text, stop_event=stop_event):
+                    if stop_event.is_set():
+                        break  # 客户端已断开：提前终止，不继续跑后续步骤
                     loop.call_soon_threadsafe(aq.put_nowait, ev)
             except Exception as e:  # 流水线级异常：作为错误事件推送，不让 SSE 挂死
                 logging.exception("Agent 流水线异常")
@@ -1068,7 +1121,14 @@ async def agent_run(req: AgentRequest):
 
         loop.run_in_executor(None, worker)
         while True:
-            ev = await aq.get()
+            try:
+                ev = await asyncio.wait_for(aq.get(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"  # SSE 心跳（注释行），防长退避期断流
+                continue
+            except asyncio.CancelledError:
+                stop_event.set()  # 客户端断开：通知 worker 停止
+                raise
             if ev is None:
                 break
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
@@ -1088,6 +1148,9 @@ def search_leads(req: LeadsRequest):
         return find_leads(req.product, req.country)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # 回归修复：LLM/网络异常不再冒泡成裸 500
+        logging.exception("线索检索异常: %s / %s", req.product, req.country)
+        raise HTTPException(status_code=502, detail=f"线索检索失败：{e}")
 
 
 @app.post("/api/leads/outreach")
@@ -1120,14 +1183,19 @@ def admin_access_log(request: Request):
 def admin_login(req: LoginRequest, response: Response, request: Request):
     """管理员登录：校验 ADMIN_PASSWORD，成功发 httpOnly session cookie
 
-    密码比对用 secrets.compare_digest（防时序攻击）；登录成败都记 access_log。
+    密码比对用 secrets.compare_digest（防时序攻击）；登录成败都记 access_log；
+    失败限速：同 IP 5 次/10 分钟 → 429（回归修复：防暴力破解）。
     """
     from database import create_admin_session, log_access
     ip = _client_ip(request)
+    if _login_failed_too_many(ip):
+        log_access(ip, "/api/admin/login", "管理员登录", "blocked")
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请 10 分钟后再试")
     ok = secrets.compare_digest((req.password or "").encode("utf-8"),
                                 cfg.ADMIN_PASSWORD.encode("utf-8"))
     log_access(ip, "/api/admin/login", "管理员登录", "ok" if ok else "blocked")
     if not ok:
+        _record_login_fail(ip)
         raise HTTPException(status_code=401, detail="密码错误")
     token = secrets.token_urlsafe(32)
     expires = datetime.now() + timedelta(days=cfg.ADMIN_SESSION_TTL_DAYS)

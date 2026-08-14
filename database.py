@@ -14,6 +14,7 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 from datetime import datetime, timedelta
 
 # DB 路径锚定（6.6）：开发/服务模式用项目目录（绝对路径，不依赖 CWD）；
@@ -24,6 +25,11 @@ if getattr(sys, "frozen", False):
     DB_PATH = os.path.join(_DATA_DIR, "tradepilot.db")
 else:
     DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tradepilot.db")
+
+# 写锁：多线程（阶段 4 并发化）下 SQLite 单写者，写操作排队防 "database is locked"
+_write_lock = threading.Lock()
+# DDL 锁：并发 init_db（8 指标并发首次拉取）时防止 DROP/建表竞态
+_init_lock = threading.Lock()
 
 
 def get_conn():
@@ -42,6 +48,12 @@ def enable_wal():
 
 
 def init_db():
+    # 并发 init_db（如 World Bank 8 指标并发首查）时串行化 DDL，防建表/DROP 竞态
+    with _init_lock:
+        _init_db_unlocked()
+
+
+def _init_db_unlocked():
     with contextlib.closing(get_conn()) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trade_cache (
@@ -154,26 +166,28 @@ def get_cached(cmd_code: str, partner_code: str, period: str, flow_code: str,
 def save_cache(cmd_code: str, partner_code: str, period: str, flow_code: str,
                data: list, reporter_code: str = "156", cache_key: str = ""):
     """写入缓存（存在则更新）；data 可为空列表（空结果也缓存，避免重复打 API）"""
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute(
-            """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
-               DO UPDATE SET data_json=excluded.data_json, fetched_at=excluded.fetched_at""",
-            (cmd_code, partner_code, period, flow_code, reporter_code, cache_key,
-             json.dumps(data, ensure_ascii=False), datetime.now().isoformat()),
-        )
-        conn.commit()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
+                   DO UPDATE SET data_json=excluded.data_json, fetched_at=excluded.fetched_at""",
+                (cmd_code, partner_code, period, flow_code, reporter_code, cache_key,
+                 json.dumps(data, ensure_ascii=False), datetime.now().isoformat()),
+            )
+            conn.commit()
 
 
 def log_query(product: str, hs_code: str, target: str):
     """记录查询历史（为第三版报告回看铺垫）"""
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute(
-            "INSERT INTO query_log (product, hs_code, country_or_group, created_at) VALUES (?, ?, ?, ?)",
-            (product, hs_code, target, datetime.now().isoformat()),
-        )
-        conn.commit()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                "INSERT INTO query_log (product, hs_code, country_or_group, created_at) VALUES (?, ?, ?, ?)",
+                (product, hs_code, target, datetime.now().isoformat()),
+            )
+            conn.commit()
 
 
 def _normalize(text: str) -> str:
@@ -190,21 +204,22 @@ def save_report_history(report_type: str, product: str, country: str,
     """
     init_db()
     product, country = _normalize(product), _normalize(country)
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute(
-            """INSERT INTO report_history (report_type, product, country, params, result_json, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(report_type, product, country, params)
-               DO UPDATE SET result_json=excluded.result_json, created_at=excluded.created_at""",
-            (report_type, product, country, params,
-             json.dumps(result, ensure_ascii=False), datetime.now().isoformat()),
-        )
-        row = conn.execute(
-            "SELECT id FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
-            (report_type, product, country, params),
-        ).fetchone()
-        conn.commit()
-        return row["id"] if row else 0
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                """INSERT INTO report_history (report_type, product, country, params, result_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(report_type, product, country, params)
+                   DO UPDATE SET result_json=excluded.result_json, created_at=excluded.created_at""",
+                (report_type, product, country, params,
+                 json.dumps(result, ensure_ascii=False), datetime.now().isoformat()),
+            )
+            row = conn.execute(
+                "SELECT id FROM report_history WHERE report_type=? AND product=? AND country=? AND params=?",
+                (report_type, product, country, params),
+            ).fetchone()
+            conn.commit()
+            return row["id"] if row else 0
 
 
 def get_report_history(report_type: str, product: str, country: str,
@@ -257,12 +272,13 @@ def list_report_history(report_type: str = "", limit: int = 50) -> list:
 def log_access(ip: str, path: str, action: str, result: str):
     """记录一条访问日志（拦截/放行），管理面板据此展示安全事件"""
     init_db()
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute(
-            "INSERT INTO access_log (ip, path, action, result, created_at) VALUES (?, ?, ?, ?, ?)",
-            (ip or "?", (path or "")[:200], action, result, datetime.now().isoformat()),
-        )
-        conn.commit()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                "INSERT INTO access_log (ip, path, action, result, created_at) VALUES (?, ?, ?, ?, ?)",
+                (ip or "?", (path or "")[:200], action, result, datetime.now().isoformat()),
+            )
+            conn.commit()
 
 
 def count_access(result: str = "blocked") -> int:
@@ -289,12 +305,13 @@ def list_access(limit: int = 50) -> list:
 def create_admin_session(token: str, expires_at: str):
     """创建管理员会话（登录成功时调用）"""
     init_db()
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO admin_sessions (token, expires_at, created_at) VALUES (?, ?, ?)",
-            (token, expires_at, datetime.now().isoformat()),
-        )
-        conn.commit()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO admin_sessions (token, expires_at, created_at) VALUES (?, ?, ?)",
+                (token, expires_at, datetime.now().isoformat()),
+            )
+            conn.commit()
 
 
 def check_admin_session(token: str) -> bool:
@@ -316,6 +333,7 @@ def check_admin_session(token: str) -> bool:
 def delete_admin_session(token: str):
     """注销管理员会话（登出时调用）"""
     init_db()
-    with contextlib.closing(get_conn()) as conn:
-        conn.execute("DELETE FROM admin_sessions WHERE token=?", (token,))
-        conn.commit()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute("DELETE FROM admin_sessions WHERE token=?", (token,))
+            conn.commit()

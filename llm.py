@@ -168,11 +168,15 @@ def _parse_json(content: str) -> dict:
 
     优先直接解析；失败则剥离 markdown 围栏（大小写都处理）再试；
     顶层必须是 dict（防止返回合法数组导致渲染端 500）。
+    content 为 None/空时抛明确错误（回归修复：API 返回 content:null 时
+    不再 TypeError 冒泡成 500）。
     """
+    if content is None or not str(content).strip():
+        raise ValueError("AI 返回内容为空，请重试")
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
-        stripped = content.strip()
+        stripped = str(content).strip()
         if stripped.startswith("```"):
             stripped = stripped.strip("`").strip()
             if stripped.lower().startswith("json"):
@@ -180,7 +184,7 @@ def _parse_json(content: str) -> dict:
         try:
             data = json.loads(stripped)
         except json.JSONDecodeError:
-            raise ValueError("DeepSeek 返回内容不是合法 JSON，请重试")
+            raise ValueError("AI 返回内容不是合法 JSON，请重试")
 
     if not isinstance(data, dict):
         raise ValueError("DeepSeek 返回结构异常（非 JSON 对象），请重试")
@@ -224,26 +228,32 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
                    trade_evidence: dict | None = None,
                    competitiveness: dict | None = None,
                    background: dict | None = None,
-                   landscape: dict | None = None) -> dict:
+                   landscape: dict | None = None,
+                   refresh: bool = False) -> dict:
     """
     调用 DeepSeek 生成市场分析，返回结构化 JSON 字典。
 
     失败时抛 ValueError，由 main.py 统一转成 502。
     手动缓存：相同 (产品, 国家) + 证据链签名直接命中，不重复消耗 API token。
+    返回前 deepcopy：调用方会往结果上挂 _news/_trade 等字段，防止污染缓存
+    （回归修复：此前返回缓存原对象，并发请求原地改 dict 可致迭代崩溃）。
+    refresh=True 时跳过缓存读写（?refresh=1 强制重新 AI 分析）。
     market_context: World Bank 市场环境数据（可选）
     trade_evidence: 真实贸易数据（UN Comtrade，可选）
     competitiveness: 竞争力指标 TC（可选）
     background: 全球宏观背景（WTO 展望，可选）
     landscape: 竞争格局（龙头品牌/份额，可选）
     """
+    import copy
     if not (cfg.RUNTIME_KEYS.get("AI_API_KEY") or cfg.RUNTIME_KEYS.get("DEEPSEEK_API_KEY")):
         raise ValueError("未配置 AI_API_KEY（或 DEEPSEEK_API_KEY），请检查 .env 文件")
 
     cache_key = _market_cache_key(product, country, market_context, trade_evidence,
                                   competitiveness, background, landscape)
-    cached = _market_cache.get(cache_key)
-    if cached is not None:
-        return cached
+    if not refresh:
+        cached = _market_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
 
     user_prompt = build_user_prompt(product, country)
     evidence_lines = []
@@ -318,13 +328,15 @@ def analyze_market(product: str, country: str, market_context: dict | None = Non
     ]
     # single-flight：同 key 并发只调一次 AI（其余线程等待后直接命中缓存）
     with _lock_for(cache_key):
-        cached = _market_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        if not refresh:
+            cached = _market_cache.get(cache_key)
+            if cached is not None:
+                return copy.deepcopy(cached)
         content = _chat(messages, use_json=True)
         result = _parse_json(content)
-        _market_cache.set(cache_key, result)  # 缓存结果（首次含市场环境，后续同参数复用）
-    return result
+        if not refresh:
+            _market_cache.set(cache_key, result)  # 缓存结果（首次含市场环境，后续同参数复用）
+    return copy.deepcopy(result)
 
 
 TRADE_TREND_SYSTEM = """你是资深国际贸易分析师兼出海品牌策略顾问。根据提供的**已核实统计指标**（程序精确计算，来自 UN Comtrade 数据）和**竞争格局**（龙头品牌/份额/变动原因/产业链），输出一份有洞察的市场解读和**可落地的入局策略**。
@@ -414,8 +426,9 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
     # 缓存 key 含提示词版本签名：TRADE_TREND_SYSTEM 变更时旧缓存自动失效
     PROMPT_VER = "v2-entry-strategy"  # 提示词结构版本（改提示词需递增）
     cache_key = (product, target, reporter, tuple(trend.keys()), PROMPT_VER)
-    if cache_key in _trade_trend_cache:
-        return _trade_trend_cache[cache_key]
+    cached = _trade_trend_cache.get(cache_key)  # _LRUCache（阶段 4 迁移漏网点，回归修复）
+    if cached is not None:
+        return cached
 
     data_lines = "\n".join(
         f"{y}: {v['value']:,.0f} 美元 / {v['weight']:,.0f} 公斤" for y, v in trend.items()

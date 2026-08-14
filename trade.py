@@ -93,10 +93,16 @@ GROUP_MEMBERS = {
 }
 
 
+# 最新年份探测锁（single-flight）：30 天 TTL 到期后并发请求同时探测会
+# 各自发起 6 次串行 UN 请求（回归修复：compare 5 国并发 → 30 次请求风暴）
+_latest_year_lock = threading.Lock()
+
+
 def get_latest_year() -> int:
     """探测 UN Comtrade 最新可用年份（从今年往前找第一个有数据的年份）
 
     探测结果写入缓存表（reporter_code='META'），避免每次查询都探测。
+    30 天 TTL + single-flight：并发调用共享一次探测。
     """
     import datetime
     from database import get_cached, init_db, save_cache
@@ -109,33 +115,38 @@ def get_latest_year() -> int:
     if cached:
         return int(cached[0]["year"])
 
-    this_year = datetime.date.today().year
-    # 探测范围 6 年（数据更新滞后时也能找到最新可用年份）
-    for y in range(this_year, this_year - 6, -1):
-        try:
-            params = {
-                "reporterCode": "156",
-                "period": str(y),
-                "partnerCode": "0",
-                "cmdCode": "8518",
-                "flowCode": "X",
-                "maxRecords": 1,
-            }
-            resp = requests.get(
-                BASE_URL, params=params,
-                headers={"Accept": "application/json"},
-                timeout=30,
-                proxies={"http": None, "https": None},
-            )
-            if resp.status_code == 200 and resp.json().get("count", 0) > 0:
-                save_cache(meta_key, "0", "0", "X", [{"year": y}], "META")
-                logging.info("最新可用年份探测: %d", y)
-                return y
-        except Exception:
-            continue
-        time.sleep(1)
-    logging.warning("最新年份探测失败，回退 %d", this_year - 6)
-    return this_year - 6  # 动态兜底：探测范围的最后一年（不再是写死的 2024）
+    # single-flight：探测期间其他线程等待后直接读缓存
+    with _latest_year_lock:
+        cached = get_cached(meta_key, "0", "0", "X", "META", ttl_days=30)
+        if cached:
+            return int(cached[0]["year"])
+        this_year = datetime.date.today().year
+        # 探测范围 6 年（数据更新滞后时也能找到最新可用年份）
+        for y in range(this_year, this_year - 6, -1):
+            try:
+                params = {
+                    "reporterCode": "156",
+                    "period": str(y),
+                    "partnerCode": "0",
+                    "cmdCode": "8518",
+                    "flowCode": "X",
+                    "maxRecords": 1,
+                }
+                resp = requests.get(
+                    BASE_URL, params=params,
+                    headers={"Accept": "application/json"},
+                    timeout=30,
+                    proxies={"http": None, "https": None},
+                )
+                if resp.status_code == 200 and resp.json().get("count", 0) > 0:
+                    save_cache(meta_key, "0", "0", "X", [{"year": y}], "META")
+                    logging.info("最新可用年份探测: %d", y)
+                    return y
+            except Exception:
+                continue
+            time.sleep(1)
+        logging.warning("最新年份探测失败，回退 %d", this_year - 6)
+        return this_year - 6  # 动态兜底：探测范围的最后一年（不再是写死的 2024）
 
 
 # AI 辅助 HS 编码解析缓存（产品名 → 编码，避免重复调用）
@@ -155,7 +166,7 @@ def get_hs_candidates(product: str, top_n: int = 3) -> list:
     try:
         from database import get_cached
         cached = get_cached("HSCAND", "0", "0", "X", "0", cache_key=product)
-        if cached and isinstance(cached, list) and cached:
+        if cached is not None and isinstance(cached, list) and cached:
             return cached[:top_n]
     except Exception:
         pass
@@ -414,6 +425,63 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
     return all_rows
 
 
+def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> list:
+    """组织成员从全球的进口总额（市场进口份额的分母，回归修复 #2）
+
+    逐成员查 reporter=成员、partner=0、flow=M 并求和（与 fetch_group 同并发/缓存骨架，
+    但 reporter 是每个成员而非固定出口国，语义不同不能复用）。
+    """
+    cached = get_cached(cmd_code, group_code, period, "MW", "0",
+                        ttl_days=_ttl_for_period(period))
+    if cached is not None:
+        return cached
+
+    members = GROUP_MEMBERS[group_code]
+    todo = []
+    for country in members:
+        code = AREA_MAP.get(country, "")
+        if not code:
+            continue
+        # 成员已缓存（该成员从全球的进口）则不重复请求
+        if get_cached(cmd_code, "0", period, "M", code,
+                      ttl_days=_ttl_for_period(period)) is not None:
+            continue
+        todo.append((country, code))
+
+    results = {}
+    failed = []
+    lock = threading.Lock()
+
+    def _fetch_one(item):
+        country, code = item
+        try:
+            rows = fetch_year(cmd_code, "0", period, reporter=country, flow="M")
+            with lock:
+                results[country] = rows
+        except ValueError as e:
+            with lock:
+                failed.append(f"{country}: {e}")
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(_fetch_one, todo))
+
+    all_rows = []
+    for country in members:  # 按成员顺序稳定输出
+        code = AREA_MAP.get(country, "")
+        if country in results:
+            all_rows.extend(results[country])
+        elif code:
+            cached_rows = get_cached(cmd_code, "0", period, "M", code,
+                                     ttl_days=_ttl_for_period(period))
+            if cached_rows is not None:
+                all_rows.extend(cached_rows)
+
+    if all_rows and not failed:
+        save_cache(cmd_code, group_code, period, "MW", all_rows, "0")
+    return all_rows
+
+
 def query_trade(product: str, target: str, year: str, reporter: str = "中国"):
     """主入口：产品 + 国家/组织 + 年份 + 出口国 → 数据列表"""
     init_db()
@@ -586,16 +654,22 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             return {}
 
         # TC：出口 + 进口（出口国对该市场）
-        exp_rows = fetch_year(hs, target_code, year, reporter, flow="X")
-        imp_rows = fetch_year(hs, target_code, year, reporter, flow="M")
+        # 组织目标（欧盟等）：组代码作 partner preview 接口不返回数据，出口/进口
+        # 两条腿都走成员聚合（回归修复：此前仅份额分母聚合，TC 腿仍是空结果）
+        if target_code in GROUP_MEMBERS:
+            exp_rows = fetch_group(hs, year, target_code, reporter, flow="X")
+            imp_rows = fetch_group(hs, year, target_code, reporter, flow="M")
+        else:
+            exp_rows = fetch_year(hs, target_code, year, reporter, flow="X")
+            imp_rows = fetch_year(hs, target_code, year, reporter, flow="M")
         export_value = sum(r.get("primaryValue") or 0 for r in exp_rows)
         import_value = sum(r.get("primaryValue") or 0 for r in imp_rows)
         tc = compute_tc(export_value, import_value)
 
         # 市场出口份额：目标市场该产品总进口（flow=M, partner=0 全球）
-        # 组织目标（欧盟等）：preview 接口对组代码不返回数据，走成员聚合（B 类审查 #4）
+        # 组织目标：逐成员查"成员从全球进口"并求和（partner=0，非出口国对成员进口）
         if target_code in GROUP_MEMBERS:
-            market_import_rows = fetch_group(hs, year, target_code, reporter, flow="M")
+            market_import_rows = fetch_group_world_imports(hs, year, target_code)
         else:
             market_import_rows = fetch_year(hs, "0", year, target, flow="M")
         market_import_value = sum(r.get("primaryValue") or 0 for r in market_import_rows)
@@ -637,7 +711,7 @@ def get_competitor_comparison(product: str, target: str, year: str,
         try:
             from database import get_cached
             cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
-            if cached and isinstance(cached, list):
+            if cached is not None and isinstance(cached, list):
                 return {"competitors": cached, "available": True}
         except Exception:
             pass
@@ -684,7 +758,7 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
         try:
             from database import get_cached
             cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k)
-            if cached and isinstance(cached, list):
+            if cached is not None and isinstance(cached, list):
                 return cached
         except Exception:
             pass
@@ -764,7 +838,7 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         try:
             from database import get_cached
             cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="V1|rank")
-            if cached and isinstance(cached, list):
+            if cached is not None and isinstance(cached, list):
                 return cached[:top_n]
         except Exception:
             pass

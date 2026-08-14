@@ -54,25 +54,10 @@ def get_worldbank(iso3: str, indicator: str, year: int = 0) -> float | None:
     init_db()
     # 缓存 key 含年份（year=0 取最新用 "latest" 占位）：不同年份查询不再串缓存（B 类审查 #2）
     cache_key = f"WB:{iso3}:{indicator}:{year if year else 'latest'}"
-    cached = get_cached(cache_key, "0", "0", "X", "META")
+    # TTL 直接交给 get_cached（90 天），删掉手工 fetched_at 查询与手开连接（回归修复）
+    cached = get_cached(cache_key, "0", "0", "X", "META", ttl_days=90)
     if cached:
-        # TTL 检查：缓存超 90 天视为过期
-        try:
-            from datetime import datetime, timedelta
-            from database import get_conn
-            conn = get_conn()
-            row = conn.execute(
-                "SELECT fetched_at FROM trade_cache WHERE cache_key=? AND reporter_code='META'",
-                (cache_key,),
-            ).fetchone()
-            conn.close()
-            if row:
-                fetched = datetime.fromisoformat(row["fetched_at"])
-                if datetime.now() - fetched < timedelta(days=90):
-                    return cached[0].get("value")
-        except (ValueError, TypeError, Exception):
-            pass
-        # 过期：继续往下重新拉取
+        return cached[0].get("value")
 
     url = f"{WB_BASE}/{iso3}/indicator/{INDICATORS[indicator]}"
     params = {"format": "json", "per_page": 1}

@@ -26,10 +26,10 @@
   --sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
 
   /* 布局 */
-  --radius: 6px;            /* 方角：单据/航海的硬朗感 */
-  --radius-sm: 4px;
-  --max-w: 880px;
-  --line-w: 1.5px;
+  --radius: 10px;           /* 圆角：现代产品感 */
+  --radius-sm: 6px;
+  --max-w: 1120px;
+  --line-w: 1px;
 }
 
 /* ============ 夜间模式（跟随系统） ============ */
@@ -92,11 +92,11 @@ body {
 /* ============ 顶部品牌栏 ============ */
 
 .brandbar {
-  max-width: 1060px;
+  max-width: var(--max-w);
   margin: 0 auto;
-  padding: 1.2rem 0.4rem 0.6rem;
+  padding: 1.4rem 0.4rem 0.8rem;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.4rem;
@@ -142,13 +142,14 @@ body {
 /* ============ 导航（双线 + 下划线态） ============ */
 
 .nav-line {
-  max-width: 1060px;
+  max-width: var(--max-w);
   margin: 0 auto;
-  border-top: 2px solid var(--navy-deep);
-  padding: 0 0.4rem;
+  border-top: 1px solid var(--border);
+  padding: 0.3rem 0.4rem 0;
   display: flex;
-  gap: 1.6rem;
+  gap: 1.4rem;
   flex-wrap: wrap;
+  justify-content: center;
 }
 .nav-line a {
   padding: 0.62rem 0 0.7rem;
@@ -169,7 +170,7 @@ body {
 
 /* ============ Hero ============ */
 
-.hero { text-align: center; margin: 2rem auto 1.8rem; max-width: 1060px; padding: 0 0.4rem; }
+.hero { text-align: center; margin: 2.2rem auto 2rem; max-width: var(--max-w); padding: 0 0.4rem; }
 
 .eyebrow {
   display: inline-block;
@@ -182,13 +183,13 @@ body {
 
 .hero h1 {
   font-family: var(--serif);
-  font-size: 2.5rem;
+  font-size: 2.6rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   color: var(--navy-deep);
 }
 
-.hero .subtitle { color: var(--muted); margin-top: 0.5rem; font-size: 0.95rem; }
+.hero .subtitle { color: var(--muted); margin-top: 0.6rem; font-size: 1rem; }
 
 /* 航线刻度：签名装饰线（hero 底部） */
 .route-line {
@@ -219,34 +220,76 @@ main { max-width: var(--max-w); margin: 0 auto; }
 
 .card {
   background: var(--card);
-  border: var(--line-w) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.6rem 1.8rem;
-  box-shadow: 0 14px 40px rgba(10, 42, 68, 0.06);
+  box-shadow: 0 10px 30px rgba(10, 42, 68, 0.05);
+  margin-bottom: 1.5rem;
 }
 
-/* ============ 表单（下划线式） ============ */
+/* ============ 业务模块网格（首页一级入口） ============ */
 
-.form-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.15rem; }
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.module-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-decoration: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.2rem 1rem;
+  color: var(--text);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.module-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(10, 42, 68, 0.1);
+  border-color: var(--accent);
+}
+.mod-ico { font-size: 1.7rem; line-height: 1; }
+.mod-name { font-weight: 700; font-size: 0.98rem; color: var(--navy-deep); }
+.mod-desc { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+.mod-active { border-color: var(--accent); }
+.mod-ai { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-soft), var(--card) 55%); }
+
+/* 区块标题（卡片内） */
+.sec-title {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--navy-deep);
+  margin-bottom: 1rem;
+  letter-spacing: 0.03em;
+}
+
+/* ============ 表单（独立输入框式） ============ */
+
+.form-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.1rem; }
 .form-row label {
-  flex: 0 0 4.8rem;
+  flex: 0 0 5.2rem;
   color: var(--muted);
-  font-size: 0.82rem;
-  letter-spacing: 0.14em;
+  font-size: 0.86rem;
+  letter-spacing: 0.12em;
+  font-weight: 600;
 }
 .form-row input,
 .form-row textarea,
 .form-row select {
   flex: 1;
-  padding: 0.55rem 0.1rem;
-  border: none;
-  border-bottom: 1.5px solid var(--border);
-  border-radius: 0;
-  background: transparent;
+  padding: 0.62rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
   color: var(--text);
   font-size: 0.98rem;
   font-family: inherit;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .form-row textarea { min-height: 4.2em; resize: vertical; }
 .form-row input::placeholder { color: #b3aa93; }
@@ -254,7 +297,8 @@ main { max-width: var(--max-w); margin: 0 auto; }
 .form-row textarea:focus,
 .form-row select:focus {
   outline: none;
-  border-bottom-color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .form-row select { cursor: pointer; }
 
@@ -265,8 +309,7 @@ main { max-width: var(--max-w); margin: 0 auto; }
 /* ============ 按钮 ============ */
 
 button {
-  width: 100%;
-  padding: 0.72rem;
+  padding: 0.72rem 1.4rem;
   border: none;
   border-radius: var(--radius-sm);
   background: var(--navy-deep);
@@ -284,11 +327,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 button.loading { animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: 0.5; } }
 
-.btn-row { display: flex; gap: 0.8rem; }
+.btn-row { display: flex; gap: 0.8rem; margin-top: 0.4rem; }
 .btn-row .btn-primary { flex: 1; }
 .btn-row .btn-secondary {
   flex: 1;
-  padding: 0.72rem;
+  padding: 0.72rem 1rem;
   border: 1px solid var(--navy);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -351,7 +394,7 @@ button.loading { animation: pulse 1.2s infinite; }
 .dash-left { display: flex; flex-direction: column; gap: 1rem; }
 .dash-right {
   background: var(--card);
-  border: var(--line-w) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.3rem 1.4rem;
 }
@@ -420,7 +463,7 @@ button.loading { animation: pulse 1.2s infinite; }
 
 .chart-ph-wrap {
   background: var(--card);
-  border: var(--line-w) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1rem 1.1rem;
 }
@@ -443,21 +486,21 @@ button.loading { animation: pulse 1.2s infinite; }
 .chart-box {
   margin-top: 1.2rem;
   background: var(--card);
-  border: var(--line-w) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.2rem 1.1rem;
 }
-#trend-chart { width: 100%; height: 340px; }
 .meta { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
 
 /* ============ 报告渲染（市场分析页） ============ */
 
 .report {
   margin-top: 1.4rem;
+  margin-bottom: 1.5rem;
   background: var(--card);
-  border: var(--line-w) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.6rem 2rem;
+  padding: 1.8rem 2.2rem;
 }
 .report h1 { font-family: var(--serif); font-size: 1.5rem; margin-bottom: 1rem; color: var(--navy-deep); }
 .report h2 {
@@ -493,7 +536,7 @@ footer {
   opacity: 0.9;
   border-top: 1px solid var(--border);
   padding-top: 1.2rem;
-  max-width: 1060px;
+  max-width: var(--max-w);
   margin-left: auto;
   margin-right: auto;
 }
@@ -509,5 +552,5 @@ footer {
   .btn-row { flex-direction: column; }
   .card { padding: 1.2rem; }
   .report { padding: 1.2rem; }
-  .nav-line { gap: 0.9rem; }
+  .nav-line { gap: 0.9rem; justify-content: flex-start; }
 }

@@ -34,6 +34,11 @@ INTENT_SYSTEM = """你是跨境贸易助手意图解析器。把用户的一句�
 - 只输出 JSON 对象"""
 
 
+def _s(v) -> str:
+    """None → ''（回归修复：str(None) 会生成字面量 'None' 通过非空校验）"""
+    return "" if v is None else str(v).strip()
+
+
 def parse_intent(user_input: str) -> dict:
     """意图解析：LLM 优先，正则兜底（LLM 挂了也能跑）"""
     text = (user_input or "").strip()
@@ -43,9 +48,9 @@ def parse_intent(user_input: str) -> dict:
             {"role": "user", "content": text[:500]},
         ], use_json=True)
         data = _parse_json(content)
-        product = str(data.get("product", "")).strip()
-        country = str(data.get("country", "")).strip()
-        task = str(data.get("task", "full")).strip()
+        product = _s(data.get("product"))
+        country = _s(data.get("country"))
+        task = _s(data.get("task")) or "full"
         if product:
             task = task if task in ("market", "leads", "full") else "full"
             return {"product": product, "country": country, "task": task}
@@ -58,8 +63,11 @@ def parse_intent(user_input: str) -> dict:
     return {"product": text, "country": "", "task": "full"}
 
 
-def run_agent_pipeline(user_input: str):
+def run_agent_pipeline(user_input: str, stop_event=None):
     """固定流水线执行（同步生成器，逐个产出进度/结果事件）
+
+    stop_event（threading.Event，可选）：客户端断开时置位，每步前检查，
+    提前终止不再烧 token（回归修复：SSE 断开后 worker 继续跑完整流水线）。
 
     事件格式：
     - {"type": "progress", "step": int, "total": int, "title": str, "status": "running|done|skipped", "detail": str}
@@ -70,6 +78,9 @@ def run_agent_pipeline(user_input: str):
     step_results = []
     product, country, task = "", "", "full"
     report, leads, outreach = "", [], None
+
+    def _stopped() -> bool:
+        return stop_event is not None and stop_event.is_set()
 
     def emit(step_idx, status, detail=""):
         ev = {"type": "progress", "step": step_idx, "total": total,
@@ -82,24 +93,27 @@ def run_agent_pipeline(user_input: str):
     try:
         intent = parse_intent(user_input)
         product, country, task = intent["product"], intent["country"], intent["task"]
-        if not product:
-            yield emit(0, "skipped", "未能识别产品，请换个说法，如「蓝牙耳机去德国卖」")
-            yield {"type": "result", "product": product, "country": country,
-                   "report": "", "leads": [], "outreach": None,
-                   "summary": "未能识别产品，请补充产品与目标市场"}
-            return
-        if not country:
-            yield emit(0, "skipped", "未能识别目标市场，请补充国家，如「蓝牙耳机去德国卖」")
-            yield {"type": "result", "product": product, "country": country,
-                   "report": "", "leads": [], "outreach": None,
-                   "summary": "未能识别目标市场，请补充国家"}
-            return
-        yield emit(0, "done", f"产品={product}，市场={country}，任务={task}")
     except Exception as e:
-        yield emit(0, "skipped", str(e))
+        logging.warning("意图解析失败（不阻断）: %s", e)
+        product, country, task = "", "", "full"
+    if not product:
+        yield emit(0, "skipped", "未能识别产品，请换个说法，如「蓝牙耳机去德国卖」")
+        yield {"type": "result", "product": product, "country": country,
+               "report": "", "leads": [], "outreach": None,
+               "summary": "未能识别产品，请补充产品与目标市场"}
+        return
+    if not country:
+        yield emit(0, "skipped", "未能识别目标市场，请补充国家，如「蓝牙耳机去德国卖」")
+        yield {"type": "result", "product": product, "country": country,
+               "report": "", "leads": [], "outreach": None,
+               "summary": "未能识别目标市场，请补充国家"}
+        return
+    yield emit(0, "done", f"产品={product}，市场={country}，任务={task}")
 
     # 步骤 1-3：市场分析链路（task=market/full）
     if task in ("full", "market"):
+        if _stopped():
+            return
         yield emit(1, "running")
         try:
             from main import _collect_evidence
@@ -110,6 +124,8 @@ def run_agent_pipeline(user_input: str):
             market_ctx = trade_evidence = competitiveness = background = landscape = None
             yield emit(1, "skipped", f"证据链部分缺失：{e}")
 
+        if _stopped():
+            return
         yield emit(2, "running")
         try:
             from llm import analyze_market
@@ -120,6 +136,8 @@ def run_agent_pipeline(user_input: str):
             data = None
             yield emit(2, "skipped", f"市场分析失败：{e}")
 
+        if _stopped():
+            return
         yield emit(3, "running")
         try:
             if data:
@@ -139,6 +157,8 @@ def run_agent_pipeline(user_input: str):
 
     # 步骤 4-5：客户线索 + 开发信（task=leads/full）
     if task in ("full", "leads"):
+        if _stopped():
+            return
         yield emit(4, "running")
         try:
             from leads import find_leads
@@ -150,6 +170,8 @@ def run_agent_pipeline(user_input: str):
             yield emit(4, "skipped", f"线索检索失败：{e}")
 
         if leads:
+            if _stopped():
+                return
             yield emit(5, "running")
             try:
                 from leads import build_lead_outreach

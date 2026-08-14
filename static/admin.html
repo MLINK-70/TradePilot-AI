@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradePilot AI — 管理面板</title>
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
   <style>
     .admin-form { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .admin-form input {
@@ -42,6 +42,7 @@
   </header>
   <nav class="nav-line">
     <a href="/">市场分析</a>
+    <a href="/agent.html">AI Agent</a>
     <a href="/trade.html">贸易数据</a>
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
@@ -84,14 +85,17 @@
 
   <script>
     (function () {
+      // 主题切换与 theme.js 对齐：用 data-theme 属性（style.css 只有 [data-theme="dark"] 规则，
+      // 此前用 .dark class 导致暗色永远不生效——回归修复）
       const btn = document.getElementById('theme-toggle');
       const saved = localStorage.getItem('tradepilot-theme');
-      if (saved === 'dark') document.documentElement.classList.add('dark');
+      if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
       btn.textContent = saved === 'dark' ? '☀️' : '🌙';
       btn.addEventListener('click', () => {
-        const dark = document.documentElement.classList.toggle('dark');
-        localStorage.setItem('tradepilot-theme', dark ? 'dark' : 'light');
-        btn.textContent = dark ? '☀️' : '🌙';
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+        localStorage.setItem('tradepilot-theme', dark ? 'light' : 'dark');
+        btn.textContent = dark ? '🌙' : '☀️';
       });
     })();
 
@@ -106,10 +110,12 @@
       try {
         const resp = await fetch('/api/settings');
         const s = await resp.json();
+        // 与后端 get_keys_status 口径一致：10 个键全列（回归修复：此前只列 5 个）
         const keyDefs = [
           ['DEEPSEEK_API_KEY', 'DeepSeek Key'], ['AI_API_KEY', 'AI Key'],
-          ['TAVILY_API_KEY', 'Tavily/搜索 Key'], ['EBAY_APP_ID', 'eBay App ID'],
-          ['ALIEXPRESS_APP_KEY', '速卖通 Key'],
+          ['TAVILY_API_KEY', 'Tavily Key'], ['SEARCH_API_KEY', '搜索 API Key'],
+          ['EBAY_APP_ID', 'eBay App ID'], ['EBAY_CLIENT_SECRET', 'eBay Secret'],
+          ['ALIEXPRESS_APP_KEY', '速卖通 Key'], ['ALIEXPRESS_APP_SECRET', '速卖通 Secret'],
         ];
         const box = document.getElementById('key-status');
         box.innerHTML = '';
@@ -126,16 +132,24 @@
         p.className = 'key-row';
         p.innerHTML = '<span>AI 提供商</span><span>' + esc(s.AI_PROVIDER || 'deepseek') + ' · ' + esc(s.AI_MODEL || '') + '</span>';
         box.appendChild(p);
-        document.getElementById('stat-keys').textContent = cnt + '/5';
+        document.getElementById('stat-keys').textContent = cnt + '/8';
         return !!s.is_admin;
-      } catch (_) { return false; }
+      } catch (_) {
+        statusEl.textContent = '网络错误：无法获取设置状态';
+        return false;
+      }
     }
 
     async function loadLog() {
       try {
         const resp = await fetch('/api/admin/access-log');
         if (resp.status === 401) { statusEl.textContent = '未登录，无法查看拦截记录'; return false; }
-        if (!resp.ok) { statusEl.textContent = '加载失败（HTTP ' + resp.status + '）'; return false; }
+        if (!resp.ok) {
+          let detail = '';
+          try { detail = (await resp.json()).detail || ''; } catch (_) {}
+          statusEl.textContent = '加载失败（HTTP ' + resp.status + '）' + (detail ? '：' + detail : '');
+          return false;
+        }
         const data = await resp.json();
         document.getElementById('stat-blocked').textContent = data.blocked_count;
         document.getElementById('stat-ok').textContent = data.ok_count;

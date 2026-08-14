@@ -22,14 +22,23 @@
         body: JSON.stringify({ ...lastQuery, fmt }),
       });
       if (resp.ok) {
+        // PDF 降级为 docx 时提示用户（服务端 X-Export-Fallback 头；本机无 Word/LibreOffice 时发生）
+        const fallback = resp.headers.get('X-Export-Fallback');
+        const actualFmt = fallback || fmt;
+        if (fallback) {
+          showStatus('当前环境无 PDF 转换组件，已降级下载 Word 文档', 'error');
+        }
         const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        a.href = url;
         // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
         const cd = resp.headers.get('Content-Disposition') || '';
         const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.' + fmt;
+        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.' + actualFmt;
         a.click();
+        // blob URL 用后回收（防内存泄漏）
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
       } else {
         showStatus('报告下载失败', 'error');
       }
@@ -114,7 +123,9 @@
     document.getElementById('product').value = product;
     document.getElementById('country').value = country;
     history.replaceState({}, '', window.location.pathname);
-    form.requestSubmit();
+    // 延迟到 submit 监听器注册完成后触发：此处脚本顺序执行时监听器尚未注册，
+    // 直接 requestSubmit() 会走表单默认提交（整页刷新 + 参数已清 → 查询失效）
+    setTimeout(() => form.requestSubmit(), 0);
   })();
 
   form.addEventListener('submit', async (e) => {

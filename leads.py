@@ -45,13 +45,26 @@ LEADS_SYSTEM = """你是外贸客户线索分析师。从给定的网页搜索�
 
 
 def _normalize_url(url: str) -> str:
-    """URL 归一化：去协议/尾部斜杠/大小写，用于来源校验"""
-    u = url.strip().rstrip("/")
-    for prefix in ("https://", "http://"):
-        if u.startswith(prefix):
-            u = u[len(prefix):]
-            break
-    return u.lower()
+    """URL 归一化用于来源校验：仅 http(s)、去 query/fragment/www/尾斜杠、
+    协议小写（回归修复：原实现只去前缀+小写，query 变体/www 前缀会误杀合法线索，
+    javascript: 等协议也未拦截）"""
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        u = urlsplit((url or "").strip())
+    except ValueError:
+        return ""
+    if u.scheme.lower() not in ("http", "https"):
+        return ""  # 非 http(s) 一律判非法（防 javascript: 等进响应）
+    host = (u.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    port = f":{u.port}" if u.port else ""
+    return urlunsplit((u.scheme.lower(), host + port, u.path.rstrip("/"), "", ""))
+
+
+def _s(v) -> str:
+    """None → ''（回归修复：str(None) 生成字面量 'None' 通过非空校验）"""
+    return "" if v is None else str(v).strip()
 
 
 def _search_leads_raw(product: str, country: str,
@@ -102,8 +115,8 @@ def _extract_leads(product: str, country: str, raw_results: list) -> list:
     for ld in leads:
         if not isinstance(ld, dict):
             continue
-        company = str(ld.get("company", "")).strip()
-        url = str(ld.get("source_url", "")).strip()
+        company = _s(ld.get("company"))
+        url = _s(ld.get("source_url"))
         if not company or not url:
             continue
         if _normalize_url(url) not in seen_urls:
@@ -111,9 +124,9 @@ def _extract_leads(product: str, country: str, raw_results: list) -> list:
             continue
         clean.append({
             "company": company[:100],
-            "business_scope": str(ld.get("business_scope", "")).strip()[:200],
-            "size_signal": str(ld.get("size_signal", "")).strip()[:100],
-            "match_reason": str(ld.get("match_reason", "")).strip()[:200],
+            "business_scope": _s(ld.get("business_scope"))[:200],
+            "size_signal": _s(ld.get("size_signal"))[:100],
+            "match_reason": _s(ld.get("match_reason"))[:200],
             "source_url": url[:300],
         })
     return clean[:8]
@@ -145,16 +158,19 @@ def build_lead_outreach(lead: dict, product: str, country: str,
     lead = lead or {}
     scope = str(lead.get("business_scope", "")).strip()
     size = str(lead.get("size_signal", "")).strip()
-    # 画像注入：业务范围+规模信号拼进收件人背景（customer_title 位），让 AI 定制内容
+    # 画像注入：业务范围+规模信号拼进收件人公司名（business 模块的 recipient 组装
+    # 只在有联系人时才含 title，纯画像场景必须走 customer_company 位，否则画像丢失）
     profile = "；".join(filter(None, [scope, f"规模信号：{size}" if size else ""]))[:150]
+    company_name = str(lead.get("company", "")).strip()
+    customer_company = company_name + (f"（{profile}）" if profile else "")
     return generate_outreach_email(
         product=product,
         market=country,
         customer_type="潜在客户（线索画像：进口商/分销商/零售商）",
         company=company, contact=contact, email=email,
-        customer_company=str(lead.get("company", "")).strip(),
+        customer_company=customer_company,
         customer_contact="",
-        customer_title=profile,
+        customer_title="",
         hook=hook,
         credentials="",
         selling_points="",

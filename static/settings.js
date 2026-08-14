@@ -152,10 +152,10 @@
         document.getElementById('set-aliexpress-key').placeholder = '只填了一半（需 Key + Secret）';
         document.getElementById('set-aliexpress-secret').placeholder = '只填了一半（需 Key + Secret）';
       }
-      // 提示：未配置 Tavily 时哪些功能不可用
-      if (!s.TAVILY_API_KEY) {
+      // 提示：搜索 Key 未配置时哪些功能不可用（按 SEARCH_API_KEY 判断，serper 已配置时不误报——回归修复）
+      if (!s.SEARCH_API_KEY && !s.TAVILY_API_KEY) {
         status.style.color = 'var(--gold)';
-        status.textContent = '未配置 Tavily：行业动态/宏观背景/竞争格局将不可用';
+        status.textContent = '未配置搜索 Key（Tavily/Serper）：行业动态/宏观背景/竞争格局将不可用';
       } else {
         status.textContent = '';
       }
@@ -226,7 +226,10 @@
       ai_base_url: document.getElementById('set-ai-base').value.trim(),
       search_provider: document.getElementById('set-search-provider').value,
     };
-    if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id && !payload.ebay_client_secret && !payload.aliexpress_app_key && !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url && !payload.ai_provider && !payload.search_provider) {
+    // 判空只看用户输入字段（provider 下拉永远非空，不能参与判空——回归修复）
+    if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id &&
+        !payload.ebay_client_secret && !payload.aliexpress_app_key &&
+        !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
       status.textContent = '没有要保存的内容';
       return;
     }
