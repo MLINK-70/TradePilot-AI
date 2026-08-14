@@ -23,12 +23,14 @@
     .lead-line { font-size: 0.88rem; margin: 0.25rem 0; color: var(--text); }
     .lead-line a { color: var(--accent); font-size: 0.8rem; }
     .summary-line { margin-top: 0.5rem; color: var(--teal); font-weight: 600; }
-    /* 六步流程条（图标卡式，与首页模块卡同风格） */
+    /* 六步流程条（无边框轻量展示） */
     .agent-flow {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-      gap: 0.5rem;
-      margin: 0 0 0.9rem;
+      gap: 0.4rem;
+      align-items: stretch;
+      margin: 0 auto 1rem;
+      max-width: 780px;
     }
     .agent-flow .f-step {
       display: flex;
@@ -36,21 +38,27 @@
       align-items: center;
       gap: 0.2rem;
       text-align: center;
-      padding: 0.6rem 0.4rem;
-      background: var(--card-2);
-      border: 1px solid var(--border);
+      padding: 0.5rem 0.3rem;
       border-radius: 10px;
-      transition: transform 0.15s ease, border-color 0.15s ease;
+      transition: background 0.15s ease;
     }
-    .agent-flow .f-step:hover { transform: translateY(-2px); border-color: var(--accent); }
-    .agent-flow .f-ico { font-size: 1.25rem; line-height: 1; }
-    .agent-flow .f-name { font-size: 0.72rem; font-weight: 700; color: var(--navy-deep); }
+    .agent-flow .f-step:hover { background: var(--accent-soft); }
+    .agent-flow .f-ico {
+      font-size: 1.4rem;
+      line-height: 1;
+      padding: 0.5rem;
+      border-radius: 50%;
+      background: var(--card-2);
+      box-shadow: 0 2px 8px rgba(10, 42, 68, 0.08);
+    }
+    .agent-flow .f-name { font-size: 0.74rem; font-weight: 700; color: var(--navy-deep); }
     .agent-flow .f-desc { font-size: 0.62rem; color: var(--muted); line-height: 1.3; }
     .agent-flow .f-arrow {
       align-self: center;
-      font-size: 0.85rem;
-      color: var(--accent);
       justify-self: center;
+      font-size: 1rem;
+      color: var(--accent);
+      font-weight: 700;
     }
   </style>
 </head>
@@ -78,49 +86,50 @@
   </header>
 
   <main style="max-width:860px;margin:0 auto;padding:1.2rem 1rem;">
+    <!-- 六步流程条（卡片外独立展示）：意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信 -->
+    <div class="agent-flow">
+      <div class="f-step">
+        <span class="f-ico">🎯</span>
+        <span class="f-name">意图解析</span>
+        <span class="f-desc">一句话 → 产品/市场/任务</span>
+      </div>
+      <span class="f-arrow">→</span>
+      <div class="f-step">
+        <span class="f-ico">🗂️</span>
+        <span class="f-name">证据链</span>
+        <span class="f-desc">Comtrade/WB/行业动态</span>
+      </div>
+      <span class="f-arrow">→</span>
+      <div class="f-step">
+        <span class="f-ico">📊</span>
+        <span class="f-name">市场分析</span>
+        <span class="f-desc">AI 解读真实数据</span>
+      </div>
+      <span class="f-arrow">→</span>
+      <div class="f-step">
+        <span class="f-ico">📄</span>
+        <span class="f-name">结构化报告</span>
+        <span class="f-desc">多章节市场报告</span>
+      </div>
+      <span class="f-arrow">→</span>
+      <div class="f-step">
+        <span class="f-ico">🔗</span>
+        <span class="f-name">客户线索</span>
+        <span class="f-desc">Tavily 检索+画像</span>
+      </div>
+      <span class="f-arrow">→</span>
+      <div class="f-step">
+        <span class="f-ico">✉️</span>
+        <span class="f-name">定制开发信</span>
+        <span class="f-desc">针对线索公司生成</span>
+      </div>
+    </div>
+
     <section class="card" style="border-color:var(--accent);">
       <h2 style="margin:0 0 0.3rem;color:var(--accent);">🤖 AI Agent 一句话全流程</h2>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 0.8rem;">
         输入一句话，自动执行以下流程。每步实时进度；某步失败自动跳过，不阻断后续。
       </p>
-      <!-- 六步流程条：意图解析 → 证据链 → 市场分析 → 报告 → 线索 → 开发信 -->
-      <div class="agent-flow">
-        <div class="f-step">
-          <span class="f-ico">🎯</span>
-          <span class="f-name">意图解析</span>
-          <span class="f-desc">一句话 → 产品/市场/任务</span>
-        </div>
-        <span class="f-arrow">→</span>
-        <div class="f-step">
-          <span class="f-ico">🗂️</span>
-          <span class="f-name">证据链</span>
-          <span class="f-desc">Comtrade/WB/行业动态</span>
-        </div>
-        <span class="f-arrow">→</span>
-        <div class="f-step">
-          <span class="f-ico">📊</span>
-          <span class="f-name">市场分析</span>
-          <span class="f-desc">AI 解读真实数据</span>
-        </div>
-        <span class="f-arrow">→</span>
-        <div class="f-step">
-          <span class="f-ico">📄</span>
-          <span class="f-name">结构化报告</span>
-          <span class="f-desc">多章节市场报告</span>
-        </div>
-        <span class="f-arrow">→</span>
-        <div class="f-step">
-          <span class="f-ico">🔗</span>
-          <span class="f-name">客户线索</span>
-          <span class="f-desc">Tavily 检索+画像</span>
-        </div>
-        <span class="f-arrow">→</span>
-        <div class="f-step">
-          <span class="f-ico">✉️</span>
-          <span class="f-name">定制开发信</span>
-          <span class="f-desc">针对线索公司生成</span>
-        </div>
-      </div>
       <div class="agent-input-row">
         <input type="text" id="agent-input" placeholder="例如：蓝牙耳机去德国卖" autocomplete="off" aria-label="任务描述">
         <button type="button" id="agent-run" class="btn-primary">🚀 一句话全流程</button>
