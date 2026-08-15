@@ -321,6 +321,8 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
     flow: X=出口 / M=进口（reporter 为报告国时的流向）
     缓存：近期年份 90 天 TTL（UN Comtrade 每年修订数据）；空结果也写缓存
     （30 天内不再重复打 API，避免 429 限流下反复撞墙）。
+    血缘（v1.0.2）：每次写缓存同时记录 source/raw_count/clean_count/quality/
+    validation_reason，可用 get_cache_meta 追溯"这个数字怎么来的"。
     """
     reporter_code = AREA_MAP.get(reporter, "156")
     flow_code = flow
@@ -373,11 +375,27 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 # 否则用户会看到假"无贸易数据"且被永久缓存
                 raise ValueError("UN Comtrade 返回异常结构（缺少 data 字段），已拒绝")
             raw_data = payload.get("data", []) or []
+            raw_count = len(raw_data)
             # 截断检测必须在过滤之前（回归修复：原实现过滤后才检查，500 条原始行里
             # 若恰无 C00/mot=0 总额行，残缺结果会被静默当作完整数据缓存）
-            if len(raw_data) >= 500:
+            if raw_count >= 500:
+                # 截断即残缺：写 REJECTED 元数据（不写数据缓存）+ 报错拒绝，
+                # DataGate 能查到 rejected 记录并向前端解释"为什么不可用"
+                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
+                           cache_key=mode_key, source="uncomtrade/" + mode_key,
+                           raw_count=raw_count, clean_count=0,
+                           quality="rejected",
+                           validation_reason=f"原始数据达到 {raw_count} 条记录上限（结果不完整），完整性校验未通过")
                 raise ValueError(
-                    f"UN Comtrade 返回 {len(raw_data)} 条达到记录上限（结果不完整，已拒绝）")
+                    f"UN Comtrade 返回 {raw_count} 条达到记录上限（结果不完整，已拒绝）")
+            # 空数据 = 合法空结果（某国某年确实无贸易记录）→ 立即写 valid 空缓存，
+            # 与"有数据但缺总额行"（残缺，rejected）严格区分——没有数据 ≠ 数据没找到
+            if not raw_data:
+                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
+                           cache_key=mode_key, source="uncomtrade/" + mode_key,
+                           raw_count=0, clean_count=0,
+                           quality="valid", validation_reason="查询成功，无贸易记录（合法空结果）")
+                return []
             # 正确聚合（数据准确性，实测验证）：UN Comtrade 按 customsCode(贸易方式：
             # C00=总计=C03+C04+…) 和 motCode(运输方式：0=全部) 拆分为多条，且部分查询
             # 有成对重复行。正确总额 = customsCode=C00 且 motCode=0 的唯一记录。
@@ -394,20 +412,29 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 unique.append(r)
             total_rows = [r for r in unique
                           if str(r.get("customsCode")) == "C00" and str(r.get("motCode")) == "0"]
+            clean_count = len(total_rows)
             if not total_rows:
                 # 兜底（回归修复）：无 C00+mot=0 时依次取 customs=C00 行、mot=0 行；
                 # 不再回退到"全部去重行"（明细行 C03/C04 求和 ≈ 总额 2~3 倍，系统性偏大）
                 total_rows = [r for r in unique if str(r.get("customsCode")) == "C00"] or \
                              [r for r in unique if str(r.get("motCode")) == "0"]
+                clean_count = len(total_rows)
             if not total_rows:
                 # 数据准确性红线（宁缺勿错）：无任何总额行说明数据残缺（截断/申报口径），
-                # 报错不写缓存，防止调用方把残缺/翻倍数字当完整结果
+                # 记 REJECTED 元数据 + 报错不写数据缓存，防止调用方把残缺/翻倍数字当完整结果
+                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
+                           cache_key=mode_key, source="uncomtrade/" + mode_key,
+                           raw_count=raw_count, clean_count=0,
+                           quality="rejected",
+                           validation_reason="原始数据缺少总额行（customsCode=C00），完整性校验未通过")
                 raise ValueError("UN Comtrade 返回数据缺少总额行（customsCode=C00），已拒绝")
             data = total_rows
             # 空结果也写缓存（30 天短 TTL 由读取侧 _ttl_for_period 控制）：
             # 某国某年无贸易数据是合法结果，不缓存会导致每次查询都打 API
             save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code,
-                       cache_key=mode_key)
+                       cache_key=mode_key, source="uncomtrade/" + mode_key,
+                       raw_count=raw_count, clean_count=clean_count,
+                       quality="valid", validation_reason="C00+mot=0 完整总额行")
             return data
         except requests.exceptions.RequestException as e:
             last_error = str(e)
@@ -418,6 +445,54 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
     # 3 次重试全失败（如持续 429）：抛异常而非静默返回空，
     # 防止单国误报 0 / 组织聚合写入残缺缓存
     raise ValueError(f"UN Comtrade 查询失败：{last_error}（重试 3 次仍失败）")
+
+
+# ── DataGate 总闸（数据层架构收口，v1.0.2）──────────────────────────────
+# 原则：数据能不能用由程序判定（校验器→质量标记→统计引擎→AI），
+# AI 只负责解释数据，不决定数据可信度。所有分析入口引用数字前过此闸。
+QUALITY_ORDER = {"rejected": 0, "invalid": 1, "suspicious": 2, "valid": 3}
+
+
+def check_data_gate(cmd_code: str, partner_code: str, period: str, flow_code: str,
+                    reporter_code: str = "156", cache_key: str = "") -> dict:
+    """DataGate 校验：查该查询的血缘元数据，返回质量判定
+
+    返回 {allowed: bool, quality, reason, meta}：
+    - allowed=False 且 quality=rejected：原始数据未通过完整性校验（截断/C00 缺失），
+      调用方不得使用数字（宁可显示"数据无法用于本次分析"也不给错值）
+    - allowed=True 但 quality=suspicious：可用但需在报告标注谨慎解读
+    - 无缓存记录（未查询过）：allowed=False, quality='unknown'——不能当作"无数据"
+    """
+    from database import get_cache_meta
+    meta = get_cache_meta(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
+    if meta is None:
+        return {"allowed": False, "quality": "unknown",
+                "reason": "该查询无缓存记录（未查询或已过期），不能当作无数据",
+                "meta": None}
+    q = meta.get("quality", "valid")
+    allowed = QUALITY_ORDER.get(q, 1) >= QUALITY_ORDER["suspicious"]
+    reason = meta.get("validation_reason", "") or (
+        "Suspicious：出口方与进口方申报口径存在镜像差异" if q == "suspicious" else "")
+    return {"allowed": allowed, "quality": q, "reason": reason, "meta": meta}
+
+
+def data_gate_report(cmd_code: str, partner_code: str, period: str, flow_code: str,
+                     reporter_code: str = "156", cache_key: str = "") -> dict:
+    """DataGate 的前端友好版：返回可展示的质量说明（供报告/前端直接渲染）"""
+    g = check_data_gate(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
+    if g["quality"] == "rejected":
+        return {"usable": False,
+                "label": "数据无法用于本次分析",
+                "detail": f"原因：{g['reason']}（原始数据未通过完整性校验）"}
+    if g["quality"] == "suspicious":
+        return {"usable": True,
+                "label": "数据存疑（镜像口径差异）",
+                "detail": g["reason"]}
+    if g["quality"] == "unknown":
+        return {"usable": False,
+                "label": "暂无数据记录",
+                "detail": "该查询没有可用数据记录，请稍后重试或检查数据源配置"}
+    return {"usable": True, "label": "数据可信", "detail": g["reason"] or "通过完整性校验"}
 
 
 def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "中国", flow: str = "X") -> list:
@@ -769,6 +844,21 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             quality = "suspicious"
             quality_note = ("该贸易流出口方申报额大于目标市场总进口（份额超 100%），"
                             "存在镜像口径差异，数据可信度降低，相关结论需谨慎解读。")
+        # DataGate 复核（v1.0.2）：若任一条腿被 REJECTED（完整性校验未过），
+        # 整体降级为 rejected——宁缺勿错，报告层看到 quality 即知不可用
+        # 注意：缓存以 reporter_code（数字代码）为键，这里用 AREA_MAP 转换
+        _rep_code = AREA_MAP.get(reporter, "156")
+        for _leg, _cmd, _partner, _flow in (
+            ("出口", hs, target_code, "X"),
+            ("进口", hs, target_code, "M"),
+            ("市场总进口", hs, "0", "M"),
+        ):
+            gate = check_data_gate(_cmd, _partner, year, _flow, reporter_code=_rep_code,
+                                   cache_key=("formal" if _use_formal() else "preview"))
+            if gate["quality"] == "rejected":
+                quality = "rejected"
+                quality_note = f"{_leg}腿数据被拒绝：{gate['reason']}"
+                break
 
         return {
             "tc": tc,
@@ -777,7 +867,7 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             "market_import_value": market_import_value,
             "market_share": market_share,  # 出口国占目标市场该产品进口的份额（%）
             "available": True,
-            "quality": quality,      # valid / suspicious / invalid
+            "quality": quality,      # valid / suspicious / invalid / rejected
             "quality_note": quality_note,
         }
     except Exception:

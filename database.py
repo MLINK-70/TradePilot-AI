@@ -74,14 +74,20 @@ def _init_db_unlocked():
                 cache_key TEXT NOT NULL DEFAULT '',
                 data_json TEXT NOT NULL,
                 fetched_at TEXT NOT NULL,
+                -- 数据血缘（v1.0.2 数据层收口）：可追溯"这个数字怎么来的"
+                source TEXT NOT NULL DEFAULT '',            -- 数据源（UN Comtrade preview/formal …）
+                raw_record_count INTEGER NOT NULL DEFAULT 0,  -- 原始返回行数（过滤前）
+                clean_record_count INTEGER NOT NULL DEFAULT 0, -- 清洗后行数（C00+mot=0）
+                quality TEXT NOT NULL DEFAULT 'valid',      -- valid / suspicious / invalid / rejected
+                validation_reason TEXT NOT NULL DEFAULT '', -- 质量判定理由（rejected 时为拒绝原因）
+                schema_version INTEGER NOT NULL DEFAULT 1,  -- 结构版本（迁移用）
                 UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
             )
         """)
-        # 迁移：旧表无 cache_key 列时无损重建（回归修复：原实现 DROP 丢数据 +
-        # 并发读会撞 "no such table"；且 SQLite ADD COLUMN 不能加 UNIQUE 约束，
-        # 因此用 新建→复制→换名 保数据）
+        # 迁移：旧表缺血缘列时无损重建（新建→复制→换名，不丢数据；
+        # SQLite ADD COLUMN 不能加 UNIQUE 约束，故整表重建）
         cols = [r[1] for r in conn.execute("PRAGMA table_info(trade_cache)").fetchall()]
-        if "cache_key" not in cols:
+        if "source" not in cols or "quality" not in cols or "schema_version" not in cols:
             conn.execute("ALTER TABLE trade_cache RENAME TO trade_cache_legacy")
             conn.execute("""
                 CREATE TABLE trade_cache (
@@ -94,13 +100,19 @@ def _init_db_unlocked():
                     cache_key TEXT NOT NULL DEFAULT '',
                     data_json TEXT NOT NULL,
                     fetched_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT '',
+                    raw_record_count INTEGER NOT NULL DEFAULT 0,
+                    clean_record_count INTEGER NOT NULL DEFAULT 0,
+                    quality TEXT NOT NULL DEFAULT 'valid',
+                    validation_reason TEXT NOT NULL DEFAULT '',
+                    schema_version INTEGER NOT NULL DEFAULT 1,
                     UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
                 )
             """)
             conn.execute(
                 """INSERT OR IGNORE INTO trade_cache
                    (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
-                   SELECT cmd_code, partner_code, period, flow_code, reporter_code, '', data_json, fetched_at
+                   SELECT cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at
                    FROM trade_cache_legacy""")
             conn.execute("DROP TABLE trade_cache_legacy")
         conn.execute("""
@@ -189,18 +201,56 @@ def get_cached(cmd_code: str, partner_code: str, period: str, flow_code: str,
     return json.loads(row["data_json"])
 
 
+def get_cache_meta(cmd_code: str, partner_code: str, period: str, flow_code: str,
+                   reporter_code: str = "156", cache_key: str = "") -> dict | None:
+    """查缓存血缘元数据（quality/source/记录数/校验理由）——数据血缘追溯用
+
+    未命中返回 None；命中返回 {source, quality, validation_reason,
+    raw_record_count, clean_record_count, fetched_at}。
+    """
+    with contextlib.closing(get_conn()) as conn:
+        row = conn.execute(
+            """SELECT source, quality, validation_reason, raw_record_count,
+                      clean_record_count, fetched_at
+               FROM trade_cache WHERE cmd_code=? AND partner_code=? AND period=?
+               AND flow_code=? AND reporter_code=? AND cache_key=?""",
+            (cmd_code, partner_code, period, flow_code, reporter_code, cache_key),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "source": row["source"],
+        "quality": row["quality"],
+        "validation_reason": row["validation_reason"],
+        "raw_record_count": row["raw_record_count"],
+        "clean_record_count": row["clean_record_count"],
+        "fetched_at": row["fetched_at"],
+    }
+
+
 def save_cache(cmd_code: str, partner_code: str, period: str, flow_code: str,
-               data: list, reporter_code: str = "156", cache_key: str = ""):
-    """写入缓存（存在则更新）；data 可为空列表（空结果也缓存，避免重复打 API）"""
+               data: list, reporter_code: str = "156", cache_key: str = "",
+               source: str = "", raw_count: int = 0, clean_count: int = 0,
+               quality: str = "valid", validation_reason: str = ""):
+    """写入缓存（存在则更新）；data 可为空列表（空结果也缓存，避免重复打 API）
+
+    血缘字段（v1.0.2）：source 数据源、raw_count 原始行数、clean_count 清洗后行数、
+    quality 四态质量（valid/suspicious/invalid/rejected）、validation_reason 判定理由。
+    缺省值向后兼容旧调用。
+    """
     with _write_lock:
         with contextlib.closing(get_conn()) as conn:
             conn.execute(
-                """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO trade_cache (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at, source, raw_record_count, clean_record_count, quality, validation_reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
-                   DO UPDATE SET data_json=excluded.data_json, fetched_at=excluded.fetched_at""",
+                   DO UPDATE SET data_json=excluded.data_json, fetched_at=excluded.fetched_at,
+                                 source=excluded.source, raw_record_count=excluded.raw_record_count,
+                                 clean_record_count=excluded.clean_record_count,
+                                 quality=excluded.quality, validation_reason=excluded.validation_reason""",
                 (cmd_code, partner_code, period, flow_code, reporter_code, cache_key,
-                 json.dumps(data, ensure_ascii=False), datetime.now().isoformat()),
+                 json.dumps(data, ensure_ascii=False), datetime.now().isoformat(),
+                 source, raw_count, clean_count, quality, validation_reason),
             )
             conn.commit()
 

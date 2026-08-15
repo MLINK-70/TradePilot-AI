@@ -1310,8 +1310,12 @@ def build_market_report(product: str, country: str, ai: dict,
                f"即该国每进口 100 美元该品类，约 {share:.0f} 美元来自中国。")
             _p(f"• 份额解读：{'渗透率较高，进入成熟竞争期' if share >= 15 else (
                 '渗透率中等，仍有扩张空间' if share >= 5 else '渗透率较低，市场拓展空间大')}。")
-        # 三态数据质量标记：suspicious 时向读者披露口径差异（数据准确性红线）
-        if competitiveness.get("quality") == "suspicious" and competitiveness.get("quality_note"):
+        # 四态数据质量标记（数据准确性红线）：rejected 时明确告知不可用，
+        # suspicious 时披露口径差异；AI 不参与判定，全部来自程序 DataGate
+        q = competitiveness.get("quality")
+        if q == "rejected":
+            _p(f"⚠️ 数据无法用于本次分析：{competitiveness.get('quality_note') or '原始数据未通过完整性校验'}", indent=False)
+        elif q == "suspicious" and competitiveness.get("quality_note"):
             _p(f"⚠️ 数据质量提示：{competitiveness['quality_note']}", indent=False)
     else:
         _p("（该品类竞争力数据不足）")

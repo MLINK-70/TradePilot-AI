@@ -258,6 +258,80 @@ Agent 生成的 Markdown 报告 → 学术式 Word/PDF 下载（复用正式报�
 
 ---
 
+## v1.0.2 更新日志（2026-08-15）— 数据层架构收口
+
+> 背景：v1.0.1 修掉了 UN Comtrade 聚合翻 8 倍的重大数据 bug。v1.0.2 不修业务，
+> 专门把「数据层」的骨架补起来——让以后**再出现数据问题能追、能挡、能测**。
+
+### 1. 数据血缘（Lineage）——每个数字都能追到"怎么来的"
+
+`trade_cache` 表新增血缘列（无损迁移，旧数据保留）：
+
+```
+source               数据源（uncomtrade/preview 或 uncomtrade/formal）
+raw_record_count     原始返回行数（过滤前）
+clean_record_count   清洗后行数（C00+mot=0）
+quality              valid / suspicious / invalid / rejected
+validation_reason    质量判定理由（rejected 时为拒绝原因）
+schema_version       结构版本（当前 1）
+```
+
+以后任何数字都能回答："为什么中国→德国 2025 年是 X 亿？"
+→ 查 `get_cache_meta()` → 那次请求拿了多少原始行 → 删了哪些 → 为什么选 C00+mot=0 → 最终值。
+
+### 2. DataGate 总闸——数据能不能用，程序说了算，AI 只解释
+
+```
+Raw Data → Normalize → Deduplicate → Validate → Quality Assessment
+                                    ↓
+                          ──── DataGate ────
+                                    ↓
+                             Analytics / AI（只解释，不判定）
+```
+
+- `check_data_gate()`：查血缘元数据返回 `{allowed, quality, reason}`——rejected 直接禁止使用
+- `data_gate_report()`：前端友好版（"数据无法用于本次分析 + 原因"）
+- `get_competitiveness` 已接入：任一条腿 REJECTED → 整体 quality=rejected，报告/前端明示
+
+### 3. REJECTED 四态质量——"没有数据" ≠ "数据没找到"
+
+查询成功但数据残缺（500 条截断 / C00 总额行缺失 / 响应结构异常）时：
+**记 REJECTED 元数据（留痕）+ 报错拒绝（不写数据缓存）**。
+前端显示"⚠️ 数据无法用于本次分析：原始数据未通过完整性校验"，而不是假"暂无数据"。
+
+### 4. 清洗逻辑回归测试——8 个脏数据 case 样本化
+
+`tests/test_data_clean.py` 扩展为 8 case + DataGate 断言：
+
+```
+case 01 正常 C00+MOT0      case 05 HTTP 200 + 错误响应体
+case 02 重复 C00（成对行）  case 06 同 key 重复值异常
+case 03 只有分项无 C00     case 07 X/M 镜像口径差异 → suspicious
+case 04 500 条截断 → rejected  case 08 空数据（合法空 ≠ 残缺）
+```
+
+以后任何人改数据层，跑一遍就知道有没有把今天的成果干碎。
+
+### 5. 数据调试纪律（写进团队共识，改数据逻辑必须回答四问）
+
+> **不能只说"修复了重复数据"，必须能解释"为什么这一行应该被删"。**
+
+每次修改数据逻辑，必须回答：
+
+1. **原始数据是什么？**（拿到什么，多少行，什么结构）
+2. **为什么删除这些记录？**（去重依据 / 截断 / 口径排除）
+3. **为什么保留这些记录？**（C00+mot=0 的语义依据）
+4. **最终数字如何从原始数据推导出来？**（逐步可复算）
+
+**三条铁律**：
+- 宁缺勿错：拿不准宁可报错/标记，绝不静默给错误值
+- 先理解语义再清洗：任何变换前必须弄清字段含义（customsCode/motCode 教训）
+- 四态质量：Valid（可信）/ Suspicious（双源不一致，标注不替换）/ Invalid / Rejected（完整性未过）
+
+**测试**：96 项 pytest 全部通过（新增 10 项血缘 + DataGate + 8 case 回归）。
+
+---
+
 ## 路线图
 
 | 阶段 | 模块 | 内容 |
@@ -279,6 +353,8 @@ Agent 生成的 Markdown 报告 → 学术式 Word/PDF 下载（复用正式报�
 | ✅ v1.0 | 性能与健壮性 | 缓存 TTL 体系（动态/空结果）+ LLM LRU + single-flight + SQLite WAL + 重试分流 + 证据链并行 |
 | ✅ v1.0 | 测试与 CI | 86 项 pytest（无网络）+ GitHub Actions（lint/双 OS 测试/打包） |
 | ✅ v1.0 | 部署 | Dockerfile（LibreOffice + CJK 字体）+ docker-compose + Linux PDF 导出 |
+| ✅ v1.0.1 | 数据准确性专项 | UN Comtrade 正确聚合（C00+mot=0 去重，德国案例 55亿→6.88亿）+ SEC/A股/索尼财务修复 + 23 项回归测试 |
+| ✅ v1.0.2 | 数据层架构收口 | 数据血缘（get_cache_meta）+ DataGate 总闸 + REJECTED 四态质量 + 8 case 脏数据回归测试 + 调试纪律四问 |
 | 远期 v1.1 | 结构重构 | export.py / main.py 拆分（routers/ + export/ 包）、前端 common.js 抽取、移动端适配、无障碍完善、exe 安装包 |
 
 **演进方式**：新模块以独立业务模块（market_data / ebay 等）扁平扩展，`main.py` 保持路由入口；AI 调用底座（`llm.py` / `prompts.py`）复用。

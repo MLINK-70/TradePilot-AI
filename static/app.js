@@ -235,7 +235,14 @@
         evComp.textContent = '';
       }
       evBox.hidden = !hasEvidence;
-      showStatus('', '');
+      // 数据质量提示（DataGate，v1.0.2）：rejected → 数据不可用；suspicious → 口径存疑
+      if (comp.quality === 'rejected') {
+        showStatus('⚠️ ' + (comp.quality_note || '数据无法用于本次分析：原始数据未通过完整性校验'), 'error');
+      } else if (comp.quality === 'suspicious') {
+        showStatus('⚠️ ' + (comp.quality_note || '数据存疑：镜像口径差异，结论需谨慎解读'), 'warn');
+      } else {
+        showStatus('', '');
+      }
     } catch (err) {
       showStatus('网络错误，请确认后端服务已启动', 'error');
     } finally {
