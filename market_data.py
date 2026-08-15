@@ -312,7 +312,7 @@ LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果�
 {
   "product_category": "产品类别（优先输出市场主流细分类目，如「微单/数码相机」而非泛泛的「相机」）",
   "top_brands": [
-    {"name": "品牌名", "share": "市场份额（如 46.5%；数据缺失填「—」并注明）", "position": "地位描述（如：全球第一，单反主导）"}
+    {"name": "品牌名", "share": "市场份额（如 46.5%；数据缺失填「—」并注明）", "share_scope": "份额口径范围与年份（如「2024年全球」「2024年德国市场 BCN 数据」；不同品牌口径不一致时必须逐条标注）", "position": "地位描述（如：全球第一，单反主导）"}
   ],
   "segment_trends": ["细分趋势1（如：微单出货量是单反10倍）", "细分趋势2"],
   "shift_reasons": ["格局变动原因1（上下游/技术/需求驱动，如：国产CMOS传感器突破降低准入门槛）", "原因2", "原因3"],
@@ -323,6 +323,7 @@ LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果�
 
 要求：
 - 基于搜索结果的具体数据（品牌名+份额+年份），不编造；标注数据年份（如"2024年 BCN 数据"）
+- **口径范围纪律（回归修复 C7）**：每个品牌的 share 必须标注范围+年份（share_scope 字段，如"2024年全球"、"2023年德国市场"）；不同品牌份额**口径不同（全球 vs 该国 vs 细分）时不得并列计算或比较**，并在 key_insight 中注明口径差异
 - **品类细分纪律（最关键）**：若产品词是宽泛品类（如「相机」），必须聚焦该品类**市场主流细分**（如相机 → 微单/数码相机/单反）的品牌份额；
   运动相机/全景相机等**边缘细分**的品牌（如 GoPro、影石）**不得混入整体品类份额**——它们只能在 segment_trends 中作为细分提及。
 - **主流品牌覆盖**：优先提炼该品类公认的头部品牌（如相机行业的佳能/索尼/尼康/富士、手机行业的三星/苹果/华为）；
@@ -337,7 +338,7 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
     init_db()
 
     # 提示词版本签名：LANDSCAPE_REFRESH_SYSTEM 变更（如品类细分纪律 v2）时旧缓存失效
-    LANDSCAPE_PROMPT_VER = "v2"
+    LANDSCAPE_PROMPT_VER = "v3"  # v3：口径范围纪律（share_scope）
     cache_key = f"LANDSCAPE:{product}:{market}:{LANDSCAPE_PROMPT_VER}"
     cached = get_cached(cache_key, "0", "0", "X", "META")
     if cached and not force_refresh:

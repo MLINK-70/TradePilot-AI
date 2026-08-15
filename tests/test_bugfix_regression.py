@@ -342,7 +342,41 @@ class TestTopExportersNoPartialCache:
         assert any(t["country"] not in FAIL for t in top)
 
 
-class TestDesktopPort:
+class TestRejectedCacheNotReturned:
+    """回归 P0-1：REJECTED 缓存不得被读取侧当"合法空结果"返回（拒绝→假 0）"""
+
+    def test_rejected_cache_triggers_refetch(self, tmp_db):
+        import trade
+        import database
+        mode_key = "formal" if trade._use_formal() else "preview"
+        # 预置 REJECTED 缓存（截断/C00 缺失拒绝的落库形态：data_json=[]）
+        database.save_cache("8518", "276", "2022", "X", [], "156",
+                            cache_key=mode_key, source="uncomtrade/" + mode_key,
+                            quality="rejected", validation_reason="测试拒绝")
+
+        def boom(*a, **k):
+            raise ValueError("REJECTED 缓存被当空结果返回（未重新请求）")
+
+        # 若 rejected 被当合法空返回 → 不发请求 → fetch_year 返回 []（断言失败）；
+        # 正确行为是重新请求（mock 抛错 → ValueError 冒泡）
+        with mock.patch.object(trade.requests, "get", side_effect=boom):
+            with pytest.raises(ValueError):
+                trade.fetch_year("8518", "276", "2022")
+
+    def test_valid_empty_cache_still_served(self, tmp_db):
+        """对照：合法空结果（valid）仍应命中缓存，不重复请求"""
+        import trade
+        import database
+        mode_key = "formal" if trade._use_formal() else "preview"
+        database.save_cache("8518", "276", "2022", "X", [], "156",
+                            cache_key=mode_key, source="uncomtrade/" + mode_key,
+                            quality="valid", validation_reason="合法空结果")
+
+        def boom(*a, **k):
+            raise AssertionError("合法空缓存应命中，不应发请求")
+
+        with mock.patch.object(trade.requests, "get", side_effect=boom):
+            assert trade.fetch_year("8518", "276", "2022") == []
     def test_no_free_port_returns_none(self):
         """回归：socket 分配失败时返回 None（原静默回退到必失败的 8000）"""
         import desktop

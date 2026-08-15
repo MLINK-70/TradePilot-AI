@@ -63,12 +63,33 @@ def suggest_pricing(product: str, market: str, year: str = "",
         # 两条腿：出口单价（出口国出口该市场）+ 市场进口均价（该市场从全球进口）
         # 回归修复 G7：组织市场（欧盟/东盟/RCEP）preview 接口对组代码不返回数据，
         # 必须走成员聚合（fetch_group/fetch_group_world_imports），否则两腿皆空误导用户
-        if target_code in GROUP_MEMBERS:
+        is_group = target_code in GROUP_MEMBERS
+        if is_group:
             exp_rows = fetch_group(hs, year, target_code, reporter=reporter, flow="X")
             imp_rows = fetch_group_world_imports(hs, year, target_code)
         else:
             exp_rows = fetch_year(hs, target_code, year, reporter=reporter, flow="X")
             imp_rows = fetch_year(hs, "0", year, reporter=market, flow="M")
+
+        # 回归修复 P1-10：任一腿 REJECTED（完整性校验未过）→ 整体不可用。
+        # 原实现把 REJECTED 空腿当"缺失"，用另一腿算价格带——违反本模块
+        # docstring"任一腿 REJECTED → 可用=False"的承诺
+        mode_key = "formal" if _use_formal() else "preview"
+        legs_meta = (
+            ("出口腿", hs, target_code, "X" if not is_group else "X",
+             AREA_MAP.get(reporter, "156")),
+            ("市场进口腿", hs, "0" if not is_group else target_code,
+             "M" if not is_group else "MW",
+             AREA_MAP.get(market, "") if not is_group else "0"),
+        )
+        for leg_name, _cmd, _partner, _flow, _rep in legs_meta:
+            try:
+                meta = get_cache_meta(_cmd, _partner, year, _flow, _rep, cache_key=mode_key)
+            except Exception:
+                meta = None
+            if meta and meta["quality"] == "rejected":
+                return {"available": False,
+                        "reason": f"{leg_name}数据被拒绝（完整性校验未通过）：{meta['reason']}"}
 
         export_up = _unit_price(exp_rows)
         market_up = _unit_price(imp_rows)

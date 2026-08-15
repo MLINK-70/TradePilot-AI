@@ -337,14 +337,23 @@ def partner_lookup(name: str) -> str:
 
 
 def _ttl_for_period(period: str) -> int:
-    """贸易数据动态 TTL：近期年份 90 天（数据每年修订），旧年份永久缓存"""
+    """贸易数据动态 TTL：UN Comtrade 持续修订（近 2 年多为初步值，
+    参考年后约 2 年趋于终值，晚申报国更晚）
+
+    回归修复 P1-11：原实现 2 年零 1 天即永久——晚申报国 3-4 年前数据
+    仍在修订却永不更新；现 3-4 年每年刷新一次，5 年以上才永久。
+    """
     try:
         y = int(str(period)[:4])
     except (TypeError, ValueError):
         return 0
     import datetime
-    this_year = datetime.date.today().year
-    return 90 if this_year - y <= 2 else 0
+    diff = datetime.date.today().year - y
+    if diff <= 2:
+        return 90   # 近 2 年：初步值，频繁修订
+    if diff <= 4:
+        return 365  # 3-4 年：晚申报国仍在修订，每年刷新
+    return 0        # 5 年以上：接近终值，永久缓存
 
 
 def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "中国",
@@ -372,8 +381,23 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
         except Exception:
             logging.warning("缓存写入失败（不影响本次结果）: %s/%s/%s", cmd_code, partner_code, period)
 
-    cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
-                        cache_key=mode_key, ttl_days=_ttl_for_period(period))
+    # 回归修复 P0-1：读缓存前先查血缘——REJECTED 缓存（截断/C00 缺失拒绝）不得
+    # 当"合法空结果"返回（原实现 get_cached 返回 [] 被直接当合法空，拒绝原因永久
+    # 丢失；fetch_group 成员被静默计 0 → 组织总额系统性偏低）
+    try:
+        from database import get_cache_meta
+        _meta = get_cache_meta(cmd_code, partner_code, period, flow_code, reporter_code,
+                               cache_key=mode_key)
+        if _meta and _meta["quality"] == "rejected":
+            logging.warning("缓存为 REJECTED（%s），按未命中重新请求: %s/%s/%s",
+                            (_meta.get("reason") or "")[:60], cmd_code, partner_code, period)
+            cached = None
+        else:
+            cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
+                                cache_key=mode_key, ttl_days=_ttl_for_period(period))
+    except Exception:
+        cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
+                            cache_key=mode_key, ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
 
@@ -559,8 +583,9 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
         if not code:
             logging.warning("[跳过] %s: 无代码", country)
             continue
-        # 已缓存成员不重复请求
-        if get_cached(cmd_code, code, period, flow, reporter_code,
+        # 已缓存成员不重复请求（回归修复 P1-7：预检与 fetch_year 写缓存同键 mode_key，
+        # 原不传 cache_key 永远 miss → 每次组织查询全量重走 N 国）
+        if get_cached(cmd_code, code, period, flow, reporter_code, cache_key=mode_key,
                       ttl_days=_ttl_for_period(period)) is not None:
             continue
         todo.append((country, code))
@@ -594,7 +619,7 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
         code = AREA_MAP.get(country, "")
         if code:
             cached_rows = get_cached(cmd_code, code, period, flow, reporter_code,
-                                     ttl_days=_ttl_for_period(period))
+                                     cache_key=mode_key, ttl_days=_ttl_for_period(period))
             if cached_rows is not None:
                 all_rows.extend(cached_rows)
 
@@ -606,9 +631,10 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
         return []
 
     # 全部成功才写缓存（残缺结果被永久缓存会让错误长期留存）
+    # 回归修复 P1-6：聚合缓存带血缘 source（原默认 source='' 被下游当可信 valid）
     if all_rows:
         save_cache(cmd_code, group_code, period, flow, all_rows, reporter_code,
-                   cache_key=mode_key)
+                   cache_key=mode_key, source="uncomtrade/" + mode_key)
     return all_rows
 
 
@@ -617,8 +643,10 @@ def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> li
 
     逐成员查 reporter=成员、partner=0、flow=M 并求和（与 fetch_group 同并发/缓存骨架，
     但 reporter 是每个成员而非固定出口国，语义不同不能复用）。
+    回归修复 P0-3：缓存键含数据源模式（preview/formal 聚合质量不同，不得互用）
     """
-    cached = get_cached(cmd_code, group_code, period, "MW", "0",
+    mode_key = "formal" if _use_formal() else "preview"
+    cached = get_cached(cmd_code, group_code, period, "MW", "0", cache_key=mode_key,
                         ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
@@ -630,7 +658,9 @@ def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> li
         if not code:
             continue
         # 成员已缓存（该成员从全球的进口）则不重复请求
-        if get_cached(cmd_code, "0", period, "M", code,
+        # 回归修复 P1-7：预检必须与 fetch_year 写缓存同键（原不传 cache_key
+        # 永远 miss，每次组织查询全量重走 N 国）
+        if get_cached(cmd_code, "0", period, "M", code, cache_key=mode_key,
                       ttl_days=_ttl_for_period(period)) is not None:
             continue
         todo.append((country, code))
@@ -659,7 +689,7 @@ def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> li
         if country in results:
             all_rows.extend(results[country])
         elif code:
-            cached_rows = get_cached(cmd_code, "0", period, "M", code,
+            cached_rows = get_cached(cmd_code, "0", period, "M", code, cache_key=mode_key,
                                      ttl_days=_ttl_for_period(period))
             if cached_rows is not None:
                 all_rows.extend(cached_rows)
@@ -669,7 +699,8 @@ def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> li
                       len(failed), "、".join(failed))
         return []
     if all_rows:
-        save_cache(cmd_code, group_code, period, "MW", all_rows, "0")
+        save_cache(cmd_code, group_code, period, "MW", all_rows, "0", cache_key=mode_key,
+                   source="uncomtrade/" + mode_key)
     return all_rows
 
 
@@ -973,9 +1004,14 @@ def get_competitor_comparison(product: str, target: str, year: str,
         hs = hs_lookup(product)
         if not hs:
             return {}
-        # 结果缓存（HS+目标+年份+出口国 → 对比结果），避免重复轮询多国 UN Comtrade
+        # 结果缓存（HS+目标+年份+出口国+名单 → 对比结果），避免重复轮询多国 UN Comtrade
         # 版本签名 V1：未来改 share 计算/候选人名单时递增，旧缓存自动失效
-        cache_k = f"V1|{target}|{reporter}"
+        # 回归修复：缓存键含数据源模式（preview/formal 数据质量不同，切换后不得互用）；
+        # 回归修复 P1-9：键含排序后的竞争对手名单（原键不含名单，main 动态传 top_names[:6]
+        # 变化时命中旧对比，share 分母基于旧国家集合）
+        mode_tag = "formal" if _use_formal() else "preview"
+        comp_sig = "|".join(sorted(competitors))
+        cache_k = f"{mode_tag}|V1|{target}|{reporter}|{comp_sig}"
         try:
             from database import get_cached
             cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k, ttl_days=_ttl_for_period(year))
@@ -1003,12 +1039,13 @@ def get_competitor_comparison(product: str, target: str, year: str,
                 results.append({"country": country, "value": None, "error": str(e)[:120]})
         for r in results:
             r["share"] = round(r["value"] / total * 100, 1) if r["value"] is not None and total else None
-        # 回归修复：任一竞争对手数据缺失（error 行）时不写缓存——
-        # 瞬时失败会变成 90 天"数据缺失"标签；宁缺勿错，下次查询重试
+        # 回归修复：有 error 行时不写缓存（瞬时失败不固化成"数据缺失"）；
+        # 写缓存带血缘 source（P1-6）
         if not any(r.get("error") for r in results):
             try:
                 from database import save_cache
-                save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
+                save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k,
+                           source="uncomtrade/" + mode_tag)
             except Exception:
                 pass
         return {"competitors": results, "available": True}
@@ -1028,8 +1065,9 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
     try:
         # 结果缓存（HS+目标+完整年份序列+出口国 → 矩阵），避免每次查询重算多国多年。
         # key 用完整年份元组：中间年份不同（如 [2018,2019,2022] vs [2018,2020,2022]）
-        # 不再命中同一缓存（B 类审查 #3）
-        cache_k = f"V1|{target}|{'-'.join(map(str, years))}|{reporter}"
+        # 不再命中同一缓存（B 类审查 #3）；含数据源模式（回归修复）
+        mode_tag = "formal" if _use_formal() else "preview"
+        cache_k = f"{mode_tag}|V1|{target}|{'-'.join(map(str, years))}|{reporter}"
         try:
             from database import get_cached
             cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k, ttl_days=_ttl_for_period(str(years[-1])))
@@ -1082,7 +1120,8 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
         matrix.sort(key=lambda x: (x["export_value"] or 0), reverse=True)
         try:
             from database import save_cache
-            save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k)
+            save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k,
+                       source="uncomtrade/" + mode_tag)  # P1-6：血缘
         except Exception:
             pass
         return matrix
@@ -1110,10 +1149,15 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         hs = hs_lookup(product)
         if not hs:
             return []
-        # 先查缓存（HS+年份 → TOP 出口国），版本签名 V1：改候选人名单/计算时递增
+        # 数据源模式标记（回归修复：缓存键区分 preview/formal；定义在 try 外避免
+        # 内层缓存异常时写入分支 UnboundLocalError）
+        mode_tag = "formal" if _use_formal() else "preview"
+        # 先查缓存（HS+年份 → TOP 出口国），版本签名 V1：改候选人名单/计算时递增；
+        # 回归修复：缓存键含数据源模式（preview/formal 排名质量不同）
         try:
             from database import get_cached
-            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="V1|rank", ttl_days=_ttl_for_period(year))
+            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key=f"{mode_tag}|V1|rank",
+                                ttl_days=_ttl_for_period(year))
             if cached is not None and isinstance(cached, list):
                 return cached[:top_n]
         except Exception:
@@ -1133,11 +1177,12 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         results.sort(key=lambda x: x["value"], reverse=True)
         top = results[:top_n]
         # 回归修复：有失败国时只返回不缓存（瞬时网络失败会变成数周错误排名）；
-        # 全部成功才持久化
+        # 全部成功才持久化（缓存键含数据源模式 + 血缘 source）
         if failed == 0:
             try:
                 from database import save_cache
-                save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="V1|rank")
+                save_cache("TOPEXP", hs, year, "X", top, "0", cache_key=f"{mode_tag}|V1|rank",
+                           source="uncomtrade/" + mode_tag)
             except Exception:
                 pass
         elif failed > len(candidates) // 2:

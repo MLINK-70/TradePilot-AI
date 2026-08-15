@@ -596,15 +596,19 @@
           });
           return root.innerHTML;
         }
+        // 回归修复 C6：AI 解读按字段独立渲染（原以 overview 为总开关，
+        // AI 漏 overview 时其余完整字段全部消失且无提示）
         if (a.overview) {
           document.getElementById('analysis-overview').innerHTML = hlNum(a.overview);
+        }
+        {
           const hl = document.getElementById('analysis-highlights');
           hl.innerHTML = '';
           (a.highlights || []).forEach(h => { const li = document.createElement('li'); li.innerHTML = hlNum(h); hl.appendChild(li); });
           const rk = document.getElementById('analysis-risks');
           rk.innerHTML = '';
           (a.risks || []).forEach(r => { const li = document.createElement('li'); li.innerHTML = hlNum(r); rk.appendChild(li); });
-          document.getElementById('analysis-suggestion').textContent = a.suggestion || '';
+          if (a.suggestion) document.getElementById('analysis-suggestion').textContent = a.suggestion;
           // 入局策略（跟随出口国视角）
           const entryBox = document.getElementById('entry-box');
           const es = a.entry_strategy || {};
@@ -813,9 +817,11 @@
             dsBox.hidden = true;
           }
 
-          ab.hidden = false;
-        } else {
-          ab.hidden = true;
+          // 回归修复 C6：只要任一解读字段存在就显示分析框（原以 overview 为总开关，
+          // AI 漏 overview 时其余完整字段全部消失）
+          ab.hidden = !(a.overview || (a.highlights && a.highlights.length) ||
+                        (a.risks && a.risks.length) || a.suggestion ||
+                        (a.entry_strategy && (a.entry_strategy.positioning || a.entry_strategy.actions)));
         }
 
         const years = data.trend.map(t => t.year);

@@ -474,9 +474,14 @@
     const first = trend[String(years[0])];
     const last = trend[String(years[years.length - 1])];
     if (!(first > 0 && last > 0)) return '—';
-    const cagr = (Math.pow(last / first, 1 / (years.length - 1)) - 1) * 100;
+    // 回归修复：指数分母用"年差"（years[last]-years[0]），与后端 summarize_stats
+    // 口径一致（原用数据点间隔数，年份缺失时 CAGR 严重高估，如 [2020,2021,2023]
+    // 前端算 41% vs 后端 26%）
+    const span = years[years.length - 1] - years[0];
+    const cagr = span > 0 ? (Math.pow(last / first, 1 / span) - 1) * 100 : null;
     const range = years[0] + '-' + years[years.length - 1];
-    return (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%（' + range + '）';
+    return cagr == null ? '—' :
+      (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%（' + range + '）';
   }
 
   async function runCompare(product, countries) {

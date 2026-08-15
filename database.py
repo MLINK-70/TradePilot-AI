@@ -111,8 +111,11 @@ def _init_db_unlocked():
             """)
             conn.execute(
                 """INSERT OR IGNORE INTO trade_cache
-                   (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
-                   SELECT cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at
+                   (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at,
+                    source, raw_record_count, clean_record_count, quality, validation_reason)
+                   SELECT cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at,
+                          '', 0, 0, 'suspicious',
+                          'v1.0.2 迁移前历史数据，来源与质量不可考，建议重新查询'
                    FROM trade_cache_legacy""")
             conn.execute("DROP TABLE trade_cache_legacy")
         conn.execute("""

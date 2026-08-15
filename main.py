@@ -213,9 +213,12 @@ def _collect_evidence(product: str, country: str) -> tuple:
             trade_evidence = {}
             competitiveness = {}
             if trend:
+                # 数据精度（回归修复）：round 2 位会把 <50 万美元出口额归零
+                # （0.005 亿美元 → 0.0），下游 CAGR 计算 first>0 判失败 → 指标缺失；
+                # 保留 4 位（最小 1 万美元精度），AI 注入与报告计算都不失真
                 trade_evidence = {
                     "hs_code": hs,
-                    "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                    "trend": {str(y): round(v["value"] / 1e8, 4) for y, v in trend.items()},
                     "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
                     "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
                 }
@@ -306,6 +309,9 @@ def analyze(req: AnalyzeRequest, request: Request):
         "background": background or {},
     }
     # 保存历史（同参数覆盖，供 UI 回看 + 后续缓存命中）
+    # 回归修复 R3：历史结果带生成时间戳（前端可显示"数据截至"，7 天历史
+    # 命中时用户能判断结果的新旧）
+    result["_generated_at"] = datetime.now().isoformat(timespec="seconds")
     try:
         save_report_history("market", product, country, result)
     except Exception:
@@ -338,7 +344,7 @@ def _collect_country_evidence(product: str, country: str) -> dict:
         if trend:
             ev["trade_evidence"] = {
                 "hs_code": hs,
-                "trend": {str(y): round(v["value"] / 1e8, 2) for y, v in trend.items()},
+                "trend": {str(y): round(v["value"] / 1e8, 4) for y, v in trend.items()},  # 4 位精度（与单国口径一致）
                 "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
             }
         if len(rows):
@@ -764,6 +770,8 @@ def trade_query(req: TradeQueryRequest):
         from database import save_report_history
         params = json.dumps({"start_year": req.start_year, "end_year": req.end_year,
                              "reporter": req.reporter}, ensure_ascii=False)
+        # 回归修复 R3：历史结果带生成时间戳
+        result["_generated_at"] = datetime.now().isoformat(timespec="seconds")
         save_report_history("trade", product, target, result, params)
     except Exception:
         logging.warning("保存贸易历史失败: %s / %s", product, target)
@@ -1572,10 +1580,18 @@ def markdown_report(product: str, country: str, d: dict) -> str:
             lines += [f"> **建议**：{_safe(es['recommendation'])}", ""]
         lines.append("")
 
-    # 市场规模
+    # 市场规模（回归修复 C4：AI 漏 value 时显示"未知（2026年估算）"、
+    # 纯数字无单位时显示"123（2026年估算）"——都是误导性展示，统一降级为"数据不足"）
     ms = d.get("market_size") or {}
+    ms_raw = (ms.get("value") or "").strip()
     ms_value = _safe(ms.get("value"), "未知")
     ms_year = _safe(ms.get("year"), "")
+    # 无效值判定：空 / 纯数字（无单位）/ 0
+    _bare_number = bool(ms_raw) and not any(ch.isalpha() for ch in ms_raw) and \
+        ms_raw.replace(",", "").replace(".", "").replace("%", "").replace(" ", "").isdigit()
+    if not ms_raw or ms_raw in ("0", "未知", "—") or _bare_number:
+        ms_value = "数据不足"
+        ms_year = ""
     # 防重复：AI 的 value 常自带"（2026年估算）"，再追加会变成双份（渲染 bug 修复）
     suffix = f"（{ms_year}年估算）" if ms_year and "估算" not in ms_value else ""
     lines += [
