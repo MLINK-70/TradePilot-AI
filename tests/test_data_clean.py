@@ -238,3 +238,39 @@ class TestLatestYearBreaker:
                                side_effect=AssertionError("熔断期内不应打 API")):
             y = trade_mod.get_latest_year()
         assert y == __import__("datetime").date.today().year - 6
+
+
+class TestSameCountryGuard:
+    """回归（v1.0.3 收尾）：同国贸易查询（如"空调→中国"且出口国默认中国）
+    必须明确报错，不得伪装成"出口数据缺失"（UN Comtrade 对同国返回空）"""
+
+    def test_query_trade_same_country(self):
+        import pytest
+        with pytest.raises(ValueError) as ctx:
+            trade.query_trade("空调", "中国", "2024")  # reporter 默认中国
+        assert "相同" in str(ctx.value)
+
+    def test_query_trend_same_country(self):
+        import pytest
+        with pytest.raises(ValueError) as ctx:
+            trade.query_trend("空调", "中国", [2023, 2024])
+        assert "相同" in str(ctx.value)
+
+    def test_collect_evidence_same_country(self):
+        import pytest
+        from main import _collect_evidence
+        with pytest.raises(ValueError) as ctx:
+            _collect_evidence("空调", "中国")
+        assert "相同" in str(ctx.value)
+
+    def test_normal_country_not_blocked(self, tmp_db):
+        """正常组合（德国 ≠ 中国）不得被同国拦截"""
+        from main import _collect_evidence
+        # 不打真实 API：mock 掉证据链内部，确认校验通过后进入采集
+        with mock.patch("main.query_trend", return_value=("8415", [], {})), \
+             mock.patch("main.get_competitiveness", return_value={}), \
+             mock.patch("main.get_market_context", return_value=None), \
+             mock.patch("main.get_trade_background", return_value=None), \
+             mock.patch("main.get_competitive_landscape", return_value=None):
+            ev = _collect_evidence("空调", "德国")
+        assert isinstance(ev, tuple)

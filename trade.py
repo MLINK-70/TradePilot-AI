@@ -722,6 +722,16 @@ def query_trade(product: str, target: str, year: str, reporter: str = "中国"):
     if not target_code:
         raise ValueError(f"未找到国家/组织「{target}」的代码")
 
+    # 回归修复（v1.0.3 收尾）：同国查询语义错误——reporter==target 时 UN Comtrade
+    # 返回 0 条（合法空），前端显示"出口数据缺失"误导用户（如"空调→中国"且出口国
+    # 默认中国 = 中国出口到中国，无意义）。明确报错让用户换目标市场或出口国。
+    reporter_code = AREA_MAP.get(reporter, "")
+    if reporter_code and reporter_code == target_code and target_code not in GROUP_MEMBERS:
+        raise ValueError(
+            f"目标市场「{target}」与出口国「{reporter}」相同——同国贸易查询无意义，"
+            f"请更换目标市场（或在高级选项修改出口国）"
+        )
+
     if target_code in GROUP_MEMBERS:
         rows = fetch_group(hs, year, target_code, reporter)
     else:
@@ -752,6 +762,14 @@ def query_trend(product: str, target: str, years: list, reporter: str = "中国"
     target_code = partner_lookup(target)
     if not target_code:
         raise ValueError(f"未找到国家/组织「{target}」的代码")
+
+    # 同国查询语义错误防护（与 query_trade 一致）：reporter==target → 明确报错
+    reporter_code = AREA_MAP.get(reporter, "")
+    if reporter_code and reporter_code == target_code and target_code not in GROUP_MEMBERS:
+        raise ValueError(
+            f"目标市场「{target}」与出口国「{reporter}」相同——同国贸易查询无意义，"
+            f"请更换目标市场（或在高级选项修改出口国）"
+        )
 
     all_rows = []
     if target_code in GROUP_MEMBERS:

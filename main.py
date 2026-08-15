@@ -203,7 +203,18 @@ def _collect_evidence(product: str, country: str) -> tuple:
     阶段 4 优化：互不依赖的证据采集并行（ThreadPoolExecutor），
     原本串行 3-5 次网络往返压缩为 1 轮；get_latest_year 只取一次。
     """
-    from trade import get_latest_year
+    from trade import AREA_MAP, GROUP_MEMBERS, get_latest_year, partner_lookup
+
+    # 回归修复（v1.0.3 收尾）：同国查询（如"空调→中国"且出口国默认中国）会在
+    # _trade_part 里被"失败不阻断"吞掉 → 前端显示"出口数据缺失"误导。
+    # 在这里显式拦截，让 /api/analyze 把明确错误返回给用户。
+    _rep = AREA_MAP.get("中国", "156")  # 市场分析默认出口国中国
+    _tgt = partner_lookup(country)
+    if _rep and _tgt and _rep == _tgt and _tgt not in GROUP_MEMBERS:
+        raise ValueError(
+            f"目标市场「{country}」与出口国「中国」相同——同国贸易查询无意义，"
+            f"请更换目标市场"
+        )
 
     def _trade_part():
         try:
