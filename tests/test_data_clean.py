@@ -207,3 +207,34 @@ class TestDataGateLineage:
         gate = trade.check_data_gate("8525", "999", "2024", "X", "276")
         assert gate["allowed"] is False
         assert gate["quality"] == "unknown"
+
+
+class TestLatestYearBreaker:
+    """回归（v1.0.3 收尾）：get_latest_year 429 熔断——
+    模块级 _latest_probe_fail_ts 被函数内赋值遮蔽导致 UnboundLocalError"""
+
+    def _patch(self, status_code=404):
+        m = mock.MagicMock()
+        m.status_code = status_code
+        m.json.return_value = {"count": 0}
+        return m
+
+    def test_no_unbound_local_error(self, monkeypatch):
+        """第一次调用（缓存未命中）不抛 UnboundLocalError，探测失败后写熔断"""
+        import trade as trade_mod
+        monkeypatch.setattr(trade_mod, "_latest_probe_fail_ts", 0.0)
+        monkeypatch.setattr(trade_mod, "_read_latest_year_cache", lambda: None)
+        with mock.patch.object(trade_mod.requests, "get", return_value=self._patch(404)):
+            y = trade_mod.get_latest_year()
+        assert isinstance(y, int)
+        assert trade_mod._latest_probe_fail_ts > 0  # 熔断已写
+
+    def test_breaker_skips_probe(self, monkeypatch):
+        """熔断生效期内不再发 API（10 分钟内直接返回 fallback）"""
+        import trade as trade_mod
+        monkeypatch.setattr(trade_mod, "_latest_probe_fail_ts", __import__("time").time())
+        monkeypatch.setattr(trade_mod, "_read_latest_year_cache", lambda: None)
+        with mock.patch.object(trade_mod.requests, "get",
+                               side_effect=AssertionError("熔断期内不应打 API")):
+            y = trade_mod.get_latest_year()
+        assert y == __import__("datetime").date.today().year - 6

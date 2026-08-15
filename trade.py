@@ -131,6 +131,10 @@ def get_latest_year() -> int:
     import datetime
     from database import init_db, save_cache
 
+    # 回归修复：模块级 _latest_probe_fail_ts 被函数内赋值遮蔽 → 未赋值前读取
+    # 抛 UnboundLocalError（149 行读、190 行写，Python 视为局部变量）
+    global _latest_probe_fail_ts
+
     init_db()  # 确保缓存表存在（首次调用/无 db 文件时）
 
     # 30 天 TTL：数据修订后能自动重新探测（阶段 4，B 类审查 #10）
