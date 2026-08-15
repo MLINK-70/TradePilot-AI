@@ -147,7 +147,7 @@
       <form id="trade-form" autocomplete="off">
         <div class="form-row">
           <label for="product">产品</label>
-          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required autocomplete="off">
+          <input type="text" id="product" placeholder="例如：蓝牙耳机 / 8518（HS编码）" required autocomplete="off" maxlength="100">
           <div id="hs-cand-box" hidden>
             <div class="analysis-label">检测到可能的 HS 编码，请选择：</div>
             <div id="hs-cand-list" class="hs-cand-list"></div>
@@ -155,19 +155,19 @@
         </div>
         <div class="form-row">
           <label for="reporter">出口国</label>
-          <input type="text" id="reporter" placeholder="默认中国，可改任意国家" value="中国" list="target-list" required autocomplete="off">
+          <input type="text" id="reporter" placeholder="默认中国，可改任意国家" value="中国" list="target-list" required autocomplete="off" maxlength="50">
         </div>
         <div class="form-row">
           <label for="target">目标市场</label>
-          <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" list="target-list" required autocomplete="off">
+          <input type="text" id="target" placeholder="例如：德国 / 欧盟 / 东盟 / RCEP / 全球" list="target-list" required autocomplete="off" maxlength="50">
           <datalist id="target-list"></datalist>
         </div>
         <div class="form-row">
           <label for="start-year">年份范围</label>
           <div class="year-pair">
-            <input type="text" id="start-year" placeholder="起始" value="2020" list="year-list" required autocomplete="off">
+            <input type="text" id="start-year" placeholder="起始" value="2020" list="year-list" required autocomplete="off" maxlength="4" inputmode="numeric">
             <span class="year-sep">至</span>
-            <input type="text" id="end-year" placeholder="截至（留空=最新）" list="year-list" autocomplete="off">
+            <input type="text" id="end-year" placeholder="截至（留空=最新）" list="year-list" autocomplete="off" maxlength="4" inputmode="numeric">
             <datalist id="year-list"></datalist>
           </div>
         </div>

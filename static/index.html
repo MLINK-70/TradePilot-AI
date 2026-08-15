@@ -209,11 +209,11 @@
       <form id="analyze-form" autocomplete="off">
         <div class="form-row">
           <label for="product">产品</label>
-          <input type="text" id="product" placeholder="例如：蓝牙耳机" required autocomplete="off">
+          <input type="text" id="product" placeholder="例如：蓝牙耳机" required autocomplete="off" maxlength="100">
         </div>
         <div class="form-row">
           <label for="country">目标国家</label>
-          <input type="text" id="country" placeholder="例如：德国" required autocomplete="off">
+          <input type="text" id="country" placeholder="例如：德国" required autocomplete="off" maxlength="50">
         </div>
         <details class="adv-options" id="adv-options">
           <summary>高级选项</summary>
@@ -228,8 +228,8 @@
               <div class="form-row">
                 <label>对比国家</label>
                 <div id="compare-countries">
-                  <input type="text" class="compare-country" placeholder="国家2" list="country-list" autocomplete="off">
-                  <input type="text" class="compare-country" placeholder="国家3" list="country-list" autocomplete="off">
+                  <input type="text" class="compare-country" placeholder="国家2" list="country-list" autocomplete="off" maxlength="50">
+                  <input type="text" class="compare-country" placeholder="国家3" list="country-list" autocomplete="off" maxlength="50">
                   <button type="button" id="add-country" title="添加对比国家">+ 添加</button>
                 </div>
                 <datalist id="country-list">

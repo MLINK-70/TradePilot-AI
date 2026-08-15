@@ -131,7 +131,7 @@
       <form id="fin-form" autocomplete="off">
         <div class="form-row">
           <label for="fin-company">公司名称</label>
-          <input type="text" id="fin-company" placeholder="例如：苹果 / 歌尔股份 / 华为" required autocomplete="off">
+          <input type="text" id="fin-company" placeholder="例如：苹果 / 歌尔股份 / 华为" required autocomplete="off" maxlength="100">
         </div>
         <button type="submit" id="fin-submit" class="btn-primary">查询财报画像</button>
       </form>
@@ -154,7 +154,7 @@
         <form id="ebay-form" autocomplete="off">
           <div class="form-row">
             <label for="ebay-url">eBay 链接</label>
-            <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off">
+            <input type="text" id="ebay-url" placeholder="粘贴 eBay 商品链接，如 https://www.ebay.com/itm/1234567890" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off" maxlength="2000">
           </div>
           <button type="submit" id="ebay-submit" class="btn-primary">分析 eBay 商品</button>
         </form>
@@ -164,7 +164,7 @@
         <form id="aliexpress-form" autocomplete="off" style="margin-top:1.4rem;">
           <div class="form-row">
             <label for="aliexpress-url">速卖通链接</label>
-            <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off">
+            <input type="text" id="aliexpress-url" placeholder="粘贴速卖通商品链接，如 https://www.aliexpress.com/item/1005001234567890.html" style="flex:1;padding:0.55rem 0.1rem;border:none;border-bottom:1.5px solid var(--border);border-radius:0;background:transparent;color:var(--text);" autocomplete="off" maxlength="2000">
           </div>
           <button type="submit" id="aliexpress-submit" class="btn-primary">分析速卖通商品</button>
         </form>
@@ -179,11 +179,11 @@
       <form id="collect-form" autocomplete="off">
         <div class="form-row">
           <label for="product-url">商品链接</label>
-          <input type="text" id="product-url" placeholder="粘贴商品链接（亚马逊等）" autocomplete="off">
+          <input type="text" id="product-url" placeholder="粘贴商品链接（亚马逊等）" autocomplete="off" maxlength="2000">
         </div>
         <div class="form-row">
           <label for="pasted-text">页面内容</label>
-          <textarea id="pasted-text" placeholder="可选：粘贴商品页面内容（反爬/登录墙时用），AI 提取字段" rows="2"></textarea>
+          <textarea id="pasted-text" placeholder="可选：粘贴商品页面内容（反爬/登录墙时用），AI 提取字段" rows="2" maxlength="50000"></textarea>
         </div>
         <div class="btn-row-inline">
           <button type="submit" id="collect-btn" class="btn-primary">采集商品数据</button>
@@ -222,7 +222,7 @@
       <form id="review-form" autocomplete="off">
         <div class="form-row">
           <label for="reviews-input">评论粘贴</label>
-          <textarea id="reviews-input" placeholder="粘贴评论文本，每行一条…（或选品类点下方按钮载入真实评论样本）"></textarea>
+          <textarea id="reviews-input" placeholder="粘贴评论文本，每行一条…（或选品类点下方按钮载入真实评论样本）" maxlength="50000"></textarea>
         </div>
         <div class="btn-row-inline">
           <button type="submit" id="submit-btn" class="btn-primary">分析评论</button>
@@ -275,14 +275,14 @@
         <h3 class="analysis-title">竞品对比</h3>
         <div class="form-row">
           <label for="prod-a">产品 A</label>
-          <input type="text" id="prod-a" placeholder="例如：A 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off">
+          <input type="text" id="prod-a" placeholder="例如：A 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off" maxlength="100">
         </div>
-        <textarea id="reviews-a" placeholder="粘贴产品 A 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
+        <textarea id="reviews-a" placeholder="粘贴产品 A 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;" maxlength="50000"></textarea>
         <div class="form-row">
           <label for="prod-b">产品 B</label>
-          <input type="text" id="prod-b" placeholder="例如：B 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off">
+          <input type="text" id="prod-b" placeholder="例如：B 款耳机" style="flex:1;padding:0.55rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);" autocomplete="off" maxlength="100">
         </div>
-        <textarea id="reviews-b" placeholder="粘贴产品 B 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;"></textarea>
+        <textarea id="reviews-b" placeholder="粘贴产品 B 的评论，每行一条…" style="width:100%;padding:0.62rem 0.85rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card-2);color:var(--text);font-size:0.9rem;resize:vertical;min-height:80px;margin-bottom:0.8rem;" maxlength="50000"></textarea>
         <button type="button" id="compare-btn" class="btn-inline">对比分析</button>
         <div id="compare-result" class="listing-box" hidden></div>
       </div>
