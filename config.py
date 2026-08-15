@@ -41,6 +41,12 @@ ALIEXPRESS_APP_SECRET = os.getenv("ALIEXPRESS_APP_SECRET", "")
 # 获取：https://app.tavily.com 注册后拿 API Key
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
+# UN Comtrade 正式 API（贸易数据，比 preview 数据质量高、无 500 条硬截断）
+# 获取：https://comtradeplus.un.org 注册后生成 subscription key
+UN_COMTRADE_KEY = os.getenv("UN_COMTRADE_KEY", "")
+# 数据源模式：preview（免费，无需 key，有 500 条限制、数据质量较低）/ formal（需 key，推荐）
+UN_COMTRADE_MODE = os.getenv("UN_COMTRADE_MODE", "preview")
+
 # 搜索提供商（多引擎支持）
 # tavily（推荐·默认）/ serper（Google）/ custom（任意兼容接口）
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
@@ -62,6 +68,8 @@ RUNTIME_KEYS = {
     "SEARCH_PROVIDER": SEARCH_PROVIDER,
     "SEARCH_API_KEY": SEARCH_API_KEY,
     "SEARCH_BASE_URL": SEARCH_BASE_URL,
+    "UN_COMTRADE_MODE": UN_COMTRADE_MODE,
+    "UN_COMTRADE_KEY": UN_COMTRADE_KEY,
 }
 
 # 本地模型（Ollama 等 http://localhost）需显式放行才允许非 https/内网地址
@@ -98,6 +106,10 @@ def validate_ai_base_url(url: str) -> str:
         raise ValueError("AI 服务地址缺少主机名")
 
     def _is_local(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        # IPv6：只拒绝环回(::1)和链路本地(fe80::)。其余（含 2001::/32 Teredo 隧道段、
+        # 2001:db8:: 文档段）都是公网，is_private 会把它们误判为内网导致误拒。
+        if ip.version == 6:
+            return ip.is_loopback or ip.is_link_local
         return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
 
     if not ALLOW_LOCAL_AI_BASE_URL and u.scheme != "https":
@@ -197,4 +209,6 @@ def get_keys_status() -> dict:
         "SEARCH_PROVIDER": RUNTIME_KEYS.get("SEARCH_PROVIDER", "tavily"),
         "SEARCH_API_KEY": bool(RUNTIME_KEYS.get("SEARCH_API_KEY")),
         "SEARCH_BASE_URL": bool(RUNTIME_KEYS.get("SEARCH_BASE_URL")),
+        "UN_COMTRADE_MODE": RUNTIME_KEYS.get("UN_COMTRADE_MODE", "preview"),
+        "UN_COMTRADE_KEY": bool(RUNTIME_KEYS.get("UN_COMTRADE_KEY")),
     }

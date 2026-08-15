@@ -24,10 +24,25 @@ ALIEXPRESS_API_PATH = "aliexpress.affiliate.productdetail.get"
 
 
 def _sign(secret: str, api_path: str, params: dict) -> str:
-    """按淘宝开放平台规范生成 HmacSHA256 签名（参数 ASCII 排序拼接 → 前加 API 路径）"""
+    """按淘宝开放平台规范生成 HmacSHA256 签名（参数 ASCII 排序拼接 → 前加 API 路径）
+
+    ⚠️ 签名结果必须是大写 hex（官方 SDK 用 digest("hex").toUpperCase()）——
+    小写 hex 会被网关判为签名不匹配（IncompleteSignature）。
+    """
     keys = sorted(k for k in params if k != "sign")
     raw = api_path + "".join(f"{k}{params[k]}" for k in keys)
-    return hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest().upper()
+
+
+def _timestamp() -> str:
+    """淘宝系网关公共参数 timestamp 格式：yyyy-MM-dd HH:mm:ss（GMT+8 北京时间）
+
+    ⚠️ 不能用 Unix 秒/毫秒——网关按该字符串校验（超时窗口 + 参与签名），
+    格式不符直接签名不通过（官方文档：Indicates the time stamp in the format of
+    yyyy-MM-dd HH:mm:ss and in the time zone of GMT+8）。
+    """
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def request_product_detail(app_key: str, app_secret: str, product_id: str, currency: str = "USD") -> dict:
@@ -36,8 +51,10 @@ def request_product_detail(app_key: str, app_secret: str, product_id: str, curre
         "method": ALIEXPRESS_API_PATH,
         "sign_method": "hmac-sha256",
         "app_key": app_key,
-        "timestamp": str(int(time.time())),
+        "timestamp": _timestamp(),
         "partner_id": "tradepilot",
+        "v": "2.0",          # 淘宝系网关公共参数（回归修复：缺失可能被网关拒绝）
+        "format": "json",    # 同上
         "product_id": str(product_id),
         "currency": currency,
     }
@@ -45,7 +62,11 @@ def request_product_detail(app_key: str, app_secret: str, product_id: str, curre
     resp = requests.post(ALIEXPRESS_API_BASE, data=params, timeout=30,
                          proxies={"http": None, "https": None})  # 强制直连，防梯子 TUN 劫持
     resp.raise_for_status()
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        # 回归修复：网关返回 HTML 错误页时给明确错误而非裸崩
+        raise ValueError("速卖通网关返回非 JSON 响应（可能被风控或网络异常），请稍后重试")
 
 
 def _str_field(v) -> str:

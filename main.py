@@ -29,7 +29,7 @@ def res_path(name: str) -> str:
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from llm import analyze_market, analyze_market_comparison, analyze_trade_trend
 from market_data import (get_competitive_landscape, get_market_context,
@@ -39,7 +39,7 @@ from business import (generate_followup_email, generate_outreach_email,
                       simulate_customer)
 from ecommerce import analyze_product_profile, analyze_reviews, compare_products, generate_listing
 from collectors import collect_product, CollectorError
-from ebay import analyze_item, get_oauth_token, parse_ebay_url
+from ebay import analyze_item, get_oauth_token, parse_ebay_url, EbayTokenExpired
 from aliexpress import analyze_product, parse_aliexpress_url
 import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
@@ -173,8 +173,10 @@ async def security_middleware(request: Request, call_next):
 
 
 class AnalyzeRequest(BaseModel):
-    product: str
-    country: str
+    # 输入长度上限（回归修复）：超长字符串会进 LLM 提示词烧 token、进历史表撑库、
+    # 进下载文件名；统一在模型层截断校验，返回 422 而非继续处理
+    product: str = Field(max_length=100)
+    country: str = Field(max_length=50)
 
 
 def _collect_evidence(product: str, country: str) -> tuple:
@@ -186,9 +188,10 @@ def _collect_evidence(product: str, country: str) -> tuple:
     from trade import get_latest_year
 
     def _trade_part():
-        ly = get_latest_year()
         try:
-            hs, rows, trend = query_trend(product, country, list(range(ly - 2, ly + 1)))
+            ly = get_latest_year()  # 移入 try（回归修复：脏缓存解析曾在此处漏成 500）
+            # 近 5 年窗口（与多国对比 _collect_country_evidence 一致，保证 CAGR 口径可比）
+            hs, rows, trend = query_trend(product, country, list(range(ly - 4, ly + 1)))
             trade_evidence = {}
             competitiveness = {}
             if trend:
@@ -300,8 +303,8 @@ def history_list(report_type: str = ""):
 
 
 class AnalyzeCompareRequest(BaseModel):
-    product: str
-    countries: list[str]
+    product: str = Field(max_length=100)
+    countries: list[str] = Field(max_length=20)  # 粗上限；业务上限 5 国在端点内校验
 
 
 def _collect_country_evidence(product: str, country: str) -> dict:
@@ -374,7 +377,7 @@ def analyze_compare(req: AnalyzeCompareRequest):
 
 
 class AnalyzeExportRequest(AnalyzeRequest):
-    fmt: str = "docx"  # docx / pdf
+    fmt: str = Field(default="docx", max_length=10)  # docx / pdf
 
 
 @app.post("/api/analyze/export")
@@ -411,19 +414,19 @@ def export_market_report(req: AnalyzeExportRequest):
 
 
 class TradeExportRequest(BaseModel):
-    product: str
-    target: str
-    start_year: int          # 起始年
-    end_year: int | None = None  # 截至年（可选，留空默认到最新）
-    reporter: str = "中国"  # 出口国（报告国），默认中国
-    fmt: str = "docx"       # docx / pdf
+    product: str = Field(max_length=100)
+    target: str = Field(max_length=50)
+    start_year: int = Field(ge=1990, le=2100)  # 边界校验：防畸形年份生成巨量年份序列
+    end_year: int | None = Field(default=None, ge=1990, le=2100)
+    reporter: str = Field(default="中国", max_length=50)  # 出口国（报告国），默认中国
+    fmt: str = Field(default="docx", max_length=10)  # docx / pdf
 
 
 def _fetch_trade_data(req: TradeExportRequest) -> tuple[str, list]:
     """复用查询逻辑：产品 + 国家/组织 + 起止年 → (hs_code, rows)"""
     product = req.product.strip()
     target = req.target.strip()
-    reporter = (req.reporter or "中国").strip()
+    reporter = _validate_reporter(req.reporter)  # 回归修复：未知出口国不再静默回退中国
     if not product or not target or not req.start_year:
         raise HTTPException(status_code=400, detail="product、target、start_year 不能为空")
 
@@ -487,7 +490,8 @@ def export_report(req: TradeExportRequest):
     # build_word_report 已不再需要 top_exporters 参数（矩阵内部已算，去掉冗余的 16 国轮询）
     buf = build_word_report(req.product.strip(), req.target.strip(), year_label,
                             hs, rows, ai, get_hs_description(hs), stats, analysis,
-                            landscape, market_ctx, matrix, background, competitiveness)
+                            landscape, market_ctx, matrix, background, competitiveness,
+                            reporter=req.reporter)
     # 收尾：COM 更新域/修表格跨页/拼写检查；pdf 时转 PDF（失败降级 docx）
     from export import finalize_docx
     buf, actual_fmt = finalize_docx(buf, as_pdf=(fmt == "pdf"))
@@ -517,11 +521,11 @@ def export_data(req: TradeExportRequest):
 
 
 class TradeQueryRequest(BaseModel):
-    product: str
-    target: str
-    start_year: int          # 起始年
-    end_year: int | None = None  # 截至年（可选，留空默认到最新）
-    reporter: str = "中国"   # 出口国（报告国），默认中国
+    product: str = Field(max_length=100)
+    target: str = Field(max_length=50)
+    start_year: int = Field(ge=1990, le=2100)  # 边界校验：防畸形年份生成巨量年份序列
+    end_year: int | None = Field(default=None, ge=1990, le=2100)
+    reporter: str = Field(default="中国", max_length=50)  # 出口国（报告国），默认中国
 
 
 def _years_from_range(start_year: int, end_year: int | None) -> list:
@@ -534,12 +538,20 @@ def _years_from_range(start_year: int, end_year: int | None) -> list:
     return list(range(start_year, end_year + 1))
 
 
+def _validate_reporter(reporter: str) -> str:
+    """出口国校验（回归修复）：未知国家曾静默回退成中国（156）并标注用户输入名"""
+    r = (reporter or "中国").strip()
+    if r not in AREA_MAP:
+        raise HTTPException(status_code=400, detail=f"未知出口国/地区：{r}")
+    return r
+
+
 class HsCandidatesRequest(BaseModel):
-    product: str
+    product: str = Field(max_length=100)
 
 
 class CompanyFinancialsRequest(BaseModel):
-    company: str
+    company: str = Field(max_length=100)
 
 
 @app.post("/api/company/financials")
@@ -582,6 +594,7 @@ def trade_query(req: TradeQueryRequest):
     """贸易数据查询：产品 + 国家/组织 + 起止年 → 数据 + 趋势汇总"""
     product = req.product.strip()
     target = req.target.strip()
+    reporter = _validate_reporter(req.reporter)  # 回归修复：未知出口国不再静默回退中国
     if not product or not target or not req.start_year:
         raise HTTPException(status_code=400, detail="product、target、start_year 不能为空")
 
@@ -592,7 +605,7 @@ def trade_query(req: TradeQueryRequest):
     # 历史命中：同参数直接返回（不重复查询 UN Comtrade，省时间/限流额度）
     from database import get_report_history
     hist_params = json.dumps({"start_year": req.start_year, "end_year": req.end_year,
-                              "reporter": req.reporter}, ensure_ascii=False)
+                              "reporter": reporter}, ensure_ascii=False)
     cached = get_report_history("trade", product, target, hist_params)
     if cached:
         logging.info("贸易历史命中: %s → %s", product, target)
@@ -600,14 +613,14 @@ def trade_query(req: TradeQueryRequest):
 
     try:
         if len(years) == 1:
-            hs, rows = query_trade(product, target, str(years[0]), reporter=req.reporter)
+            hs, rows = query_trade(product, target, str(years[0]), reporter=reporter)
             trend = summarize_trend(rows)
         else:
-            hs, rows, trend = query_trend(product, target, years, reporter=req.reporter)
+            hs, rows, trend = query_trend(product, target, years, reporter=reporter)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    logging.info("贸易查询: %s→%s / %s / %d-%s", req.reporter, target, product, req.start_year, req.end_year or "最新")
+    logging.info("贸易查询: %s→%s / %s / %d-%s", reporter, target, product, req.start_year, req.end_year or "最新")
 
     # AI 解读真实贸易数据（失败不阻断查询，前端显示"解读生成失败"）
     analysis = {}
@@ -700,18 +713,18 @@ def trade_query(req: TradeQueryRequest):
 
 
 class BusinessEmailRequest(BaseModel):
-    product: str
-    market: str
-    customer_type: str = "经销商"
-    company: str = ""
-    contact: str = ""
-    email: str = ""
-    selling_points: str = ""
-    customer_company: str = ""
-    customer_contact: str = ""
-    customer_title: str = ""
-    hook: str = "免费样品"
-    credentials: str = ""
+    product: str = Field(max_length=100)
+    market: str = Field(max_length=50)
+    customer_type: str = Field(default="经销商", max_length=50)
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=200)
+    selling_points: str = Field(default="", max_length=2000)
+    customer_company: str = Field(default="", max_length=200)
+    customer_contact: str = Field(default="", max_length=100)
+    customer_title: str = Field(default="", max_length=100)
+    hook: str = Field(default="免费样品", max_length=200)
+    credentials: str = Field(default="", max_length=2000)
 
 
 @app.post("/api/business/outreach")
@@ -737,16 +750,16 @@ def business_outreach(req: BusinessEmailRequest):
 
 
 class BusinessFollowupRequest(BaseModel):
-    product: str
-    market: str
-    customer_type: str = "经销商"
-    original_subject: str = ""
-    company: str = ""
-    contact: str = ""
-    email: str = ""
-    customer_company: str = ""
-    customer_contact: str = ""
-    customer_title: str = ""
+    product: str = Field(max_length=100)
+    market: str = Field(max_length=50)
+    customer_type: str = Field(default="经销商", max_length=50)
+    original_subject: str = Field(default="", max_length=500)
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=200)
+    customer_company: str = Field(default="", max_length=200)
+    customer_contact: str = Field(default="", max_length=100)
+    customer_title: str = Field(default="", max_length=100)
 
 
 @app.post("/api/business/followup")
@@ -771,13 +784,13 @@ def business_followup(req: BusinessFollowupRequest):
 
 
 class BusinessIdeaRequest(BaseModel):
-    idea: str
-    company: str = ""
-    contact: str = ""
-    email: str = ""
-    customer_company: str = ""
-    customer_contact: str = ""
-    customer_title: str = ""
+    idea: str = Field(max_length=2000)
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=200)
+    customer_company: str = Field(default="", max_length=200)
+    customer_contact: str = Field(default="", max_length=100)
+    customer_title: str = Field(default="", max_length=100)
 
 
 @app.post("/api/business/from-idea")
@@ -814,11 +827,11 @@ def business_product_intro(req: BusinessIdeaRequest):
 
 
 class SimulateRequest(BaseModel):
-    product: str
-    market: str
-    customer_type: str = "经销商"
-    user_message: str
-    history: list = []  # [{"role": "user"/"assistant", "content": "..."}]
+    product: str = Field(max_length=100)
+    market: str = Field(max_length=50)
+    customer_type: str = Field(default="经销商", max_length=50)
+    user_message: str = Field(max_length=5000)
+    history: list = Field(default_factory=list, max_length=100)  # 对话历史条数上限
 
 
 @app.post("/api/business/simulate")
@@ -838,8 +851,8 @@ def business_simulate(req: SimulateRequest):
 
 
 class ProductCollectRequest(BaseModel):
-    url: str = ""
-    pasted_text: str = ""
+    url: str = Field(default="", max_length=2000)
+    pasted_text: str = Field(default="", max_length=50000)
 
 
 @app.post("/api/ecommerce/collect")
@@ -866,7 +879,7 @@ def ecommerce_collect(req: ProductCollectRequest):
 
 
 class EcommerceAnalyzeRequest(BaseModel):
-    reviews: list = []       # 用户粘贴的评论（每行一条）
+    reviews: list = Field(default_factory=list, max_length=500)  # 评论条数上限
     use_sample: bool = False  # 使用内置演示数据
 
 
@@ -895,8 +908,8 @@ def ecommerce_analyze(req: EcommerceAnalyzeRequest):
 
 
 class EcommerceListingRequest(BaseModel):
-    product: str
-    platform: str = "亚马逊"
+    product: str = Field(max_length=100)
+    platform: str = Field(default="亚马逊", max_length=50)
     analysis: dict = {}
 
 
@@ -953,12 +966,12 @@ def ecommerce_sample(slug: str = ""):
 
 
 class EbayAnalyzeRequest(BaseModel):
-    url: str
+    url: str = Field(max_length=2000)
 
 
 @app.post("/api/ebay/analyze")
 def ebay_analyze(req: EbayAnalyzeRequest):
-    """eBay 商品链接 → 商品信息 + AI 分析"""
+    """eBay 商品链接 → 商品信息 + AI 分析（回归修复：401 token 过期自动刷新重试一次）"""
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="请提供 eBay 商品链接")
@@ -968,9 +981,15 @@ def ebay_analyze(req: EbayAnalyzeRequest):
     if not cfg.RUNTIME_KEYS.get("EBAY_APP_ID") or not cfg.RUNTIME_KEYS.get("EBAY_CLIENT_SECRET"):
         raise HTTPException(status_code=503, detail="eBay 密钥未配置（需 App ID + Client Secret，见设置面板）")
     try:
-        token = get_oauth_token(cfg.RUNTIME_KEYS.get("EBAY_APP_ID", ""),
-                                cfg.RUNTIME_KEYS.get("EBAY_CLIENT_SECRET", ""))
-        data = analyze_item(item_id, token)
+        app_id = cfg.RUNTIME_KEYS.get("EBAY_APP_ID", "")
+        secret = cfg.RUNTIME_KEYS.get("EBAY_CLIENT_SECRET", "")
+        token = get_oauth_token(app_id, secret)
+        try:
+            data = analyze_item(item_id, token)
+        except EbayTokenExpired:
+            # token 失效（缓存边界/被吊销）：强制刷新后重试一次
+            token = get_oauth_token(app_id, secret, force=True)
+            data = analyze_item(item_id, token)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"eBay 查询失败: {e}")
     logging.info("eBay 分析: %s", item_id)
@@ -978,7 +997,7 @@ def ebay_analyze(req: EbayAnalyzeRequest):
 
 
 class AliexpressAnalyzeRequest(BaseModel):
-    url: str
+    url: str = Field(max_length=2000)
 
 
 @app.post("/api/aliexpress/analyze")
@@ -1002,10 +1021,10 @@ def aliexpress_analyze(req: AliexpressAnalyzeRequest):
 
 
 class EcommerceCompareRequest(BaseModel):
-    product_a: str
-    reviews_a: list = []
-    product_b: str
-    reviews_b: list = []
+    product_a: str = Field(max_length=100)
+    reviews_a: list = Field(default_factory=list, max_length=500)
+    product_b: str = Field(max_length=100)
+    reviews_b: list = Field(default_factory=list, max_length=500)
 
 
 @app.post("/api/ecommerce/compare")
@@ -1028,17 +1047,18 @@ def ecommerce_compare(req: EcommerceCompareRequest):
 
 
 class SettingsRequest(BaseModel):
-    deepseek_key: str = ""   # 兼容旧面板：provider=deepseek 时等价于 AI Key
-    ai_api_key: str = ""     # 新面板：AI Key（当前 provider 的 key，统一入口）
-    tavily_key: str = ""
-    ebay_app_id: str = ""
-    ebay_client_secret: str = ""
-    aliexpress_app_key: str = ""
-    aliexpress_app_secret: str = ""
-    ai_provider: str = ""
-    ai_model: str = ""
-    ai_base_url: str = ""
-    search_provider: str = ""
+    deepseek_key: str = Field(default="", max_length=300)   # 兼容旧面板：provider=deepseek 时等价于 AI Key
+    ai_api_key: str = Field(default="", max_length=300)     # 新面板：AI Key（当前 provider 的 key，统一入口）
+    tavily_key: str = Field(default="", max_length=300)
+    ebay_app_id: str = Field(default="", max_length=300)
+    ebay_client_secret: str = Field(default="", max_length=300)
+    aliexpress_app_key: str = Field(default="", max_length=300)
+    aliexpress_app_secret: str = Field(default="", max_length=300)
+    ai_provider: str = Field(default="", max_length=50)
+    ai_model: str = Field(default="", max_length=100)
+    ai_base_url: str = Field(default="", max_length=500)
+    search_provider: str = Field(default="", max_length=50)
+    un_comtrade_mode: str = Field(default="", max_length=20)   # preview（免费）/ formal（正式接口，需 key）
 
 
 # 登录失败限速（防暴力破解）：同 IP 5 次失败/10 分钟（回归修复）
@@ -1064,26 +1084,26 @@ def _record_login_fail(ip: str):
 
 
 class LoginRequest(BaseModel):
-    password: str
+    password: str = Field(max_length=200)
 
 
 class LeadsRequest(BaseModel):
-    product: str
-    country: str
+    product: str = Field(max_length=100)
+    country: str = Field(max_length=50)
 
 
 class LeadOutreachRequest(BaseModel):
-    product: str
-    country: str
+    product: str = Field(max_length=100)
+    country: str = Field(max_length=50)
     lead: dict = {}          # 线索画像（来自 /api/leads/search 结果）
-    company: str = ""
-    contact: str = ""
-    email: str = ""
-    hook: str = "免费样品"
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=200)
+    hook: str = Field(default="免费样品", max_length=200)
 
 
 class AgentRequest(BaseModel):
-    input: str
+    input: str = Field(max_length=500)
 
 
 @app.post("/api/agent/run")
@@ -1141,10 +1161,10 @@ async def agent_run(req: AgentRequest):
 
 
 class AgentExportRequest(BaseModel):
-    report: str
-    product: str
-    country: str
-    fmt: str = "docx"
+    report: str = Field(max_length=300000)  # Agent 报告 markdown（长报告可到几百 KB）
+    product: str = Field(max_length=100)
+    country: str = Field(max_length=50)
+    fmt: str = Field(default="docx", max_length=10)
 
 
 @app.post("/api/agent/export")
@@ -1300,6 +1320,13 @@ def save_settings(req: SettingsRequest, request: Request):
             cfg.set_key("AI_BASE_URL", req.ai_base_url)
         if req.search_provider:
             cfg.set_key("SEARCH_PROVIDER", req.search_provider)
+        if req.un_comtrade_mode:
+            # 白名单校验（防乱值写入 .env）；formal 模式需已配置 key 才允许切换
+            if req.un_comtrade_mode not in ("preview", "formal"):
+                raise HTTPException(status_code=400, detail="UN Comtrade 模式只支持 preview / formal")
+            if req.un_comtrade_mode == "formal" and not cfg.UN_COMTRADE_KEY:
+                raise HTTPException(status_code=400, detail="切换到正式接口需要先在 .env 配置 UN_COMTRADE_KEY")
+            cfg.set_key("UN_COMTRADE_MODE", req.un_comtrade_mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logging.info("设置已保存")
@@ -1338,9 +1365,13 @@ def markdown_report(product: str, country: str, d: dict) -> str:
 
     # 市场规模
     ms = d.get("market_size") or {}
+    ms_value = _safe(ms.get("value"), "未知")
+    ms_year = _safe(ms.get("year"), "")
+    # 防重复：AI 的 value 常自带"（2026年估算）"，再追加会变成双份（渲染 bug 修复）
+    suffix = f"（{ms_year}年估算）" if ms_year and "估算" not in ms_value else ""
     lines += [
         "## 市场规模",
-        f"- **规模**：{_safe(ms.get('value'), '未知')}（{_safe(ms.get('year'), '未知')}年估算）",
+        f"- **规模**：{ms_value}{suffix}",
         f"- **说明**：{_safe(ms.get('note'))}",
         "",
     ]

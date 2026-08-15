@@ -6,6 +6,7 @@ World Bank API（无 Key 免费）：市场环境数据（GDP/人口/人均/互�
 OEC / NewsAPI 预留（注册 Key 后启用，见 config）。
 """
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -71,8 +72,10 @@ def get_worldbank(iso3: str, indicator: str, year: int = 0) -> float | None:
         data = resp.json()
         if len(data) > 1 and data[1]:
             value = data[1][0].get("value")
-            save_cache(cache_key, "0", "0", "X", [{"value": value}], "META")
-            return value
+            if value is not None:
+                # 回归修复：value=None（WB 临时缺值）不写缓存，否则 90 天不重试
+                save_cache(cache_key, "0", "0", "X", [{"value": value}], "META")
+                return value
     except Exception as e:
         # 接口偶发超时，重试一次
         try:
@@ -82,8 +85,9 @@ def get_worldbank(iso3: str, indicator: str, year: int = 0) -> float | None:
             data = resp.json()
             if len(data) > 1 and data[1]:
                 value = data[1][0].get("value")
-                save_cache(cache_key, "0", "0", "X", [{"value": value}], "META")
-                return value
+                if value is not None:
+                    save_cache(cache_key, "0", "0", "X", [{"value": value}], "META")
+                    return value
         except Exception as e2:
             logging.warning("World Bank 查询失败 %s/%s: %s", iso3, indicator, e2)
     return None
@@ -98,10 +102,15 @@ def get_worldbank_series(iso3: str, indicator: str, years: list) -> dict:
     if not years:
         return {}
     init_db()
-    cache_key = f"WB_SER:{iso3}:{indicator}:{min(years)}-{max(years)}"
-    cached = get_cached(cache_key, "0", "0", "X", "META")
+    # 回归修复：缓存键用完整年份序列（原 min-max 区间会让 [2018,2022] 与 [2019,2020]
+    # 等不同查询串缓存），且读取侧不过滤年份
+    cache_key = f"WB_SER:{iso3}:{indicator}:{','.join(str(y) for y in sorted(set(years)))}"
+    # 数据准确性：序列缓存 90 天 TTL（年度指标需刷新最新年份，防永久旧数据）
+    cached = get_cached(cache_key, "0", "0", "X", "META", ttl_days=90)
     if cached:
-        return {int(k): v for k, v in (cached[0].get("data") or {}).items()}
+        # 读取侧按请求年份过滤（回归修复：防御性双保险，防旧缓存多带年份）
+        return {int(k): v for k, v in (cached[0].get("data") or {}).items()
+                if int(k) in years}
 
     url = f"{WB_BASE}/{iso3}/indicator/{INDICATORS[indicator]}"
     params = {
@@ -295,9 +304,9 @@ LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果�
 
 输出 JSON：
 {
-  "product_category": "产品类别（如：数码相机/无反相机）",
+  "product_category": "产品类别（优先输出市场主流细分类目，如「微单/数码相机」而非泛泛的「相机」）",
   "top_brands": [
-    {"name": "品牌名", "share": "市场份额（如 46.5%）", "position": "地位描述（如：全球第一，单反主导）"}
+    {"name": "品牌名", "share": "市场份额（如 46.5%；数据缺失填「—」并注明）", "position": "地位描述（如：全球第一，单反主导）"}
   ],
   "segment_trends": ["细分趋势1（如：微单出货量是单反10倍）", "细分趋势2"],
   "shift_reasons": ["格局变动原因1（上下游/技术/需求驱动，如：国产CMOS传感器突破降低准入门槛）", "原因2", "原因3"],
@@ -307,8 +316,11 @@ LANDSCAPE_REFRESH_SYSTEM = """你是行业竞争分析师。根据搜索结果�
 }
 
 要求：
-- 基于搜索结果的具体数据（品牌名+份额+年份），不编造
-- 标注数据年份（如"2024年 BCN 数据"）
+- 基于搜索结果的具体数据（品牌名+份额+年份），不编造；标注数据年份（如"2024年 BCN 数据"）
+- **品类细分纪律（最关键）**：若产品词是宽泛品类（如「相机」），必须聚焦该品类**市场主流细分**（如相机 → 微单/数码相机/单反）的品牌份额；
+  运动相机/全景相机等**边缘细分**的品牌（如 GoPro、影石）**不得混入整体品类份额**——它们只能在 segment_trends 中作为细分提及。
+- **主流品牌覆盖**：优先提炼该品类公认的头部品牌（如相机行业的佳能/索尼/尼康/富士、手机行业的三星/苹果/华为）；
+  若搜索结果未覆盖这些品牌，在 key_insight 中注明「主流品牌份额数据未检索到」并说明原因（如检索结果偏向细分品类）。
 - shift_reasons 要结合产业逻辑（上游传感器/芯片、技术路线转移、需求变化）
 - 面向"出口商了解市场格局与变动趋势"的视角"""
 
@@ -318,7 +330,9 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
     from llm import _chat, _parse_json
     init_db()
 
-    cache_key = f"LANDSCAPE:{product}:{market}"
+    # 提示词版本签名：LANDSCAPE_REFRESH_SYSTEM 变更（如品类细分纪律 v2）时旧缓存失效
+    LANDSCAPE_PROMPT_VER = "v2"
+    cache_key = f"LANDSCAPE:{product}:{market}:{LANDSCAPE_PROMPT_VER}"
     cached = get_cached(cache_key, "0", "0", "X", "META")
     if cached and not force_refresh:
         try:
@@ -331,11 +345,12 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
     if not (cfg.SEARCH_API_KEY or cfg.TAVILY_API_KEY):
         return {}
     try:
-        # 两轮检索：①品牌份额 ②产业逻辑（上下游/变动原因）
+        # 三轮检索：①主流品牌份额（含细分品类聚焦）②产业逻辑 ③主流品牌销量数据
         snippets = []
         for query in [
-            f"{product} {market} 品牌 市场份额 排名 竞争格局 龙头",
+            f"{product} {market} 市场份额 排名 龙头 主要品牌 市占率",
             f"{product} 行业 产业链 上下游 传感器 芯片 格局 变动 原因 分析",
+            f"{product} {market} 主流品牌 销量 排名 数据 报告",
         ]:
             snippets += [
                 r.get("content", "")
@@ -347,6 +362,18 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
             {"role": "user", "content": f"产品: {product}，市场: {market}\n搜索到的内容:\n" + "\n---\n".join(snippets[:10])},
         ], use_json=True)
         result = _parse_json(content)
+        # 数据准确性：校验份额和 ≤105%（防 LLM 幻觉，如三家各 40%）
+        total_share = 0.0
+        for b in result.get("top_brands", []):
+            s = str(b.get("share", "")).replace("％", "%").replace(",", "")
+            m = re.search(r"(\d+(?:\.\d+)?)", s)
+            if m:
+                total_share += float(m.group(1))
+        if result.get("top_brands") and total_share > 105:
+            logging.error("[数据准确性] 竞争格局份额和 %.1f%% > 105%%，疑似幻觉，top_brands 置空降级",
+                          total_share)
+            result["top_brands"] = []
+            result["key_insight"] = "竞争格局份额数据异常（份额和超过 100%），已降级，请人工核实。"
         result["_updated"] = datetime.now().isoformat()
         result["_source"] = "Tavily 行业检索"
 

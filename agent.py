@@ -59,7 +59,10 @@ def parse_intent(user_input: str) -> dict:
     # 正则兜底："XX去德国卖" / "XX 卖到 德国" / "XX 销往德国"
     m = re.search(r"(.+?)(?:去|卖到|出口到|发往|销往)(.+?)(?:卖|销售|市场|$)", text)
     if m and m.group(1).strip() and m.group(2).strip():
-        return {"product": m.group(1).strip(), "country": m.group(2).strip(), "task": "full"}
+        # 兜底也做任务类型识别（回归修复：原兜底一律 full，只想要线索的任务多烧 token）
+        tail = m.group(2).strip()
+        task = "leads" if re.search(r"线索|客户|经销商|分销|采购|找买家", tail) else "full"
+        return {"product": m.group(1).strip(), "country": tail, "task": task}
     return {"product": text, "country": "", "task": "full"}
 
 
@@ -75,7 +78,7 @@ def run_agent_pipeline(user_input: str, stop_event=None):
     - {"type": "error", "detail": str}（流水线级异常，正常降级不会出现）
     """
     total = len(STEPS)
-    step_results = []
+    step_results: list = [None] * total  # 每步一条最终状态（回归修复：原 append 双份记录）
     product, country, task = "", "", "full"
     report, leads, outreach = "", [], None
 
@@ -85,7 +88,7 @@ def run_agent_pipeline(user_input: str, stop_event=None):
     def emit(step_idx, status, detail=""):
         ev = {"type": "progress", "step": step_idx, "total": total,
               "title": STEPS[step_idx][1], "status": status, "detail": detail}
-        step_results.append({"title": STEPS[step_idx][1], "status": status, "detail": detail})
+        step_results[step_idx] = {"title": STEPS[step_idx][1], "status": status, "detail": detail}
         return ev
 
     # 步骤 0：意图解析
@@ -100,12 +103,14 @@ def run_agent_pipeline(user_input: str, stop_event=None):
         yield emit(0, "skipped", "未能识别产品，请换个说法，如「蓝牙耳机去德国卖」")
         yield {"type": "result", "product": product, "country": country,
                "report": "", "leads": [], "outreach": None,
+               "steps": step_results,  # 结构统一（回归修复：提前返回缺 steps 键）
                "summary": "未能识别产品，请补充产品与目标市场"}
         return
     if not country:
         yield emit(0, "skipped", "未能识别目标市场，请补充国家，如「蓝牙耳机去德国卖」")
         yield {"type": "result", "product": product, "country": country,
                "report": "", "leads": [], "outreach": None,
+               "steps": step_results,
                "summary": "未能识别目标市场，请补充国家"}
         return
     yield emit(0, "done", f"产品={product}，市场={country}，任务={task}")
@@ -185,8 +190,8 @@ def run_agent_pipeline(user_input: str, stop_event=None):
         yield emit(4, "skipped", "任务不包含线索检索")
         yield emit(5, "skipped", "任务不包含开发信")
 
-    done_n = sum(1 for r in step_results if r["status"] == "done")
-    missing = [r["title"] for r in step_results if r["status"] == "skipped"]
+    done_n = sum(1 for r in step_results if r and r["status"] == "done")
+    missing = [r["title"] for r in step_results if r and r["status"] == "skipped"]
     summary = f"完成 {done_n}/{total} 步" + (f"，缺失：{'；'.join(missing)}" if missing else "，全部完成")
     yield {"type": "result", "product": product, "country": country,
            "report": report, "leads": leads, "outreach": outreach,

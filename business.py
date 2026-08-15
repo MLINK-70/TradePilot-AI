@@ -2,6 +2,8 @@
 
 第三版核心：产品 + 目标市场 + 客户类型 + 公司信息 → 结构化英文开发信 + 中文要点
 """
+import logging
+
 from llm import _chat, _parse_json
 
 OUTREACH_SYSTEM = """你是资深外贸业务员。根据产品、目标市场、客户类型、公司信息，写一封专业的英文开发信（Cold Outreach Email）。
@@ -20,7 +22,7 @@ OUTREACH_SYSTEM = """你是资深外贸业务员。根据产品、目标市场�
 - 语气专业但不生硬，B2B 风格
 - 正文总长度 100-150 词（越短回复率越高）
 - 结合目标市场特点做本地化表达（如德国重品质、日本重细节）
-- 信任背书放第②段（出口年限/认证/现有客户市场，如 "CE/FCC certified, supplying EU for 8 years"）
+- 信任背书放第②段：**仅使用提供的真实背书**；未提供时写通用表达（如 "We can provide certifications upon request"），**禁止编造具体认证/出口年限**（回归修复：原示例 "CE/FCC certified, supplying EU for 8 years" 诱导编造事实）
 - 钩子用提供的（如免费样品/目录/报价）
 - CTA 具体且低门槛（如 "Can I send you our catalog?"），不用 "Let's cooperate"
 - 签名必须用提供的发件人信息；若信息是 [Your Company Name] 这类占位符，原样保留不替换、不编造"""
@@ -62,7 +64,7 @@ def generate_outreach_email(product: str, market: str, customer_type: str,
         f"发件联系人: {contact}\n"
         f"发件邮箱: {email}\n"
         f"钩子: {hook_en}\n"
-        f"信任背书: {credentials or '（未提供，按产品常识写通用背书）'}\n"
+        f"信任背书: {credentials or '（未提供——写通用表达如 “We can provide certifications upon request”，不得声称任何具体认证/出口年限）'}\n"
         f"产品卖点: {selling_points or '（未提供，按产品常识生成）'}\n"
         f"请生成英文开发信（100-150 词，3 段式）。"
     )
@@ -241,22 +243,31 @@ FAQ_SYSTEM = """你是资深外贸业务员。根据核心思路（产品信息�
 - 回答简洁专业"""
 
 
-def generate_product_intro(idea: str, product_hint: str = "") -> dict:
-    """核心思路 → 产品介绍 + FAQ"""
+def generate_product_intro(idea: str) -> dict:
+    """核心思路 → 产品介绍 + FAQ（两次 LLM 调用各自独立降级，一次失败不丢另一份）"""
     user_msg = f"核心思路: {idea}\n请生成产品介绍。"
-    intro_content = _chat([
-        {"role": "system", "content": PRODUCT_INTRO_SYSTEM},
-        {"role": "user", "content": user_msg},
-    ], use_json=True)
-    intro = _parse_json(intro_content)
+    intro = {}
+    try:
+        intro_content = _chat([
+            {"role": "system", "content": PRODUCT_INTRO_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ], use_json=True)
+        intro = _parse_json(intro_content)
+    except Exception:
+        logging.warning("产品介绍生成失败（降级返回空）", exc_info=True)
 
-    faq_content = _chat([
-        {"role": "system", "content": FAQ_SYSTEM},
-        {"role": "user", "content": f"核心思路: {idea}\n请生成 FAQ。"},
-    ], use_json=True)
-    faq = _parse_json(faq_content)
+    faqs = []
+    try:
+        faq_content = _chat([
+            {"role": "system", "content": FAQ_SYSTEM},
+            {"role": "user", "content": f"核心思路: {idea}\n请生成 FAQ。"},
+        ], use_json=True)
+        faq = _parse_json(faq_content)
+        faqs = faq.get("faqs", []) if isinstance(faq.get("faqs"), list) else []
+    except Exception:
+        logging.warning("FAQ 生成失败（降级返回空）", exc_info=True)
 
-    return {"intro": intro, "faqs": faq.get("faqs", [])}
+    return {"intro": intro, "faqs": faqs}
 
 
 SIMULATE_SYSTEM = """你是 {market} 的 {customer_type}（采购商），正在与一家 {product} 供应商沟通。扮演一个真实、专业的海外采购商。
@@ -292,10 +303,12 @@ def simulate_customer(product: str, market: str, customer_type: str,
     }
     trait = market_traits.get(market, "重视品质与价格平衡")
 
-    system = SIMULATE_SYSTEM.format(
-        market=market, customer_type=customer_type,
-        product=product, market_trait=trait,
-    )
+    # 回归修复：原 .format() 在用户输入含 { } 时抛 KeyError/IndexError → 500；
+    # 改用 replace 顺序替换（占位符与用户输入内容不会互相干扰）
+    system = SIMULATE_SYSTEM
+    for ph, val in (("{market}", market), ("{customer_type}", customer_type),
+                    ("{product}", product), ("{market_trait}", trait)):
+        system = system.replace(ph, val)
 
     messages = [{"role": "system", "content": system}]
     # 历史对话（用户+AI 交替）；role 白名单校验，防注入

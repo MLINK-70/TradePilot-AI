@@ -6,6 +6,7 @@
 复用 llm._chat / _parse_json 底座。
 """
 import json
+import logging
 import re
 
 from llm import _chat, _parse_json
@@ -37,24 +38,18 @@ REVIEW_PARSE_SYSTEM = """你是跨境电商评论分析师。分析每条用户�
 
 REVIEW_SUMMARY_SYSTEM = """你是资深产品经理。根据评论分析结果（每条评论的 sentiment/aspect/痛点/卖点），输出产品改进洞察。
 
+注意：痛点/卖点的「出现次数」和「前 5 排序」由程序精确计算，不在你这里生成、也不要重复统计。
+
 输出 JSON：
 {
-  "top_pains": [
-    {"pain": "痛点描述（如：续航虚标严重）", "count": 出现次数, "aspect": "维度", "example": "引用原文（必须来自给定评论，不能编造）"}
-  ],
-  "top_praises": [
-    {"praise": "卖点描述（如：降噪效果出色）", "count": 出现次数, "aspect": "维度", "example": "引用原文"}
-  ],
   "overall_sentiment": "一句话总评（正面/负面/混合）",
   "improvement_suggestions": ["改进建议1（具体可执行）", "改进建议2"],
   "zh_summary": "中文总结（面向产品改进方向）"
 }
 
 要求：
-- top_pains 按出现次数排序取前 5，top_praises 取前 5
-- example 必须逐字来自给定评论，禁止编造引用
-- 改进建议具体（如"将电池容量标注改为实测值"），不说空话
-- 所有数字来自统计，不虚增"""
+- 基于给定的痛点/卖点统计结果与原文提炼，不编造
+- 改进建议具体（如"将电池容量标注改为实测值"），不说空话"""
 
 
 def _parse_reviews_batch(reviews: list) -> list:
@@ -73,7 +68,11 @@ def _parse_reviews_batch(reviews: list) -> list:
                 {"role": "user", "content": "评论列表（每行一条）:\n" + "\n".join(f"{j + 1}. {r}" for j, r in enumerate(batch))},
             ], use_json=True)
             data = _parse_json(content)
-            batch_parsed = data.get("reviews", [])
+            # 回归修复：LLM 返回非列表/含非 dict 元素时兜底过滤，防下游 r.get() 崩 500
+            batch_parsed = data.get("reviews", []) or []
+            if not isinstance(batch_parsed, list):
+                batch_parsed = []
+            batch_parsed = [r for r in batch_parsed if isinstance(r, dict)]
             if len(batch_parsed) == len(batch):
                 break  # 数量一致，无需重试
         parsed.extend(batch_parsed)
@@ -91,32 +90,74 @@ def analyze_reviews(reviews: list) -> dict:
     # 1. 解析（逐条提取 sentiment/aspect/痛点/卖点）
     parsed = _parse_reviews_batch(reviews)
 
-    # 2. 程序统计（可溯源，不依赖 AI 算数）
+    # 2. 程序统计 + 痛点/卖点程序聚类计数（数据准确性红线：AI 不参与算术，
+    #    此前 count 和排序由 LLM 生成，可能虚增/漏合/排序错位）
     sentiments = {"positive": 0, "negative": 0, "neutral": 0}
     aspect_counts = {}
+
+    def _norm(s):
+        return re.sub(r"[\s，。！？,.!?;；:：'\"“”‘’\-]", "", str(s))
+
+    pain_counter = {}
+    praise_counter = {}
+    pain_display = {}
+    praise_display = {}
+    pain_example = {}
+    praise_example = {}
+    pain_aspect = {}
+    praise_aspect = {}  # 回归修复：正面卖点的维度此前从未写入，输出硬编码"其他"
+
     for r in parsed:
         s = r.get("sentiment", "neutral")
-        sentiments[s] = sentiments.get(s, 0) + 1
+        if s not in sentiments:
+            s = "neutral"
+        sentiments[s] += 1
         a = r.get("aspect", "其他")
         aspect_counts[a] = aspect_counts.get(a, 0) + 1
+        pp = _norm(r.get("pain_point"))
+        if pp:
+            pain_counter[pp] = pain_counter.get(pp, 0) + 1
+            pain_display.setdefault(pp, str(r.get("pain_point", "")))
+            pain_example.setdefault(pp, str(r.get("text", "")))
+            pain_aspect.setdefault(pp, a)
+        pr = _norm(r.get("praise_point"))
+        if pr:
+            praise_counter[pr] = praise_counter.get(pr, 0) + 1
+            praise_display.setdefault(pr, str(r.get("praise_point", "")))
+            praise_example.setdefault(pr, str(r.get("text", "")))
+            praise_aspect.setdefault(pr, a)
 
-    # 3. AI 聚类（带原文引用的痛点/卖点）
-    summary_content = _chat([
-        {"role": "system", "content": REVIEW_SUMMARY_SYSTEM},
-        {"role": "user", "content": json.dumps(parsed, ensure_ascii=False)},
-    ], use_json=True)
-    summary = _parse_json(summary_content)
+    top_pains = [{"pain": pain_display[k], "count": v, "aspect": pain_aspect.get(k, "其他"), "example": pain_example[k]}
+                 for k, v in sorted(pain_counter.items(), key=lambda x: -x[1])[:5]]
+    top_praises = [{"praise": praise_display[k], "count": v, "aspect": praise_aspect.get(k, "其他"), "example": praise_example[k]}
+                   for k, v in sorted(praise_counter.items(), key=lambda x: -x[1])[:5]]
+
+    # 3. AI 整体解读（只负责总评/建议/总结，不负责计数排序）
+    # 回归修复：AI 解读失败不阻断——程序统计结果（sentiments/聚类）已算好，
+    # 降级返回空解读并标记，避免已算好的统计全丢
+    summary = {}
+    try:
+        summary_content = _chat([
+            {"role": "system", "content": REVIEW_SUMMARY_SYSTEM},
+            {"role": "user", "content": json.dumps(
+                {"sentiments": sentiments, "aspect_counts": aspect_counts,
+                 "top_pains": top_pains, "top_praises": top_praises},
+                ensure_ascii=False)},
+        ], use_json=True)
+        summary = _parse_json(summary_content)
+    except Exception:
+        logging.warning("评论解读失败（降级返回程序统计）", exc_info=True)
+        summary = {}
 
     # 4. 引用真实性校验：宽松匹配（去空白/标点后比对），防幻觉但容忍轻微改写
     def _normalize(s):
         return re.sub(r"[\s，。！？,.!?;；:：'\"“”‘’\-]", "", str(s))
 
     normalized_reviews = {_normalize(r) for r in reviews}
-    for pains in (summary.get("top_pains", []), summary.get("top_praises", [])):
-        for item in pains:
-            ex = item.get("example", "")
-            if ex and _normalize(ex) not in normalized_reviews:
-                item["example"] = "(引用校验失败，已移除)"
+    for item in top_pains + top_praises:
+        ex = item.get("example", "")
+        if ex and _normalize(ex) not in normalized_reviews:
+            item["example"] = "(引用校验失败，已移除)"
 
     return {
         "total": len(reviews),
@@ -124,11 +165,12 @@ def analyze_reviews(reviews: list) -> dict:
         "parse_mismatch": len(parsed) != len(reviews),  # 解析数与输入不一致时前端提示（B 类审查 #8）
         "sentiments": sentiments,
         "aspect_counts": aspect_counts,
-        "top_pains": summary.get("top_pains", []),
-        "top_praises": summary.get("top_praises", []),
+        "top_pains": top_pains,
+        "top_praises": top_praises,
         "overall_sentiment": summary.get("overall_sentiment", ""),
-        "improvement_suggestions": summary.get("improvement_suggestions", []),
+        "improvement_suggestions": summary.get("improvement_suggestions", []) if isinstance(summary.get("improvement_suggestions"), list) else [],
         "zh_summary": summary.get("zh_summary", ""),
+        "summary_failed": not summary,  # AI 解读失败标记（前端可提示"解读生成失败，统计仍有效"）
         "sample_basis": True,  # 基于提供的评论样本
     }
 

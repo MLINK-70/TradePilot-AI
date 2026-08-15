@@ -30,6 +30,8 @@ else:
 _write_lock = threading.Lock()
 # DDL 锁：并发 init_db（8 指标并发首次拉取）时防止 DROP/建表竞态
 _init_lock = threading.Lock()
+# 进程内已初始化标记（回归修复：此前每个请求路径都重复执行整套 DDL）
+_db_initialized = False
 
 
 def get_conn():
@@ -49,8 +51,14 @@ def enable_wal():
 
 def init_db():
     # 并发 init_db（如 World Bank 8 指标并发首查）时串行化 DDL，防建表/DROP 竞态
+    global _db_initialized
+    if _db_initialized:
+        return
     with _init_lock:
+        if _db_initialized:
+            return
         _init_db_unlocked()
+        _db_initialized = True
 
 
 def _init_db_unlocked():
@@ -69,10 +77,12 @@ def _init_db_unlocked():
                 UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
             )
         """)
-        # 迁移：旧表无 cache_key 列时重建（缓存数据易失，直接重建避免索引冲突）
+        # 迁移：旧表无 cache_key 列时无损重建（回归修复：原实现 DROP 丢数据 +
+        # 并发读会撞 "no such table"；且 SQLite ADD COLUMN 不能加 UNIQUE 约束，
+        # 因此用 新建→复制→换名 保数据）
         cols = [r[1] for r in conn.execute("PRAGMA table_info(trade_cache)").fetchall()]
         if "cache_key" not in cols:
-            conn.execute("DROP TABLE trade_cache")
+            conn.execute("ALTER TABLE trade_cache RENAME TO trade_cache_legacy")
             conn.execute("""
                 CREATE TABLE trade_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,6 +97,12 @@ def _init_db_unlocked():
                     UNIQUE(cmd_code, partner_code, period, flow_code, reporter_code, cache_key)
                 )
             """)
+            conn.execute(
+                """INSERT OR IGNORE INTO trade_cache
+                   (cmd_code, partner_code, period, flow_code, reporter_code, cache_key, data_json, fetched_at)
+                   SELECT cmd_code, partner_code, period, flow_code, reporter_code, '', data_json, fetched_at
+                   FROM trade_cache_legacy""")
+            conn.execute("DROP TABLE trade_cache_legacy")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS query_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,12 +147,22 @@ def _init_db_unlocked():
 
 
 def cleanup_expired_cache(trade_max_days: int = 365, history_max_days: int = 90):
-    """启动时清理过期缓存行（保守下限：读取侧还有更严格的动态 TTL）"""
+    """启动时清理过期缓存行（保守下限：读取侧还有更严格的动态 TTL）
+
+    回归修复：一并清理 access_log / query_log / admin_sessions（此前只清两张缓存表，
+    三张日志/会话表随使用无限增长导致 db 膨胀）。
+    """
     with contextlib.closing(get_conn()) as conn:
         cutoff = (datetime.now() - timedelta(days=trade_max_days)).isoformat()
         conn.execute("DELETE FROM trade_cache WHERE fetched_at < ?", (cutoff,))
         cutoff_h = (datetime.now() - timedelta(days=history_max_days)).isoformat()
         conn.execute("DELETE FROM report_history WHERE created_at < ?", (cutoff_h,))
+        conn.execute("DELETE FROM query_log WHERE created_at < ?", (cutoff_h,))
+        conn.execute("DELETE FROM access_log WHERE created_at < ?", (cutoff_h,))
+        # 过期管理员会话（TTL 天数对齐 ADMIN_SESSION_TTL_DAYS）
+        import config as _cfg
+        cutoff_admin = (datetime.now() - timedelta(days=_cfg.ADMIN_SESSION_TTL_DAYS)).isoformat()
+        conn.execute("DELETE FROM admin_sessions WHERE expires_at < ?", (cutoff_admin,))
         conn.commit()
 
 

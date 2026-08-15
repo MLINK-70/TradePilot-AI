@@ -58,6 +58,21 @@ class TestSummarizeTrend:
         rows = [{"primaryValue": 9}, {"refYear": 2020, "primaryValue": 5, "netWgt": 1}]
         assert summarize_trend(rows) == {2020: {"value": 5.0, "weight": 1.0}}
 
+    def test_refyear_fallback_to_period(self):
+        """数据准确性：refYear 缺失时回退 period 前 4 位，不静默丢数据"""
+        rows = [
+            {"period": "2024", "primaryValue": 10, "netWgt": 2},  # 无 refYear
+            {"refYear": 2023, "primaryValue": 5, "netWgt": 1},
+        ]
+        trend = summarize_trend(rows)
+        assert 2024 in trend and 2023 in trend
+        assert trend[2024] == {"value": 10.0, "weight": 2.0}
+
+    def test_string_value_coerced_to_float(self):
+        """数据准确性：primaryValue 为字符串时 float 强转，不拼接不报错"""
+        rows = [{"refYear": 2020, "primaryValue": "5.5", "netWgt": "1"}]
+        assert summarize_trend(rows) == {2020: {"value": 5.5, "weight": 1.0}}
+
 
 class TestComputeTc:
     def test_zero_zero_returns_none(self):

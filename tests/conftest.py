@@ -31,5 +31,7 @@ def tmp_db(tmp_path, monkeypatch):
     """数据库夹具：指向临时库并初始化"""
     import database
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    # 回归修复：init-once 标记需随库重置，否则后续用例建表被跳过
+    monkeypatch.setattr(database, "_db_initialized", False)
     database.init_db()
     return database

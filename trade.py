@@ -14,10 +14,20 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+import config as cfg
 from countries import ALL_COUNTRIES
 from database import get_cached, init_db, log_query, save_cache
 
-BASE_URL = "https://comtradeapi.un.org/public/v1/preview/C/A/HS"
+# UN Comtrade 数据源（可切换）：
+# - preview：免费，无需 key，有 500 条硬截断、部分国家申报数据质量较低
+# - formal：需 subscription key（config.UN_COMTRADE_KEY），数据质量高
+# 通过 .env 的 UN_COMTRADE_MODE 切换（默认 preview，向后兼容）
+_PREVIEW_URL = "https://comtradeapi.un.org/public/v1/preview/C/A/HS"
+_FORMAL_URL = "https://comtradeapi.un.org/data/v1/get/C/A/HS"
+
+
+def _use_formal() -> bool:
+    return cfg.UN_COMTRADE_MODE == "formal" and bool(cfg.UN_COMTRADE_KEY)
 
 # 常用消费电子 HS 编码映射表（第二版起步用，可扩展）
 HS_MAP = {
@@ -98,6 +108,18 @@ GROUP_MEMBERS = {
 _latest_year_lock = threading.Lock()
 
 
+def _read_latest_year_cache() -> int | None:
+    """读最新年份缓存；脏数据（旧结构/手工改库）解析失败返回 None（防 500 泄漏）"""
+    from database import get_cached
+    try:
+        cached = get_cached("LATEST_YEAR", "0", "0", "X", "META", ttl_days=30)
+        if cached:
+            return int(cached[0]["year"])
+    except (KeyError, TypeError, ValueError, IndexError, Exception):
+        logging.warning("最新年份缓存解析失败，按未命中处理", exc_info=True)
+    return None
+
+
 def get_latest_year() -> int:
     """探测 UN Comtrade 最新可用年份（从今年往前找第一个有数据的年份）
 
@@ -105,21 +127,20 @@ def get_latest_year() -> int:
     30 天 TTL + single-flight：并发调用共享一次探测。
     """
     import datetime
-    from database import get_cached, init_db, save_cache
+    from database import init_db, save_cache
 
     init_db()  # 确保缓存表存在（首次调用/无 db 文件时）
 
-    meta_key = "LATEST_YEAR"
     # 30 天 TTL：数据修订后能自动重新探测（阶段 4，B 类审查 #10）
-    cached = get_cached(meta_key, "0", "0", "X", "META", ttl_days=30)
-    if cached:
-        return int(cached[0]["year"])
+    latest = _read_latest_year_cache()
+    if latest is not None:
+        return latest
 
     # single-flight：探测期间其他线程等待后直接读缓存
     with _latest_year_lock:
-        cached = get_cached(meta_key, "0", "0", "X", "META", ttl_days=30)
-        if cached:
-            return int(cached[0]["year"])
+        latest = _read_latest_year_cache()
+        if latest is not None:
+            return latest
         this_year = datetime.date.today().year
         # 探测范围 6 年（数据更新滞后时也能找到最新可用年份）
         for y in range(this_year, this_year - 6, -1):
@@ -132,14 +153,17 @@ def get_latest_year() -> int:
                     "flowCode": "X",
                     "maxRecords": 1,
                 }
+                hdrs = {"Accept": "application/json"}
+                if _use_formal():
+                    hdrs["Ocp-Apim-Subscription-Key"] = cfg.UN_COMTRADE_KEY
                 resp = requests.get(
-                    BASE_URL, params=params,
-                    headers={"Accept": "application/json"},
+                    _FORMAL_URL if _use_formal() else _PREVIEW_URL, params=params,
+                    headers=hdrs,
                     timeout=30,
                     proxies={"http": None, "https": None},
                 )
                 if resp.status_code == 200 and resp.json().get("count", 0) > 0:
-                    save_cache(meta_key, "0", "0", "X", [{"year": y}], "META")
+                    save_cache("LATEST_YEAR", "0", "0", "X", [{"year": y}], "META")
                     logging.info("最新可用年份探测: %d", y)
                     return y
             except Exception:
@@ -300,8 +324,10 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
     """
     reporter_code = AREA_MAP.get(reporter, "156")
     flow_code = flow
+    # 回归修复：缓存键含数据源模式（preview/formal 切换后旧缓存不得继续命中）
+    mode_key = "formal" if _use_formal() else "preview"
     cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
-                        ttl_days=_ttl_for_period(period))
+                        cache_key=mode_key, ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
 
@@ -314,12 +340,18 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
         "maxRecords": 500,
     }
     last_error = None
+    # 数据源：formal（带 subscription key 头）/ preview（免费）
+    use_formal = _use_formal()
+    base_url = _FORMAL_URL if use_formal else _PREVIEW_URL
+    headers = {"Accept": "application/json"}
+    if use_formal:
+        headers["Ocp-Apim-Subscription-Key"] = cfg.UN_COMTRADE_KEY
     for attempt in range(3):
         try:
             resp = requests.get(
-                BASE_URL,
+                base_url,
                 params=params,
-                headers={"Accept": "application/json"},
+                headers=headers,
                 timeout=60,
                 proxies={"http": None, "https": None},  # 强制直连（防梯子劫持）
             )
@@ -333,18 +365,49 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 continue
             resp.raise_for_status()
             try:
-                data = resp.json().get("data", [])
+                payload = resp.json()
             except ValueError:
                 raise ValueError(f"UN Comtrade 返回非 JSON 响应（HTTP {resp.status_code}）")
-            if len(data) >= 500:
-                # 触顶提示：preview 接口 4 位码返回聚合记录，理论上不会触发；
-                # 若触发说明可能有更细粒度数据被截断，数值偏小（B 类审查 #9）。
-                # 用 logging 而非 print：web 部署下 print 无人可见。
-                logging.warning("[截断] HS%s %s 返回 %d 条，可能达到记录上限，统计数值偏小",
-                                cmd_code, period, len(data))
+            if not isinstance(payload, dict) or "data" not in payload:
+                # 回归修复：200 + 错误响应体（无 data 键）不得当作"合法空结果"写入缓存，
+                # 否则用户会看到假"无贸易数据"且被永久缓存
+                raise ValueError("UN Comtrade 返回异常结构（缺少 data 字段），已拒绝")
+            raw_data = payload.get("data", []) or []
+            # 截断检测必须在过滤之前（回归修复：原实现过滤后才检查，500 条原始行里
+            # 若恰无 C00/mot=0 总额行，残缺结果会被静默当作完整数据缓存）
+            if len(raw_data) >= 500:
+                raise ValueError(
+                    f"UN Comtrade 返回 {len(raw_data)} 条达到记录上限（结果不完整，已拒绝）")
+            # 正确聚合（数据准确性，实测验证）：UN Comtrade 按 customsCode(贸易方式：
+            # C00=总计=C03+C04+…) 和 motCode(运输方式：0=全部) 拆分为多条，且部分查询
+            # 有成对重复行。正确总额 = customsCode=C00 且 motCode=0 的唯一记录。
+            # 此前"sum 所有行"(55亿) 和 "mot=0 优先"(27.5亿) 均错误，真实值为 6.88 亿。
+            seen = set()
+            unique = []
+            for r in raw_data:
+                key = (r.get("reporterCode"), r.get("partnerCode"), r.get("cmdCode"),
+                       r.get("period"), r.get("motCode"), r.get("mosCode"),
+                       r.get("customsCode"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(r)
+            total_rows = [r for r in unique
+                          if str(r.get("customsCode")) == "C00" and str(r.get("motCode")) == "0"]
+            if not total_rows:
+                # 兜底（回归修复）：无 C00+mot=0 时依次取 customs=C00 行、mot=0 行；
+                # 不再回退到"全部去重行"（明细行 C03/C04 求和 ≈ 总额 2~3 倍，系统性偏大）
+                total_rows = [r for r in unique if str(r.get("customsCode")) == "C00"] or \
+                             [r for r in unique if str(r.get("motCode")) == "0"]
+            if not total_rows:
+                # 数据准确性红线（宁缺勿错）：无任何总额行说明数据残缺（截断/申报口径），
+                # 报错不写缓存，防止调用方把残缺/翻倍数字当完整结果
+                raise ValueError("UN Comtrade 返回数据缺少总额行（customsCode=C00），已拒绝")
+            data = total_rows
             # 空结果也写缓存（30 天短 TTL 由读取侧 _ttl_for_period 控制）：
             # 某国某年无贸易数据是合法结果，不缓存会导致每次查询都打 API
-            save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code)
+            save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code,
+                       cache_key=mode_key)
             return data
         except requests.exceptions.RequestException as e:
             last_error = str(e)
@@ -365,8 +428,9 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
     限流只在 429 时由 fetch_year 内部退避（plan 修订 #3：并发撞窗再退串行）。
     """
     reporter_code = AREA_MAP.get(reporter, "156")
+    mode_key = "formal" if _use_formal() else "preview"
     cached = get_cached(cmd_code, group_code, period, flow, reporter_code,
-                        ttl_days=_ttl_for_period(period))
+                        cache_key=mode_key, ttl_days=_ttl_for_period(period))
     if cached is not None:
         return cached
 
@@ -417,11 +481,16 @@ def fetch_group(cmd_code: str, period: str, group_code: str, reporter: str = "�
                 all_rows.extend(cached_rows)
 
     if failed:
-        logging.warning("[警告] %d 国查询失败: %s", len(failed), "、".join(failed))
+        logging.error("[数据准确性] %d 国查询失败，组织聚合结果残缺，返回空（宁缺勿错）: %s",
+                      len(failed), "、".join(failed))
+        # 数据准确性红线：任一成员失败导致聚合数字系统性偏小（TC/份额失真），
+        # 宁可返回空（调用方置 available=False/None）也不返回残缺数字
+        return []
 
-    # 有失败国时聚合数据残缺，不写缓存（防止残缺结果被永久缓存）
-    if all_rows and not failed:
-        save_cache(cmd_code, group_code, period, flow, all_rows, reporter_code)
+    # 全部成功才写缓存（残缺结果被永久缓存会让错误长期留存）
+    if all_rows:
+        save_cache(cmd_code, group_code, period, flow, all_rows, reporter_code,
+                   cache_key=mode_key)
     return all_rows
 
 
@@ -477,7 +546,11 @@ def fetch_group_world_imports(cmd_code: str, period: str, group_code: str) -> li
             if cached_rows is not None:
                 all_rows.extend(cached_rows)
 
-    if all_rows and not failed:
+    if failed:
+        logging.error("[数据准确性] %d 国查询失败，组织进口聚合残缺，返回空（宁缺勿错）: %s",
+                      len(failed), "、".join(failed))
+        return []
+    if all_rows:
         save_cache(cmd_code, group_code, period, "MW", all_rows, "0")
     return all_rows
 
@@ -536,15 +609,22 @@ def query_trend(product: str, target: str, years: list, reporter: str = "中国"
 
 
 def summarize_trend(rows: list) -> dict:
-    """逐年汇总：{year: {"value": float, "weight": float}}，按 refYear 聚合"""
+    """逐年汇总：{year: {"value": float, "weight": float}}，按 refYear 聚合
+
+    数据准确性：refYear 缺失时回退 period 前 4 位（防静默丢整条记录），
+    仍无效才跳过。
+    """
     by_year: dict[int, dict] = {}
     for r in rows:
         year = r.get("refYear")
         if not year:
+            period = str(r.get("period") or "")
+            year = int(period[:4]) if len(period) >= 4 and period[:4].isdigit() else None
+        if not year:
             continue
         entry = by_year.setdefault(year, {"value": 0.0, "weight": 0.0})
-        entry["value"] += r.get("primaryValue") or 0
-        entry["weight"] += r.get("netWgt") or 0
+        entry["value"] += float(r.get("primaryValue") or 0)
+        entry["weight"] += float(r.get("netWgt") or 0)
     return {y: v for y, v in sorted(by_year.items())}
 
 
@@ -664,7 +744,12 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             imp_rows = fetch_year(hs, target_code, year, reporter, flow="M")
         export_value = sum(r.get("primaryValue") or 0 for r in exp_rows)
         import_value = sum(r.get("primaryValue") or 0 for r in imp_rows)
-        tc = compute_tc(export_value, import_value)
+        # 数据准确性：合法空结果（无贸易记录）≠ 真实为 0——
+        # 缺失时算 TC 会得到 ±1.0 极端值（假"完美竞争力"），一律置 None
+        if not exp_rows or not imp_rows or (export_value <= 0 and import_value <= 0):
+            tc = None
+        else:
+            tc = compute_tc(export_value, import_value)
 
         # 市场出口份额：目标市场该产品总进口（flow=M, partner=0 全球）
         # 组织目标：逐成员查"成员从全球进口"并求和（partner=0，非出口国对成员进口）
@@ -675,6 +760,16 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
         market_import_value = sum(r.get("primaryValue") or 0 for r in market_import_rows)
         market_share = round(export_value / market_import_value * 100, 2) if market_import_value else None
 
+        # 三态数据质量标记（数据准确性）：内部自洽检查
+        # suspicious：出口申报额 > 目标市场总进口（份额>100%，数学不自洽，多为
+        #   出口方申报与进口方申报口径差异——如德国转口/统计制度，需谨慎解读）
+        quality = "valid"
+        quality_note = ""
+        if market_import_value and export_value > market_import_value:
+            quality = "suspicious"
+            quality_note = ("该贸易流出口方申报额大于目标市场总进口（份额超 100%），"
+                            "存在镜像口径差异，数据可信度降低，相关结论需谨慎解读。")
+
         return {
             "tc": tc,
             "export_value": export_value,
@@ -682,6 +777,8 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             "market_import_value": market_import_value,
             "market_share": market_share,  # 出口国占目标市场该产品进口的份额（%）
             "available": True,
+            "quality": quality,      # valid / suspicious / invalid
+            "quality_note": quality_note,
         }
     except Exception:
         return {}
@@ -710,7 +807,7 @@ def get_competitor_comparison(product: str, target: str, year: str,
         cache_k = f"V1|{target}|{reporter}"
         try:
             from database import get_cached
-            cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k)
+            cached = get_cached("COMPARE", hs, year, "X", "0", cache_key=cache_k, ttl_days=_ttl_for_period(year))
             if cached is not None and isinstance(cached, list):
                 return {"competitors": cached, "available": True}
         except Exception:
@@ -757,7 +854,7 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
         cache_k = f"V1|{target}|{'-'.join(map(str, years))}|{reporter}"
         try:
             from database import get_cached
-            cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k)
+            cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k, ttl_days=_ttl_for_period(str(years[-1])))
             if cached is not None and isinstance(cached, list):
                 return cached
         except Exception:
@@ -837,7 +934,7 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         # 先查缓存（HS+年份 → TOP 出口国），版本签名 V1：改候选人名单/计算时递增
         try:
             from database import get_cached
-            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="V1|rank")
+            cached = get_cached("TOPEXP", hs, year, "X", "0", cache_key="V1|rank", ttl_days=_ttl_for_period(year))
             if cached is not None and isinstance(cached, list):
                 return cached[:top_n]
         except Exception:

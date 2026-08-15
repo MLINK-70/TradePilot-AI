@@ -69,11 +69,19 @@
           <input type="password" id="set-ebay-secret" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · eBay 商品分析（链接→价格/评分/卖家）。需 eBay 开发者审核 · 需梯子</div>
         </div>
-        <div style="margin-bottom:10px;">
+         <div style="margin-bottom:10px;">
           <label for="set-aliexpress-key" style="font-size:.85rem;color:var(--muted);">速卖通联盟凭证（商品分析）</label>
           <input type="password" id="set-aliexpress-key" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <input type="password" id="set-aliexpress-secret" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 速卖通商品分析（链接→商品/价格/销量）。联盟开放平台 · 国内直连</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="set-comtrade-mode" style="font-size:.85rem;color:var(--muted);">UN Comtrade 数据源（贸易数据）</label>
+          <select id="set-comtrade-mode" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+            <option value="formal">正式接口（数据更全，需 key · 推荐）</option>
+            <option value="preview">免费预览（无 key，500 条上限）</option>
+          </select>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">正式接口 key 在 .env 的 UN_COMTRADE_KEY 配置；未配置 key 时即使选正式接口也会回落免费预览</div>
         </div>
       </div>
     </details>
@@ -145,6 +153,12 @@
       if (s.AI_BASE_URL) document.getElementById('set-ai-base').placeholder = '已配置（留空保持不变）';
       if (s.TAVILY_API_KEY || s.SEARCH_API_KEY) document.getElementById('set-tavily').placeholder = '已配置（留空保持不变）';
       if (s.EBAY_APP_ID) document.getElementById('set-ebay-id').placeholder = '已配置（留空保持不变）';
+      // UN Comtrade 模式同步（下拉框显示当前生效模式；记录初始值用于判空比较）
+      const comtradeSel = document.getElementById('set-comtrade-mode');
+      if (comtradeSel && s.UN_COMTRADE_MODE) {
+        comtradeSel.value = s.UN_COMTRADE_MODE;
+        comtradeSel.dataset.initial = s.UN_COMTRADE_MODE;
+      }
       if (s.ALIEXPRESS_APP_KEY && s.ALIEXPRESS_APP_SECRET) {
         document.getElementById('set-aliexpress-key').placeholder = '已配置（留空保持不变）';
         document.getElementById('set-aliexpress-secret').placeholder = '已配置（留空保持不变）';
@@ -225,11 +239,18 @@
       ai_model: document.getElementById('set-ai-model').value.trim(),
       ai_base_url: document.getElementById('set-ai-base').value.trim(),
       search_provider: document.getElementById('set-search-provider').value,
+      un_comtrade_mode: document.getElementById('set-comtrade-mode').value,
     };
-    // 判空只看用户输入字段（provider 下拉永远非空，不能参与判空——回归修复）
+    // 判空只看用户输入字段（provider/模式下拉永远非空，不能参与判空——回归修复）；
+    // UN Comtrade 模式例外：它变了也算有保存内容（下拉无"留空"概念，用 initial 对比）
+    const comtradeChanged = (() => {
+      const sel = document.getElementById('set-comtrade-mode');
+      return sel && sel.dataset.initial !== undefined && sel.value !== sel.dataset.initial;
+    })();
     if (!payload.ai_api_key && !payload.tavily_key && !payload.ebay_app_id &&
         !payload.ebay_client_secret && !payload.aliexpress_app_key &&
-        !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url) {
+        !payload.aliexpress_app_secret && !payload.ai_model && !payload.ai_base_url &&
+        !comtradeChanged) {
       status.textContent = '没有要保存的内容';
       return;
     }

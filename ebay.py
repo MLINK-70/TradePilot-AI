@@ -21,9 +21,25 @@ EBAY_API_BASE = "https://api.ebay.com/buy/browse/v1"
 EBAY_OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
 
-def get_oauth_token(app_id: str, client_secret: str) -> str:
-    """获取 OAuth access token（client_credentials 流程，有效期 2 小时）"""
+class EbayTokenExpired(Exception):
+    """eBay OAuth token 失效（401），调用方应刷新 token 重试一次"""
+
+
+# token 缓存（回归修复：原每次请求都重新换取；token 有效期 2 小时，
+# 提前 5 分钟过期，避免临界窗口 401）
+_token_cache = {"token": "", "expires_at": 0.0}
+
+
+def get_oauth_token(app_id: str, client_secret: str, force: bool = False) -> str:
+    """获取 OAuth access token（client_credentials 流程，有效期 2 小时）
+
+    模块级缓存：未过期直接复用（force=True 强制刷新，供 401 重试）。
+    """
     import base64
+    import time
+    now = time.time()
+    if not force and _token_cache["token"] and _token_cache["expires_at"] - now > 300:
+        return _token_cache["token"]
     auth = base64.b64encode(f"{app_id}:{client_secret}".encode()).decode()
     resp = requests.post(
         EBAY_OAUTH_URL,
@@ -36,7 +52,13 @@ def get_oauth_token(app_id: str, client_secret: str) -> str:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json()["access_token"]
+    data = resp.json()
+    token = data.get("access_token")
+    if not token:  # 回归修复：响应缺 access_token 时不再 KeyError 裸抛
+        raise ValueError("eBay OAuth 响应缺少 access_token")
+    _token_cache["token"] = token
+    _token_cache["expires_at"] = now + int(data.get("expires_in", 7200))
+    return token
 
 
 def parse_ebay_url(url: str) -> str | None:
@@ -45,21 +67,24 @@ def parse_ebay_url(url: str) -> str | None:
     支持格式：
     - /itm/123456789012（标准）
     - /itm/Product-Name/123456789012（带标题）
-    - /p/1234567890（产品页）
+    - /p/1234567890（产品页，ID 可为 9 位——回归修复：原要求至少 10 位）
     - /itm/123456789012?hash=...（带查询参数）
     注意：ebay.us 短链接不含 item ID，无法解析（提示用户用完整链接）。
     """
     # 优先匹配 /itm/ 或 /p/ 后的数字（可能带标题前缀）
-    m = re.search(r"/(?:itm|p)/(?:[^/]+/)?(\d{10,13})", url)
+    m = re.search(r"/(?:itm|p)/(?:[^/]+/)?(\d{8,13})", url)
     if m:
         return m.group(1)
     # 兼容 itm 在查询参数中的情况（如 ?item=123456789012）
-    m2 = re.search(r"[?&]item[=:](\d{10,13})", url)
+    m2 = re.search(r"[?&]item[=:](\d{8,13})", url)
     return m2.group(1) if m2 else None
 
 
 def fetch_item(item_id: str, access_token: str) -> dict:
-    """调用 eBay Browse API 获取商品信息（access_token 来自 get_oauth_token）"""
+    """调用 eBay Browse API 获取商品信息（access_token 来自 get_oauth_token）
+
+    回归修复：404（下架）/401（token 过期）映射为明确错误而非裸 HTTPError。
+    """
     resp = requests.get(
         f"{EBAY_API_BASE}/item/{item_id}",
         headers={
@@ -69,6 +94,10 @@ def fetch_item(item_id: str, access_token: str) -> dict:
         },
         timeout=30,
     )
+    if resp.status_code == 404:
+        raise ValueError("eBay 商品不存在或已下架（HTTP 404）")
+    if resp.status_code == 401:
+        raise EbayTokenExpired("eBay token 已过期，正在刷新重试")
     resp.raise_for_status()
     return resp.json()
 

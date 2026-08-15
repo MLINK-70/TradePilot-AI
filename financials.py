@@ -72,7 +72,11 @@ def get_a_share_financials(company: str) -> dict:
         annual = annual[:5]
 
         def _series(key, scale=1.0):
-            return [{"year": r["REPORTDATE"][:4], "value": round((r.get(key) or 0) * scale, 2)} for r in annual]
+            s = [{"year": r["REPORTDATE"][:4], "value": round((r.get(key) or 0) * scale, 2)} for r in annual]
+            # 统一升序（旧→新）：export.py 取 [-1] 为最新年报，且"近 N 年变化"方向正确
+            # （数据准确性修复：此前降序导致最新营收错位、扩张显示为收缩）
+            s.sort(key=lambda x: str(x["year"]))
+            return s
 
         metrics = {
             "revenue": _series("TOTAL_OPERATE_INCOME"),
@@ -159,12 +163,33 @@ def _fetch_concept(cik: str, tag: str) -> dict | None:
     return None
 
 
-def _annual_series(data: dict, n: int = 5) -> list:
-    """从 XBRL 响应提取最近 N 个财年的年度值（10-K 且 fp=FY）"""
+# SEC XBRL 申报单位：companyconcept 的 val 是申报文件原始值，
+# 白名单内大部分美股公司（苹果/特斯拉/戴尔）以"百万美元"申报，
+# 统一换算为美元（×1e6），否则报告显示"0.00 亿美元"（数据准确性红线）。
+# 回归修复：索尼是外国私人发行人，年报申报为 Form 20-F（非 10-K），
+# 且以"百万日元"列示——原硬编码 (10-K, USD, 1e6) 导致索尼永远取不到数据。
+# 按公司维护申报档案（form 集合, 币种, 换算倍数）。
+SEC_PROFILES = {
+    "苹果": (("10-K",), "USD", 1e6),
+    "索尼": (("20-F", "10-K"), "JPY", 1e6),  # 20-F 年报 + 百万日元
+    "特斯拉": (("10-K",), "USD", 1e6),
+    "戴尔": (("10-K",), "USD", 1e6),
+}
+
+
+def _annual_series(data: dict, n: int = 5, forms=("10-K",), currency: str = "USD",
+                   scale: float = 1e6) -> list:
+    """从 XBRL 响应提取最近 N 个财年的年度值（允许 form 集合 + 币种）
+
+    数据准确性：val 按申报币种换算为基准货币（乘以申报单位倍数 scale）；
+    财年 end 提取年份。旧版注释"以百万美元申报"仅对 10-K 美股成立。
+    """
     if not data:
         return []
-    units = data.get("units", {}).get("USD", [])
-    annual = [u for u in units if u.get("form") == "10-K" and u.get("fp") == "FY" and u.get("end")]
+    units = data.get("units", {}).get(currency, [])
+    if not units:
+        return []
+    annual = [u for u in units if u.get("form") in forms and u.get("fp") == "FY" and u.get("end")]
     # 去重（同 end 保留最新 filed）
     seen = {}
     for u in annual:
@@ -172,7 +197,9 @@ def _annual_series(data: dict, n: int = 5) -> list:
         if end not in seen or u["filed"] > seen[end]["filed"]:
             seen[end] = u
     recent = sorted(seen.values(), key=lambda u: u["end"])[-n:]
-    return [{"year": u["end"][:4], "value": u["val"]} for u in recent]
+    # 升序（旧→新），与 A 股序列约定一致
+    recent.sort(key=lambda u: u["end"])
+    return [{"year": u["end"][:4], "value": u["val"] * scale} for u in recent]
 
 
 def get_sec_financials(company: str) -> dict:
@@ -181,14 +208,15 @@ def get_sec_financials(company: str) -> dict:
     if not info or not info[0]:
         return {"available": False, "reason": f"{company} 无 SEC 财报（非美股上市）"}
     cik = info[0]
+    forms, currency, scale = SEC_PROFILES.get(company, (("10-K",), "USD", 1e6))
 
     result = {"company": info[1], "source": "SEC EDGAR (官方 XBRL)", "available": True,
-              "unit": "USD", "metrics": {}}
+              "unit": currency, "metrics": {}}
     for metric, tags in TAG_CANDIDATES.items():
         for tag in tags:
             try:
                 data = _fetch_concept(cik, tag)
-                series = _annual_series(data)
+                series = _annual_series(data, forms=forms, currency=currency, scale=scale)
                 if series:
                     result["metrics"][metric] = series
                     break
@@ -235,14 +263,35 @@ def get_private_company_financials(company: str) -> dict:
         ], use_json=True)
         data = _parse_json(content)
 
+        # 数据准确性：value_billion 可能是 "8621亿" / "8,621" / 0 等，统一正则抽纯数字；
+        # year 可能是 "2024年" 字符串，强制 int；非法值跳过不整条失败
+        def _clean_series(items):
+            out = []
+            for r in items:
+                if not isinstance(r, dict):
+                    continue
+                s = str(r.get("value_billion") or "")
+                m = re.search(r"(\d[\d,.]*)", s)
+                if not m:
+                    continue
+                try:
+                    val = float(m.group(1).replace(",", ""))
+                except ValueError:
+                    continue
+                if val <= 0:
+                    continue
+                y = str(r.get("year") or "")
+                ym = re.search(r"(\d{4})", y)
+                if not ym:
+                    continue
+                out.append({"year": int(ym.group(1)), "value": val * 1e8})
+            return out
+
         metrics = {}
         if data.get("revenue"):
-            # LLM 数值强转 float：返回字符串时不再 TypeError 整条失败（B 类审查 #7）
-            metrics["revenue"] = [{"year": r["year"], "value": float(r.get("value_billion") or 0) * 1e8}
-                                  for r in data["revenue"] if r.get("year")]
+            metrics["revenue"] = _clean_series(data["revenue"])
         if data.get("rd_expense"):
-            metrics["rd_expense"] = [{"year": r["year"], "value": float(r.get("value_billion") or 0) * 1e8}
-                                     for r in data["rd_expense"] if r.get("year")]
+            metrics["rd_expense"] = _clean_series(data["rd_expense"])
         if not metrics:
             return {"available": False, "reason": "公开报道中未找到财务数据"}
         return {"company": company, "source": "公开报道（Tavily 检索，非官方财报）",

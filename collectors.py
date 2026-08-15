@@ -14,10 +14,15 @@ import json
 import logging
 import re
 import socket
+import ssl
 import time
 from urllib.parse import urljoin, urlparse
 
 import requests
+from urllib3.connection import HTTPSConnection
+from urllib3.connectionpool import HTTPSConnectionPool
+from urllib3.poolmanager import PoolManager
+from requests.adapters import HTTPAdapter
 
 from llm import _chat, _parse_json
 
@@ -32,15 +37,31 @@ class CollectorError(Exception):
     """采集失败（网络/平台不支持/页面结构变化）"""
 
 
-def _safe_url(url: str) -> str:
-    """SSRF 防护：仅 https、拒绝内网/保留地址
+def _is_forbidden_ip(ip) -> bool:
+    """内网/保留地址判定（回归修复：补 is_multicast/is_unspecified/CGNAT；
+    0.0.0.0 在旧版 Python is_private=False 属版本相关，一并显式拦截）"""
+    if ip.version == 6:
+        # IPv6：拒绝环回/链路本地/未指定；其余（含 2001::/32 等）是公网
+        return ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast
+    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified or ip == ipaddress.ip_address("0.0.0.0")
+            or ip in ipaddress.ip_network("100.64.0.0/10"))  # CGNAT 共享地址段
 
-    域名会解析后逐 IP 校验（防 DNS rebinding）；纯 IP 字面量直接校验。
+
+def _safe_url(url: str):
+    """SSRF 防护：仅 https、拒绝内网/保留地址，返回 (url, pinned_ip)
+
+    域名解析后逐 IP 校验（DNS rebinding 防护见 _fetch_html：解析出的 IP
+    钉扎到连接，不再二次解析）；纯 IP 字面量直接校验。
+    返回 pinned_ip 供调用方固定建连；None 表示无需钉扎（本轮无域名）。
     """
     u = urlparse(url)
     if u.scheme != "https":
         raise CollectorError("仅支持 https 链接")
-    host = u.hostname or ""
+    try:
+        host = (u.hostname or "").lower()
+    except ValueError:
+        raise CollectorError("链接格式非法")
     if not host:
         raise CollectorError("链接缺少主机名")
     try:
@@ -48,18 +69,76 @@ def _safe_url(url: str) -> str:
     except ValueError:
         ip = None  # 域名，走解析校验
     if ip is not None:
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        if _is_forbidden_ip(ip):
             raise CollectorError("不支持内网地址")
+        return url, None  # IP 字面量无需钉扎（连接用的就是它）
     else:
         try:
             infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-        except socket.gaierror:
+        except (socket.gaierror, UnicodeError, OSError, ValueError):
             raise CollectorError("链接域名无法解析")
+        public = []
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            if _is_forbidden_ip(ip):
                 raise CollectorError("链接解析到内网地址（已拒绝）")
-    return url
+            public.append(ip)
+        if not public:
+            raise CollectorError("链接域名解析结果为空")
+        # 钉扎第一个公网解析结果（多 IP 场景取首选；DNS rebinding 窗口
+        # 由此关闭——连接不再重新解析域名）
+        return url, str(public[0])
+
+
+class PinIpAdapter(HTTPAdapter):
+    """把 HTTPS 连接钉扎到固定 IP 的 requests 适配器（DNS rebinding 防护）
+
+    构造时传入解析校验过的 IP；连接时直接连该 IP，同时保留原始 Host
+    头与 server_hostname（TLS SNI + 证书校验仍按域名进行，防中间人）。
+    """
+
+    def __init__(self, ip: str, *args, **kwargs):
+        self._pin_ip = ip
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = ssl.create_default_context()
+        pin_ip = self._pin_ip
+
+        class PinnedHTTPSConnection(HTTPSConnection):
+            _pin_ip = pin_ip  # 类属性：闭包内 self 是新连接实例，不能引用外层 self
+
+            def _new_conn(self):
+                # 直接连钉扎 IP（不走 getaddrinfo/系统解析）
+                sock = socket.create_connection((self._pin_ip, self.port), self.timeout)
+                return sock
+
+        class PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+            ConnectionCls = PinnedHTTPSConnection
+
+        class PinnedPoolManager(PoolManager):
+            def _new_pool(self, scheme, host, port, request_context=None):
+                if scheme == "https":
+                    return PinnedHTTPSConnectionPool(
+                        host, port, **self.connection_pool_kw,
+                    )
+                return super()._new_pool(scheme, host, port, request_context)
+
+        self.poolmanager = PinnedPoolManager(**kwargs)
+
+
+def _request_pinned(url: str, pinned_ip, timeout: int = 15) -> requests.Response:
+    """按钉扎 IP 发起 GET（无 IP 时普通请求）；关闭代理；不跟随重定向"""
+    if pinned_ip:
+        s = requests.Session()
+        s.mount("https://", PinIpAdapter(pinned_ip))
+        try:
+            return s.get(url, headers=UA, timeout=timeout, allow_redirects=False,
+                         stream=True, proxies={"http": None, "https": None})
+        finally:
+            s.close()
+    return requests.get(url, headers=UA, timeout=timeout, allow_redirects=False,
+                        stream=True, proxies={"http": None, "https": None})
 
 
 def _fetch_html(url: str, timeout: int = 15) -> str:
@@ -67,13 +146,19 @@ def _fetch_html(url: str, timeout: int = 15) -> str:
 
     手动跟随重定向（最多 5 跳）：每一跳都重新过 _safe_url 校验，
     防止 https 页面 302 跳到内网/非 https 地址绕过 SSRF 防线。
+    DNS rebinding 防护（修复 TOCTOU 窗口）：_safe_url 返回钉扎 IP，
+    连接经 PinIpAdapter 直接连到该 IP（带 Host 头 + SNI 校验），
+    不再让 requests 二次解析域名——校验与建连使用同一解析结果。
+    回归修复：requests 异常（连接失败/超时/DNS）统一包装为 CollectorError，
+    让 collect_product 的 AI 兜底链真正生效（此前 requests 异常原样冒泡）。
     """
     current = url
     for _ in range(5):
-        current = _safe_url(current)
-        resp = requests.get(current, headers=UA, timeout=timeout,
-                            allow_redirects=False,
-                            proxies={"http": None, "https": None})
+        current, pinned_ip = _safe_url(current)
+        try:
+            resp = _request_pinned(current, pinned_ip, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            raise CollectorError(f"页面访问失败：{e}")
         if resp.status_code in (301, 302, 303, 307, 308):
             nxt = resp.headers.get("Location")
             if not nxt:
@@ -82,9 +167,43 @@ def _fetch_html(url: str, timeout: int = 15) -> str:
             continue
         if resp.status_code != 200:
             raise CollectorError(f"页面访问失败（HTTP {resp.status_code}）")
-        html = resp.text
-        if len(html) > 2 * 1024 * 1024:
+        # 回归修复：流式读取限量（原先把整页解码进内存后才检查 2MB）
+        try:
+            content_length = int(resp.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            content_length = 0
+        if content_length > 2 * 1024 * 1024:
+            resp.close()
             raise CollectorError("页面过大")
+        chunks = []
+        total = 0
+        try:
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > 2 * 1024 * 1024:
+                    resp.close()
+                    raise CollectorError("页面过大")
+                chunks.append(chunk)
+        except requests.exceptions.RequestException as e:
+            raise CollectorError(f"页面读取失败：{e}")
+        finally:
+            resp.close()
+        raw = b"".join(chunks)
+        # 编码兜底：显式 charset 头按头解码；无 charset 头（GBK 等中文页常见）
+        # 用内容探测修正，避免乱码污染 AI 兜底文本（回归修复）
+        html = None
+        if "charset=" in resp.headers.get("Content-Type", "").lower():
+            try:
+                html = raw.decode(resp.encoding or "utf-8", errors="replace")
+            except LookupError:
+                html = None
+        if html is None:
+            try:
+                from charset_normalizer import from_bytes
+                best = from_bytes(raw).best()
+                html = raw.decode(best.encoding if best else "utf-8", errors="replace")
+            except Exception:
+                html = raw.decode("utf-8", errors="replace")
         return html
     raise CollectorError("重定向次数过多")
 
@@ -102,10 +221,10 @@ def detect_platform(url: str) -> str:
 
 
 def _json_ld_products(html: str) -> list:
-    """提取 JSON-LD 中的 Product 块"""
+    """提取 JSON-LD 中的 Product 块（回归修复：支持 @type 列表与 @graph 嵌套）"""
     products = []
     for m in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
-                         html, re.S):
+                         html, re.S | re.I):
         raw = m.group(1).strip()
         try:
             data = json.loads(raw)
@@ -113,8 +232,15 @@ def _json_ld_products(html: str) -> list:
             continue
         # 兼容单对象/数组/@graph
         items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
         for d in items:
-            if isinstance(d, dict) and d.get("@type") in ("Product", "IndividualProduct"):
+            if not isinstance(d, dict):
+                continue
+            types = d.get("@type") or []
+            if not isinstance(types, list):
+                types = [types]
+            if any(t in ("Product", "IndividualProduct") for t in types):
                 products.append(d)
     return products
 
@@ -153,11 +279,11 @@ def _normalize_product(raw: dict, url: str, platform: str, source: str) -> dict:
 
 
 def amazon_collect(url: str) -> dict:
-    """亚马逊采集：/dp/{ASIN} 或 /gp/product/{ASIN}"""
-    m = re.search(r"/(?:dp|gp/product)/([A-Z0-9]{10})", url)
+    """亚马逊采集：/dp/{ASIN} 或 /gp/product/{ASIN}（回归修复：小写 asin 也识别）"""
+    m = re.search(r"/(?:dp|gp/product)/([A-Za-z0-9]{10})", url)
     if not m:
         raise CollectorError("无法从链接提取亚马逊商品 ID（ASIN）")
-    asin = m.group(1)
+    asin = m.group(1).upper()
     html = _fetch_html(url)
 
     raw = {
@@ -311,6 +437,9 @@ def collect_product(url: str = "", pasted_text: str = "") -> dict:
             return ai_extract(pasted_text, url, detect_platform(url) if url else "generic")
         except CollectorError:
             raise
+        except ValueError as e:
+            # 回归修复：AI 不可用（无 Key/限流）统一包装，前端拿到一致错误
+            raise CollectorError(f"AI 提取不可用：{e}")
 
     # 2. 平台采集
     platform = detect_platform(url)
@@ -331,6 +460,7 @@ def collect_product(url: str = "", pasted_text: str = "") -> dict:
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return ai_extract(text[:6000], url, platform)
-    except CollectorError as e:
+    except (CollectorError, ValueError) as e:
+        # 回归修复：requests/ValueError 统一进 errors，AI 兜底失败给一致错误文案
         errors.append(str(e))
         raise CollectorError("；".join(errors) + "（可尝试粘贴商品页面内容后重试）")

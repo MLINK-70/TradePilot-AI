@@ -7,6 +7,7 @@ import datetime
 import functools
 import io
 import os
+import re
 import tempfile
 import threading
 import time
@@ -22,6 +23,26 @@ from docx.oxml.ns import qn
 # matplotlib pyplot 全局状态非线程安全：FastAPI 线程池并发导出可能错图/偶发异常
 # （回归修复）。所有绘图函数经 _plot_locked 串行化，且 finally 关闭全部 Figure 防泄漏。
 _PLOT_LOCK = threading.Lock()
+
+# Word COM 单实例锁（回归修复：原 _refresh_fields_docx 与 _convert_to_pdf 各持一把锁，
+# 并发导出时两个线程同时 Dispatch Word → RPC server is busy/文件锁冲突）
+_WORD_LOCK = threading.Lock()
+
+
+def _parse_share(s) -> float | None:
+    """从份额字符串稳健提取数字（数据准确性：一处实现，全局复用）
+
+    支持：'18.2%' / '46.5%（2026年Q1）' / '1,234.5%' / '18.2% (2026)' / 全角％
+    范围值（'3-5%'）取中点。解析失败返回 None（不抛异常、不产生错误数字）。
+    """
+    if s is None:
+        return None
+    t = str(s).replace("％", "%").replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*[-~至]\s*(\d+(?:\.\d+)?)", t)
+    if m:  # 范围取中点
+        return (float(m.group(1)) + float(m.group(2))) / 2
+    m = re.search(r"(\d+(?:\.\d+)?)", t)
+    return float(m.group(1)) if m else None
 
 
 def _plot_locked(func):
@@ -275,7 +296,8 @@ def _add_toc_field(doc: Document, anchor: object = None) -> None:
         new_el = last_el.makeelement(qn("w:p"), {})
         last_el.addnext(new_el)  # 插到 last_el 之后
         entry = _Paragraph(new_el, anchor._parent)
-        entry.paragraph_format.tab_stops.add_tab_stop(Cm(15.5), alignment=1, leader=1)
+        # 回归修复：alignment=1 是 CENTER，页码会在 15.5cm 处居中；RIGHT=2 才对齐点线
+        entry.paragraph_format.tab_stops.add_tab_stop(Cm(15.5), alignment=2, leader=1)
         # 目录文字用 w:hyperlink 包裹（单击直接跳转，无需 Ctrl+点击）
         hl = OxmlElement("w:hyperlink")
         hl.set(qn("w:anchor"), bm_name)  # 锚点 = 标题书签名
@@ -322,8 +344,12 @@ def _add_toc_field(doc: Document, anchor: object = None) -> None:
 @_plot_locked
 def build_trend_chart(trend: dict) -> io.BytesIO:
     """生成趋势折线图 PNG（内存流），供 Word 报告嵌入"""
-    years = list(trend.keys())
-    values = [trend[y]["value"] / 1e8 for y in years]  # 亿美元
+    # 按年份排序（键可能是 str/int）；兼容 {year: {value, weight}} 与 {year: float} 两种结构
+    years = sorted(trend.keys(), key=lambda k: int(k))
+    def _val(y):
+        v = trend[y]
+        return v["value"] if isinstance(v, dict) else v
+    values = [_val(y) / 1e8 for y in years]  # 亿美元
 
     # 宽幅布局，给标注留足空间（tight_layout 防裁切）
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -433,17 +459,14 @@ def _convert_to_pdf(docx_path: str) -> None:
     import logging
     import shutil
     import subprocess
-    import threading
 
-    _word_lock = getattr(_convert_to_pdf, "_lock", None)
-    if _word_lock is None:
-        _word_lock = threading.Lock()
-        _convert_to_pdf._lock = _word_lock
-    with _word_lock:
+    with _WORD_LOCK:
         # 路径 1：Word COM（Windows + 已装 Word）
         try:
             import win32com.client
-            word = win32com.client.Dispatch("Word.Application")
+            # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
+            # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
+            word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
             try:
                 word.DisplayAlerts = 0
@@ -477,7 +500,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                       market_ctx: dict | None = None,
                       matrix: list | None = None,
                       background: dict | None = None,
-                      competitiveness: dict | None = None) -> io.BytesIO:
+                      competitiveness: dict | None = None,
+                      reporter: str = "中国") -> io.BytesIO:
     """生成贸易数据 Word 报告（与市场分析同套规范：封面/目录/字体/页码/表格防切）
 
     章节：封面 → 目录 → 一、执行摘要 → 二、出口趋势（图）→ 三、数据总览（表）
@@ -584,7 +608,13 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     ktr.font.size = Pt(14)
     ktr.bold = True
     kpi_rows = []
-    kpi_rows.append((f"对{target}出口总额（{year}）", f"{total_value / 1e8:.2f} 亿美元"))
+    # 回归修复：多年报告封面 KPI 用年份区间标注（原写死单年 year，与多年总量对不上）；
+    # 与执行摘要同口径：stats.first_year-last_year
+    if stats and stats.get("first_year") and stats.get("last_year") and stats["first_year"] != stats["last_year"]:
+        year_label_kpi = f"{stats['first_year']}-{stats['last_year']}"
+    else:
+        year_label_kpi = str(year)
+    kpi_rows.append((f"对{target}出口总额（{year_label_kpi}）", f"{total_value / 1e8:.2f} 亿美元"))
     if total_wgt:
         kpi_rows.append(("出口净重", f"{total_wgt / 1e6:.2f} 千吨"))
     if stats:
@@ -627,7 +657,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     # ===== 二、出口趋势（图）=====
     _h("二、出口趋势", 1, blank_before=True)
     if chart_buf:
-        _p(f"中国对{target}出口 {product}（HS {hs_code}）出口额变化趋势，单位：亿美元：")
+        _p(f"{reporter}对{target}出口 {product}（HS {hs_code}）出口额变化趋势，单位：亿美元：")
         doc.add_picture(chart_buf, width=Cm(14))
         _p(f"数据来源：UN Comtrade 公共 API（HS {hs_code}）", indent=False)
     else:
@@ -667,7 +697,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         share_vals = [m["market_share"] for m in matrix if m.get("market_share") is not None]
         if share_labels:
             _p(f"各出口国占 {target} 市场进口份额（%，<4% 合并为其他）：")
-            _add_pie_chart(doc, share_labels, share_vals, f"{product} 出口国份额结构")
+            _add_pie_chart(doc, share_labels, share_vals, f"{product} 出口国份额结构", raw_values=share_vals)
         # 饼图"其他"拆解 + 全量明细表（作证饼图 + 延伸分析）
         _h("份额明细与「其他」拆解", 2)
         _p("饼图中的「其他」包含以下出口国——份额虽小但增速与单价各不相同，值得单独观察：", indent=False)
@@ -710,12 +740,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     if landscape and landscape.get("top_brands"):
         brands = landscape["top_brands"]
         _p(f"{landscape.get('product_category', product)} 龙头品牌竞争格局（来源：{landscape.get('_source', '行业检索')}）。")
-        # 品牌份额饼图先放（解析 share 里的数字如 '18.2%'）
-        def _parse_share(s):
-            try:
-                return float(str(s).replace("%", "").split("（")[0].strip())
-            except (ValueError, TypeError):
-                return None
+        # 品牌份额饼图先放（解析 share 里的数字，用模块级 _parse_share 统一处理）
         pie_labels = []
         pie_vals = []
         for b in brands[:8]:
@@ -725,7 +750,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                 pie_vals.append(v)
         if pie_labels:
             _p(f"龙头品牌市场份额结构（<4% 合并为其他）：")
-            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额")
+            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额", raw_values=pie_vals)
         # 份额排名表（作证饼图 + 地位说明）
         _h("品牌份额排名", 2)
         _p("饼图份额对应的品牌全量明细——排名、份额与市场地位：", indent=False)
@@ -847,8 +872,8 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         raw_tbl.rows[i].cells[0].text = str(r.get("refYear"))
         raw_tbl.rows[i].cells[1].text = "出口"
         raw_tbl.rows[i].cells[2].text = str(r.get("cmdCode"))
-        raw_tbl.rows[i].cells[3].text = f"{r.get('primaryValue') or 0:,.0f}"
-        raw_tbl.rows[i].cells[4].text = f"{r.get('netWgt') or 0:,.0f}"
+        raw_tbl.rows[i].cells[3].text = f"{float(r.get('primaryValue') or 0):,.0f}"
+        raw_tbl.rows[i].cells[4].text = f"{float(r.get('netWgt') or 0):,.0f}"
 
     # ===== 九、AI 市场分析 =====
     _h("九、AI 市场分析", 1, blank_before=True)
@@ -857,7 +882,11 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     risks = ai.get("risks") or []
     up = ai.get("user_profile") or {}
     _h("市场规模", 2)
-    _p(f"{ms.get('value', '未知')}（{ms.get('year', '')}年估算）")
+    # 防重复：AI 的 value 常自带"（2026年估算）"，再追加会双份（渲染 bug 修复）
+    ms_value = str(ms.get("value", "未知"))
+    ms_year = str(ms.get("year", ""))
+    ms_suffix = f"（{ms_year}年估算）" if ms_year and "估算" not in ms_value else ""
+    _p(f"{ms_value}{ms_suffix}")
     _h("增长趋势", 2)
     _p(f"CAGR {gt.get('cagr', '未知')}，{gt.get('forecast_years', '')}")
     if gt.get("description"):
@@ -887,7 +916,9 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
                 if cell.paragraphs[0].runs:
                     cell.paragraphs[0].runs[0].bold = True
     _p()
-    _p("免责声明：本报告数据来源与统计口径见附录，市场估算部分仅供参考，实际决策请以官方统计为准。")
+    _p("免责声明：本报告数据来源与统计口径见附录，市场估算部分仅供参考，实际决策请以官方统计为准。"
+       "贸易竞争力指数（TC）与市场份额基于 UN Comtrade 出口（FOB 口径）与进口（CIF 口径）数据计算，"
+       "两口径存在约 5-10% 的系统性差异，属贸易统计惯例。")
 
     # 收尾统一：页码 / 拼写检查 / 表格防切 / 目录 / 字体
     _add_page_numbers(doc)
@@ -909,15 +940,12 @@ def _refresh_fields_docx(path: str) -> None:
     （整表移到下一页，不切断）。仅 Windows + 已装 Word 时可用；失败静默。
     用线程锁串行化：Word COM 单实例，并发调用会冲突。
     """
-    import threading
-    _word_lock = getattr(_refresh_fields_docx, "_lock", None)
-    if _word_lock is None:
-        _word_lock = threading.Lock()
-        _refresh_fields_docx._lock = _word_lock
-    with _word_lock:
+    with _WORD_LOCK:
         try:
             import win32com.client
-            word = win32com.client.Dispatch("Word.Application")
+            # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
+            # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
+            word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
             try:
                 word.DisplayAlerts = 0  # 防兼容性/恢复弹窗卡死
@@ -1282,6 +1310,9 @@ def build_market_report(product: str, country: str, ai: dict,
                f"即该国每进口 100 美元该品类，约 {share:.0f} 美元来自中国。")
             _p(f"• 份额解读：{'渗透率较高，进入成熟竞争期' if share >= 15 else (
                 '渗透率中等，仍有扩张空间' if share >= 5 else '渗透率较低，市场拓展空间大')}。")
+        # 三态数据质量标记：suspicious 时向读者披露口径差异（数据准确性红线）
+        if competitiveness.get("quality") == "suspicious" and competitiveness.get("quality_note"):
+            _p(f"⚠️ 数据质量提示：{competitiveness['quality_note']}", indent=False)
     else:
         _p("（该品类竞争力数据不足）")
 
@@ -1291,12 +1322,7 @@ def build_market_report(product: str, country: str, ai: dict,
         brands = landscape["top_brands"]
         _p(f"{landscape.get('product_category', product)} 龙头品牌竞争格局"
            f"（来源：{landscape.get('_source', 'Tavily 行业检索')}）。")
-        # 品牌份额饼图先放（解析 share 里的数字）
-        def _parse_share(s):
-            try:
-                return float(str(s).replace("%", "").split("（")[0].strip())
-            except (ValueError, TypeError):
-                return None
+        # 品牌份额饼图先放（解析 share 里的数字，用模块级 _parse_share 统一处理）
         pie_labels = []
         pie_vals = []
         for b in brands[:8]:
@@ -1306,7 +1332,7 @@ def build_market_report(product: str, country: str, ai: dict,
                 pie_vals.append(v)
         if pie_labels:
             _p(f"龙头品牌市场份额结构（<4% 合并为其他）：")
-            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额")
+            _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额", raw_values=pie_vals)
         # 份额排名表（作证饼图）
         _h("品牌份额排名", 2)
         _p("饼图份额对应的品牌全量明细——排名、份额与市场地位：", indent=False)
@@ -1379,7 +1405,15 @@ def build_market_report(product: str, country: str, ai: dict,
                 financials_available = True
                 latest = rev_series[-1]
                 rev_val = latest.get("value")
-                rev_unit = "美元" if fin.get("source", "").startswith("SEC") else "元"
+                # 单位标注（数据准确性）：优先用 financials 模块返回的 unit 字段，
+                # 回退到 source 前缀判断（SEC 美元 / A股·非上市 人民币元）
+                unit = fin.get("unit", "")
+                if unit == "USD":
+                    rev_unit = "美元"
+                elif unit == "CNY":
+                    rev_unit = "人民币元"
+                else:
+                    rev_unit = "美元" if fin.get("source", "").startswith("SEC") else "人民币元"
                 _p(f"• {fname}（份额 {b.get('share', '')}）：", indent=False)
                 if rev_val:
                     _p(f"  最新营收 {rev_val / 1e8:.2f} 亿{rev_unit}（{latest.get('year', '')}年）"
@@ -1403,20 +1437,18 @@ def build_market_report(product: str, country: str, ai: dict,
         _h("对出口商的启示", 2)
         top_share = None
         for b in brands:
-            try:
-                s = float(str(b.get("share", "").replace("%", "")))
+            s = _parse_share(b.get("share"))
+            if s is not None:
                 top_share = max(top_share or 0, s)
-            except (ValueError, TypeError):
-                continue
         if top_share is not None:
             if top_share >= 30:
-                _p(f"• 龙头品牌份额合计约 {top_share:.0f}%：市场高度集中，新进入者宜避开正面竞争，"
+                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场集中度较高，新进入者宜避开正面竞争，"
                    f"从细分场景（如通勤降噪、运动佩戴、价格带空档）切入。")
             elif top_share >= 15:
-                _p(f"• 龙头品牌份额约 {top_share:.0f}%：市场中度集中，存在差异化空间，"
+                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场存在主导者，存在差异化空间，"
                    f"可在功能或价格带建立差异化定位。")
             else:
-                _p(f"• 龙头品牌份额约 {top_share:.0f}%：市场相对分散，竞争格局未固化，"
+                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场相对分散，竞争格局未固化，"
                    f"是新进入者布局的窗口期。")
         if landscape.get("shift_reasons"):
             _p(f"• 格局正在变动（{'；'.join(landscape['shift_reasons'][:2])}），"
@@ -1430,7 +1462,11 @@ def build_market_report(product: str, country: str, ai: dict,
     # ===== 六、市场规模与增长 =====
     _h("六、市场规模与增长", 1, blank_before=True)
     ms = ai.get("market_size") or {}
-    _p(f"规模：{ms.get('value', '未知')}（{ms.get('year', '')}年估算）")
+    # 防重复：AI 的 value 常自带"（2026年估算）"，再追加会双份（渲染 bug 修复）
+    ms_value = str(ms.get("value", "未知"))
+    ms_year = str(ms.get("year", ""))
+    ms_suffix = f"（{ms_year}年估算）" if ms_year and "估算" not in ms_value else ""
+    _p(f"规模：{ms_value}{ms_suffix}")
     if ms.get("note"):
         _p(f"说明：{ms['note']}")
     gt = ai.get("growth_trend") or {}
@@ -1471,7 +1507,8 @@ def build_market_report(product: str, country: str, ai: dict,
             first, last = trend[str(years[0])], trend[str(years[-1])]
             # 防 0 值（某年出口额为 0 时 pow(last/0) 崩溃）
             if first > 0 and last > 0:
-                cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
+                n_years = int(years[-1]) - int(years[0])
+                cagr = (pow(last / first, 1 / n_years) - 1) * 100 if n_years > 0 else None
             else:
                 cagr = None
             # 标注"历史"：与第六章 AI 预测 CAGR 区分（避免同报告两个 CAGR 打架）
@@ -1514,7 +1551,8 @@ def build_market_report(product: str, country: str, ai: dict,
             first, last = trend[str(years[0])], trend[str(years[-1])]
             # 防 0 值（某年出口额为 0 时 pow(last/0) 崩溃）
             if first > 0 and last > 0:
-                cagr = (pow(last / first, 1 / (len(years) - 1)) - 1) * 100
+                n_years = int(years[-1]) - int(years[0])
+                cagr = (pow(last / first, 1 / n_years) - 1) * 100 if n_years > 0 else None
                 _p(f"• {years[0]}-{years[-1]} 出口 CAGR {cagr:+.1f}%（历史）：反映该品类在目标市场的整体出口动能。", indent=False)
     _h("竞争侧（格局与份额）", 2)
     if landscape and landscape.get("top_brands"):
@@ -1706,11 +1744,13 @@ def _add_gauge_chart(doc: Document, tc: float, title: str):
 
 
 @_plot_locked
-def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
+def _add_pie_chart(doc: Document, labels: list, values: list, title: str, raw_values: list = None):
     """饼图：名称 + 数值 → 占比 PNG，嵌入 Word
 
     标签内嵌扇区（名称 + 百分比直接写在饼里），不靠图例猜；
     小于 4% 的碎块合并为"其他"（不列明细，保持饼图干净）。
+    数据准确性：raw_values（与 values 对应的原始份额）非空时，图内百分比
+    标注原始份额（与表格一致），不再显示归一化重算值（修复饼图/表格数字打架）。
     """
     import matplotlib.pyplot as plt
     if not labels or len(labels) != len(values) or not any(values):
@@ -1720,9 +1760,16 @@ def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
         return
     keep = [(l, v) for l, v in zip(labels, values) if v > 0]
     keep.sort(key=lambda x: x[1], reverse=True)
+    # 回归修复：raw 值按标签映射（原实现按原始输入顺序迭代，排序后扇区与标注错位；
+    # "其他"合并项也没有对应 raw 值，会取到第一个小碎块的份额）
+    raw_by_label = {}
+    if raw_values and len(raw_values) == len(labels):
+        raw_by_label = dict(zip(labels, raw_values))
     main = [(l, v) for l, v in keep if v / total >= 0.04]
     rest = [(l, v) for l, v in keep if v / total < 0.04]
     if rest:
+        if raw_by_label:
+            raw_by_label["其他"] = sum(raw_by_label.get(l, 0) for l, _ in rest)
         main.append(("其他", sum(v for _, v in rest)))
     if not main:
         main = keep[:6]  # 全都很小时兜底取前 6
@@ -1731,9 +1778,21 @@ def _add_pie_chart(doc: Document, labels: list, values: list, title: str):
     labels_pie = [l for l, _ in main]
     values_pie = [v for _, v in main]
     colors = ["#2e5bff", "#e06a4c", "#12b886", "#f0a020", "#8e6fc0", "#5aa7d4", "#c0c0c0"]
+    # 原始份额按扇区顺序（labels_pie 与扇区一一对应；缺失回退归一化百分比）
+    _raw_iter = iter(labels_pie)
+
+    def _autopct(p):
+        try:
+            label = next(_raw_iter)
+        except StopIteration:
+            return f"{p:.1f}%"
+        if label in raw_by_label:
+            return f"{raw_by_label[label]:.1f}%"
+        return f"{p:.1f}%"
+
     wedges, texts, autotexts = ax.pie(
         values_pie, labels=None,
-        autopct=lambda p: f"{p:.1f}%",
+        autopct=_autopct,
         colors=colors[:len(main)], startangle=90,
         pctdistance=0.68,
         wedgeprops={"edgecolor": "white", "linewidth": 1.2})

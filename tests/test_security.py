@@ -54,7 +54,13 @@ class TestSafeUrl:
             _safe_url("https://169.254.169.254/x")
 
     def test_accept_public(self):
-        assert _safe_url("https://www.amazon.com/dp/B0XXXX") == "https://www.amazon.com/dp/B0XXXX"
+        # DNS rebinding 修复后 _safe_url 返回 (url, pinned_ip)：
+        # 域名 → 钉扎公网 IP；IP 字面量 → pin 为 None（连接用的就是它）
+        url, pin = _safe_url("https://www.amazon.com/dp/B0XXXX")
+        assert url == "https://www.amazon.com/dp/B0XXXX"
+        assert isinstance(pin, str) and pin.count(".") == 3  # IPv4 公网地址
+        url2, pin2 = _safe_url("https://8.8.8.8/x")
+        assert url2 == "https://8.8.8.8/x" and pin2 is None
 
 
 class TestSetKeyInjection:

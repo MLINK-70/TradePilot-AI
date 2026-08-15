@@ -1,4 +1,5 @@
 """llm.py — DeepSeek API 调用层：请求、JSON 解析、错误处理"""
+import copy
 import json
 import logging
 import threading
@@ -38,10 +39,15 @@ class _LRUCache:
 # single-flight 锁：同 key 并发请求合并为一次 AI 调用（防烧双倍 token）
 _cache_locks: dict = {}
 _cache_locks_guard = threading.Lock()
+# 锁字典上限：缓存 key 由用户输入组合生成，理论上可无界增长（内存泄漏面）。
+# 超限直接清空：持锁者仍持有锁对象引用不受影响，仅后续同 key 并发短暂失去合并（可接受）。
+_MAX_CACHE_LOCKS = 2048
 
 
 def _lock_for(key):
     with _cache_locks_guard:
+        if len(_cache_locks) > _MAX_CACHE_LOCKS:
+            _cache_locks.clear()
         lock = _cache_locks.get(key)
         if lock is None:
             lock = _cache_locks[key] = threading.Lock()
@@ -53,10 +59,11 @@ _SESSION = requests.Session()
 
 
 def _retry_after(resp) -> int:
-    """429 响应中的 Retry-After 秒数（无则 0）"""
+    """429 响应中的 Retry-After 秒数（无则 0）；封顶 60s（回归修复：恶意/异常大值
+    会让请求挂起数十分钟并阻塞 single-flight 队列）"""
     try:
         v = resp.headers.get("Retry-After")
-        return max(1, int(v)) if v else 0
+        return min(60, max(1, int(v))) if v else 0
     except (TypeError, ValueError):
         return 0
 
@@ -141,10 +148,15 @@ def _chat(messages: list, use_json: bool = True) -> str:
             except ValueError:
                 raise ValueError("AI 返回格式异常（非 JSON）")
             if provider == "claude":
+                if not isinstance(data, dict):
+                    raise ValueError("AI 返回格式异常（非 JSON 对象）")
                 return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+            # 回归修复：200 + 非 dict body（数组/字符串）曾抛 TypeError 漏成 500
+            if not isinstance(data, dict) or not isinstance(data.get("choices"), list) or not data["choices"]:
+                raise ValueError("AI 返回格式异常（choices 缺失）")
             try:
                 return data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError):
+            except (KeyError, IndexError, TypeError):
                 raise ValueError("AI 返回格式异常（choices 缺失）")
         except requests.exceptions.Timeout as e:
             if attempt == 2:
@@ -196,13 +208,18 @@ def _parse_json(content: str) -> dict:
 _market_cache: _LRUCache = _LRUCache()
 
 
+# 提示词版本签名：SYSTEM_PROMPT 变更时必须递增，否则旧提示词生成的
+# 错误结果会继续命中缓存（数据准确性红线——口径纪律 v3 起生效）
+MARKET_PROMPT_VER = "v3"
+
+
 def _market_cache_key(product: str, country: str,
                       market_context: dict | None,
                       trade_evidence: dict | None,
                       competitiveness: dict | None,
                       background: dict | None,
                       landscape: dict | None = None) -> tuple:
-    """缓存 key：产品+国家+证据链签名（证据链变化时缓存失效重算）"""
+    """缓存 key：产品+国家+提示词版本+证据链签名（证据链/提示词变化时缓存失效重算）"""
     def _sig(d):
         if not d:
             return None
@@ -220,7 +237,7 @@ def _market_cache_key(product: str, country: str,
         return None
     # AI 提供商/模型签名：切换提供商或模型时旧缓存自动失效
     ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
-    return (product, country, ai_sig, _sig(market_context), _sig(trade_evidence),
+    return (product, country, MARKET_PROMPT_VER, ai_sig, _sig(market_context), _sig(trade_evidence),
             _sig(competitiveness), _sig(background), _sig(landscape))
 
 
@@ -425,11 +442,15 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
         }
     # 缓存 key 含提示词版本签名：TRADE_TREND_SYSTEM 变更时旧缓存自动失效
     PROMPT_VER = "v2-entry-strategy"  # 提示词结构版本（改提示词需递增）
-    cache_key = (product, target, reporter, tuple(trend.keys()), PROMPT_VER)
+    # 回归修复：AI 提供商/模型签名缺失——切换模型后旧模型解读仍命中缓存
+    # （与 _market_cache_key 口径一致；trend 值变化而年份集合不变时也靠下方
+    #  数据行签名兜底：key 内加入 trend 数值摘要）
+    ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
+    data_sig = tuple((y, v.get("value"), v.get("weight")) for y, v in trend.items())
+    cache_key = (product, target, reporter, data_sig, PROMPT_VER, ai_sig)
     cached = _trade_trend_cache.get(cache_key)  # _LRUCache（阶段 4 迁移漏网点，回归修复）
     if cached is not None:
-        return cached
-
+        return copy.deepcopy(cached)  # 回归修复：返回副本，防调用方原地改 dict 污染缓存
     data_lines = "\n".join(
         f"{y}: {v['value']:,.0f} 美元 / {v['weight']:,.0f} 公斤" for y, v in trend.items()
     )
@@ -488,13 +509,18 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
         f"逐年出口数据:\n{data_lines}{stats_lines}{market_lines}{landscape_lines}\n"
         f"请输出市场解读（引用指标数值、市场环境和竞争格局数据支撑结论，不自行计算）。"
     )
-    content = _chat([
-        {"role": "system", "content": TRADE_TREND_SYSTEM},
-        {"role": "user", "content": user_msg},
-    ], use_json=True)
-    result = _parse_json(content)
-    _trade_trend_cache.set(cache_key, result)  # 缓存结果，避免重复烧 token
-    return result
+    # single-flight（回归修复：与 analyze_market 口径一致，防并发同 key 重复调 AI 烧双倍 token）
+    with _lock_for(cache_key):
+        cached = _trade_trend_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+        content = _chat([
+            {"role": "system", "content": TRADE_TREND_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ], use_json=True)
+        result = _parse_json(content)
+        _trade_trend_cache.set(cache_key, result)  # 缓存结果，避免重复烧 token
+    return copy.deepcopy(result)  # 回归修复：首次调用也返回副本（原返回缓存原对象）
 
 
 def analyze_market_comparison(product: str, countries: list, per_country: dict) -> dict:
@@ -553,17 +579,22 @@ def analyze_market_comparison(product: str, countries: list, per_country: dict) 
     cache_key = (product, tuple(countries), PROMPT_VER, ai_sig, ev_sig)
     cached = _compare_cache.get(cache_key)
     if cached is not None:
-        return cached
+        return copy.deepcopy(cached)  # 回归修复：返回副本，防调用方污染缓存
 
     user_msg = (
         f"产品: {product}\n请对以下目标国家做横向对比分析:\n\n"
         + "\n\n".join(country_lines)
         + "\n\n请输出对比解读 JSON（引用指标数值支撑结论，不自行计算）。"
     )
-    content = _chat([
-        {"role": "system", "content": COMPARE_SYSTEM},
-        {"role": "user", "content": user_msg},
-    ], use_json=True)
-    result = _parse_json(content)
-    _compare_cache.set(cache_key, result)
-    return result
+    # single-flight（回归修复：与 analyze_market 口径一致，防并发同 key 重复调 AI）
+    with _lock_for(cache_key):
+        cached = _compare_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+        content = _chat([
+            {"role": "system", "content": COMPARE_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ], use_json=True)
+        result = _parse_json(content)
+        _compare_cache.set(cache_key, result)
+    return copy.deepcopy(result)  # 回归修复：首次调用也返回副本（原返回缓存原对象）
