@@ -104,7 +104,7 @@ def main():
     setup_env()
     port = find_free_port()
     if port is None:
-        _show_error("端口不足", "8000-8019 端口均被占用，无法启动服务。请关闭占用端口的程序后重试。")
+        _show_error("端口不足", "系统无法分配可用端口（端口资源耗尽），无法启动服务。请关闭占用端口的程序后重试。")
         return
     # 后台线程启动服务器
     server_thread = threading.Thread(target=run_server, args=(port,), daemon=True)
@@ -113,6 +113,7 @@ def main():
     if not _wait_ready(port):
         _show_error("服务启动失败",
                     "TradePilot 服务未能在 30 秒内就绪，请查看 tradepilot_error.log 后重试。")
+        return  # 回归修复 G9：启动失败不再继续建窗（原弹窗后仍打开死链窗口）
 
     import webview
 

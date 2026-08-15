@@ -21,10 +21,19 @@ def _weight_ok(rows: list) -> bool:
     return any((r.get("netWgt") or 0) > 0 for r in rows)
 
 
+def _num(v):
+    """数值兜底（回归修复：UN 脏数据行 primaryValue 可能是 'N/A'/带逗号字符串，
+    直接参与 sum 会 TypeError 被吞成"获取失败"）"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _unit_price(rows: list):
     """出口/进口单价（美元/公斤）：总额 / 总净重；无净重返回 None"""
-    value = sum(r.get("primaryValue") or 0 for r in rows)
-    weight = sum(r.get("netWgt") or 0 for r in rows)
+    value = sum(_num(r.get("primaryValue")) for r in rows)
+    weight = sum(_num(r.get("netWgt")) for r in rows)
     if value <= 0 or weight <= 0:
         return None
     return value / weight
@@ -37,7 +46,8 @@ def suggest_pricing(product: str, market: str, year: str = "",
     返回 {available, export_unit_price, market_unit_price,
           suggest_low, suggest_mid, suggest_high, explain, _audit}
     """
-    from trade import AREA_MAP, fetch_year, get_latest_year, hs_lookup, partner_lookup
+    from trade import (AREA_MAP, GROUP_MEMBERS, fetch_group, fetch_group_world_imports,
+                       fetch_year, get_latest_year, hs_lookup, partner_lookup)
     from database import get_cache_meta
 
     try:
@@ -50,9 +60,15 @@ def suggest_pricing(product: str, market: str, year: str = "",
         if not year:
             year = str(get_latest_year())
 
-        # 两条腿：出口单价（中国出口该市场）+ 市场进口均价（该市场从全球进口）
-        exp_rows = fetch_year(hs, target_code, year, reporter=reporter, flow="X")
-        imp_rows = fetch_year(hs, "0", year, reporter=market, flow="M")
+        # 两条腿：出口单价（出口国出口该市场）+ 市场进口均价（该市场从全球进口）
+        # 回归修复 G7：组织市场（欧盟/东盟/RCEP）preview 接口对组代码不返回数据，
+        # 必须走成员聚合（fetch_group/fetch_group_world_imports），否则两腿皆空误导用户
+        if target_code in GROUP_MEMBERS:
+            exp_rows = fetch_group(hs, year, target_code, reporter=reporter, flow="X")
+            imp_rows = fetch_group_world_imports(hs, year, target_code)
+        else:
+            exp_rows = fetch_year(hs, target_code, year, reporter=reporter, flow="X")
+            imp_rows = fetch_year(hs, "0", year, reporter=market, flow="M")
 
         export_up = _unit_price(exp_rows)
         market_up = _unit_price(imp_rows)
@@ -70,6 +86,12 @@ def suggest_pricing(product: str, market: str, year: str = "",
             suggest_mid = round(market_up, 2)
             suggest_high = round(market_up * 1.3, 2)
             basis = "出口单价×1.5 与市场进口均价"
+            # 回归修复：数据异常时区间可能反转（出口单价远高于市场均价），
+            # 此时输出反转区间会误导；改为以市场价为锚并显式标注异常
+            if suggest_low > suggest_high:
+                suggest_low = round(market_up * 0.8, 2)
+                suggest_high = round(market_up * 1.2, 2)
+                basis = "市场进口均价（出口单价异常高于市场价，区间已按市场价带修正）"
         elif export_up:
             # 无市场均价：以出口单价为锚（加价 1.5-2.5 倍为建议带）
             suggest_low = round(export_up * 1.5, 2)
@@ -88,7 +110,8 @@ def suggest_pricing(product: str, market: str, year: str = "",
         exp_txt = f"{export_up:.2f}" if export_up is not None else "—"
         mkt_txt = f"{market_up:.2f}" if market_up is not None else "—"
         explain = (
-            f"基于 {year} 年 UN Comtrade 真实贸易数据：中国出口{market}该品类"
+            # 回归修复 G10：出口国文案用 reporter 变量（原硬编码"中国"，reporter≠中国时输出错误）
+            f"基于 {year} 年 UN Comtrade 真实贸易数据：{reporter}出口{market}该品类"
             f"（HS {hs}）单价约 {exp_txt} 美元/公斤，{market} 市场进口均价约 "
             f"{mkt_txt} 美元/公斤。建议定价区间 {suggest_low:.2f}–{suggest_high:.2f} 美元/公斤"
             f"（依据：{basis}）。实际售价还需结合规格、品牌与渠道，此区间为数据参考带。"
@@ -121,6 +144,10 @@ def suggest_pricing(product: str, market: str, year: str = "",
             "explain": explain,
             "_audit": {"legs": legs, "reporter": reporter, "market": market},
         }
+    except ValueError as e:
+        # 回归修复 G10：UN 查询失败/数据被拒绝的根因不再被吞成通用文案
+        # （429 耗尽/REJECTED 的具体原因透出给用户）
+        return {"available": False, "reason": str(e)}
     except Exception:
         logging.exception("定价建议计算异常: %s / %s", product, market)
         return {"available": False, "reason": "定价数据获取失败"}

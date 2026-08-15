@@ -249,7 +249,7 @@
           card.innerHTML =
             '<h3>' + escapeHtml(ld.company) +
             ' <span style="font-size:.75rem;padding:0.15rem 0.6rem;border-radius:999px;background:var(--accent-soft);color:var(--accent);">' +
-            (F_STATUS_LABEL[ld.status] || ld.status) + '</span></h3>' +
+            escapeHtml(F_STATUS_LABEL[ld.status] || ld.status) + '</span></h3>' +
             '<div class="meta">' + escapeHtml(ld.product) + ' → ' + escapeHtml(ld.country) +
             ' · ' + escapeHtml((ld.business_scope || '').slice(0, 80)) + '</div>' +
             (ld.note ? '<div class="meta">📝 ' + escapeHtml(ld.note) + '</div>' : '') +
@@ -260,27 +260,47 @@
             btn.addEventListener('click', async () => {
               const act = btn.dataset.act;
               const id = Number(btn.dataset.id);
-              if (act === 'del') {
-                if (!confirm('删除这条线索？')) return;
-                await fetch('/api/leads/funnel/delete', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ lead_id: id }),
-                });
-              } else {
-                // 回归修复：won/lost 弹备注时用户点"取消"（null）应中止流转，
-                // 不能把"取消"当成"空备注照常流转"
-                let note = '';
-                if (act === 'won' || act === 'lost') {
-                  const input = prompt(act === 'won' ? '成交备注（可选，取消则中止）' : '放弃原因（可选，取消则中止）', '');
-                  if (input === null) { loadFunnel(); return; }  // 取消：不流转
-                  note = input;
+              btn.disabled = true;  // 回归修复：请求期间防双击竞态（400 二次流转）
+              try {
+                if (act === 'del') {
+                  if (!confirm('删除这条线索？')) return;
+                  const r = await fetch('/api/leads/funnel/delete', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lead_id: id }),
+                  });
+                  if (!r.ok) {
+                    let detail = '';
+                    try { detail = (await r.json()).detail || ''; } catch (_) {}
+                    alert('删除失败（HTTP ' + r.status + '）' + (detail ? '：' + detail : ''));
+                    return;
+                  }
+                } else {
+                  // 回归修复：won/lost 弹备注时用户点"取消"（null）应中止流转，
+                  // 不能把"取消"当成"空备注照常流转"
+                  let note = '';
+                  if (act === 'won' || act === 'lost') {
+                    const input = prompt(act === 'won' ? '成交备注（可选，取消则中止）' : '放弃原因（可选，取消则中止）', '');
+                    if (input === null) { loadFunnel(); return; }  // 取消：不流转
+                    note = String(input).slice(0, 500);  // 回归修复：后端截断 500，前端先限
+                  }
+                  const r = await fetch('/api/leads/funnel/update', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lead_id: id, status: act, note: note }),
+                  });
+                  // 回归修复：原无 r.ok 检查，400（非法流转）/网络失败静默
+                  if (!r.ok) {
+                    let detail = '';
+                    try { detail = (await r.json()).detail || ''; } catch (_) {}
+                    alert('流转失败（HTTP ' + r.status + '）' + (detail ? '：' + detail : ''));
+                    return;
+                  }
                 }
-                await fetch('/api/leads/funnel/update', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ lead_id: id, status: act, note: note }),
-                });
+                loadFunnel(); loadFunnelStats();
+              } catch (_) {
+                alert('操作失败（网络错误），请重试');
+              } finally {
+                btn.disabled = false;
               }
-              loadFunnel(); loadFunnelStats();
             });
           });
           list.appendChild(card);

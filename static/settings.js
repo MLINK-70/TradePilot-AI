@@ -25,16 +25,16 @@
       <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
         <div style="margin-bottom:10px;">
           <label for="set-ai-key" style="font-size:.85rem;color:var(--muted);">API Key <span style="color:var(--error);">*必备</span></label>
-          <input type="password" id="set-ai-key" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-ai-key" maxlength="300" placeholder="sk-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">当前所选 AI 提供商的 Key（DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a> · GPT: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a> · Claude: <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>）</div>
         </div>
         <div style="margin-bottom:10px;">
           <label for="set-ai-model" style="font-size:.85rem;color:var(--muted);">模型（可选，留空用默认）</label>
-          <input type="text" id="set-ai-model" placeholder="如 deepseek-chat / gpt-4o-mini" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="text" id="set-ai-model" maxlength="100" placeholder="如 deepseek-chat / gpt-4o-mini" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
         </div>
         <div style="margin-bottom:10px;">
           <label for="set-ai-base" style="font-size:.85rem;color:var(--muted);">Base URL（仅自定义需要）</label>
-          <input type="text" id="set-ai-base" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="text" id="set-ai-base" maxlength="500" placeholder="https://api.openai.com/v1" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
         </div>
       </div>
     </details>
@@ -51,7 +51,7 @@
           <option value="custom">自定义</option>
         </select>
         <label for="set-tavily" style="font-size:.85rem;color:var(--muted);display:block;margin-top:8px;">搜索 API Key</label>
-        <input type="password" id="set-tavily" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+        <input type="password" id="set-tavily" maxlength="300" placeholder="tvly-..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
         <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">
           行业动态 / 宏观背景 / 竞争格局的来源。未配置时这些板块缺失，其余功能不受影响。<a href="https://app.tavily.com" target="_blank" rel="noopener" style="color:var(--accent);">获取</a>
         </div>
@@ -65,14 +65,14 @@
       <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
         <div style="margin-bottom:10px;">
           <label for="set-ebay-id" style="font-size:.85rem;color:var(--muted);">eBay 凭证（商品分析）</label>
-          <input type="password" id="set-ebay-id" placeholder="App ID" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-          <input type="password" id="set-ebay-secret" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-ebay-id" maxlength="300" placeholder="App ID" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-ebay-secret" maxlength="300" placeholder="Client Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · eBay 商品分析（链接→价格/评分/卖家）。需 eBay 开发者审核 · 需梯子</div>
         </div>
          <div style="margin-bottom:10px;">
           <label for="set-aliexpress-key" style="font-size:.85rem;color:var(--muted);">速卖通联盟凭证（商品分析）</label>
-          <input type="password" id="set-aliexpress-key" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
-          <input type="password" id="set-aliexpress-secret" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-aliexpress-key" maxlength="300" placeholder="App Key" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
+          <input type="password" id="set-aliexpress-secret" maxlength="300" placeholder="App Secret" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);margin-top:4px;">
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">可选 · 速卖通商品分析（链接→商品/价格/销量）。联盟开放平台 · 国内直连</div>
         </div>
         <div style="margin-bottom:10px;">
@@ -88,7 +88,7 @@
     <div id="set-admin-box" style="display:none;margin-bottom:12px;border:1px solid var(--error);border-radius:8px;padding:10px;background:rgba(220,38,38,.06);">
       <div style="font-size:.85rem;color:var(--error);margin-bottom:6px;">🔒 仅管理员可修改设置</div>
       <div style="display:flex;gap:6px;">
-        <input type="password" id="set-admin-pw" placeholder="管理员密码" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);">
+        <input type="password" id="set-admin-pw" maxlength="200" placeholder="管理员密码" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card-2);color:var(--text);">
         <button id="set-admin-login" style="padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">登录</button>
       </div>
       <div id="set-admin-hint" style="font-size:.72rem;color:var(--muted);margin-top:4px;">密码在服务器 .env 的 ADMIN_PASSWORD 中配置（未配置时查看服务启动日志）</div>

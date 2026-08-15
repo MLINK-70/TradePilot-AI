@@ -52,6 +52,7 @@ UN_COMTRADE_MODE = os.getenv("UN_COMTRADE_MODE", "preview")
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", TAVILY_API_KEY)
 SEARCH_BASE_URL = os.getenv("SEARCH_BASE_URL", "https://api.tavily.com")
+# 注：SEARCH_BASE_URL 的启动校验在文件末尾执行（validate_search_base_url 定义之后）
 
 # 运行时可更新的 Key（设置面板写入）
 RUNTIME_KEYS = {
@@ -95,15 +96,26 @@ def validate_ai_base_url(url: str) -> str:
     本地模型（http://localhost:11434 等）需 .env 设 ALLOW_LOCAL_AI_BASE_URL=1 显式放行。
     返回去除尾部斜杠的规范化地址；不合法抛 ValueError。
     """
+    return _validate_outbound_base_url(url, "AI 服务")
+
+
+def validate_search_base_url(url: str) -> str:
+    """校验搜索服务地址（回归修复 S1：SEARCH_BASE_URL 曾完全无校验，
+    custom provider 可把 Bearer key 明文发给内网/任意地址——与 AI 侧防线不对称）"""
+    return _validate_outbound_base_url(url, "搜索服务")
+
+
+def _validate_outbound_base_url(url: str, what: str) -> str:
+    """外发服务地址通用校验（AI/搜索共用同一套 SSRF/泄露防线）"""
     url = (url or "").strip().rstrip("/")
     if not url:
-        raise ValueError("AI 服务地址不能为空")
+        raise ValueError(f"{what}地址不能为空")
     u = urllib.parse.urlsplit(url)
     if u.scheme not in ("https", "http"):
-        raise ValueError("AI 服务地址必须以 http(s):// 开头")
+        raise ValueError(f"{what}地址必须以 http(s):// 开头")
     host = (u.hostname or "").lower()
     if not host:
-        raise ValueError("AI 服务地址缺少主机名")
+        raise ValueError(f"{what}地址缺少主机名")
 
     def _is_local(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         # IPv6：只拒绝环回(::1)和链路本地(fe80::)。其余（含 2001::/32 Teredo 隧道段、
@@ -113,7 +125,7 @@ def validate_ai_base_url(url: str) -> str:
         return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
 
     if not ALLOW_LOCAL_AI_BASE_URL and u.scheme != "https":
-        raise ValueError("AI 服务地址必须使用 https（本地模型需在 .env 设 ALLOW_LOCAL_AI_BASE_URL=1）")
+        raise ValueError(f"{what}地址必须使用 https（本地模型需在 .env 设 ALLOW_LOCAL_AI_BASE_URL=1）")
 
     try:
         ip = ipaddress.ip_address(host)  # 纯 IP 字面量
@@ -121,17 +133,17 @@ def validate_ai_base_url(url: str) -> str:
         ip = None  # 域名，走下方解析校验
     if ip is not None:
         if _is_local(ip) and not ALLOW_LOCAL_AI_BASE_URL:
-            raise ValueError("AI 服务地址不允许指向内网/本机地址")
+            raise ValueError(f"{what}地址不允许指向内网/本机地址")
     else:
         # 域名：解析后逐 IP 校验（防 DNS rebinding 绕过字面量检查）
         try:
             infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
         except socket.gaierror:
-            raise ValueError("AI 服务地址域名无法解析")
+            raise ValueError(f"{what}地址域名无法解析")
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
             if _is_local(ip) and not ALLOW_LOCAL_AI_BASE_URL:
-                raise ValueError("AI 服务地址解析到内网地址（已拒绝）")
+                raise ValueError(f"{what}地址解析到内网地址（已拒绝）")
     return url
 
 
@@ -151,6 +163,9 @@ def set_key(name: str, value: str) -> bool:
         raise ValueError(f"配置项 {name} 的值不能包含换行或 # 字符")
     if name == "AI_BASE_URL":
         value = validate_ai_base_url(value)
+    elif name == "SEARCH_BASE_URL":
+        # 回归修复：搜索地址与 AI 地址同套 SSRF/泄露校验
+        value = validate_search_base_url(value)
     RUNTIME_KEYS[name] = value
     globals()[name] = value  # 让引用处（llm/market_data/ebay）立即读到新值
 
@@ -212,3 +227,15 @@ def get_keys_status() -> dict:
         "UN_COMTRADE_MODE": RUNTIME_KEYS.get("UN_COMTRADE_MODE", "preview"),
         "UN_COMTRADE_KEY": bool(RUNTIME_KEYS.get("UN_COMTRADE_KEY")),
     }
+
+
+# ── 启动校验（回归修复）：SEARCH_BASE_URL 曾无校验（custom provider 可把
+# Bearer key 明文发给内网/任意地址——与 AI 侧防线不对称）。校验函数定义在本
+# 文件前面，因此放在模块末尾执行；非法则禁用搜索（服务照常启动，宁缺勿错）。
+try:
+    SEARCH_BASE_URL = validate_search_base_url(SEARCH_BASE_URL)
+    RUNTIME_KEYS["SEARCH_BASE_URL"] = SEARCH_BASE_URL
+except ValueError as _e:
+    logging.error("SEARCH_BASE_URL 配置非法，搜索功能已禁用：%s", _e)
+    SEARCH_BASE_URL = ""
+    RUNTIME_KEYS["SEARCH_BASE_URL"] = ""

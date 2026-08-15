@@ -362,6 +362,8 @@ def get_report_history(report_type: str, product: str, country: str,
 def list_report_history(report_type: str = "", limit: int = 50) -> list:
     """列出历史记录（倒序），可选按类型过滤"""
     init_db()
+    # 回归修复：limit 未校验（负数 → SQLite LIMIT -1 = 不限行）
+    limit = max(1, min(int(limit), 200))
     with contextlib.closing(get_conn()) as conn:
         if report_type:
             rows = conn.execute(
@@ -403,6 +405,8 @@ def count_access(result: str = "blocked") -> int:
 def list_access(limit: int = 50) -> list:
     """最近访问日志（倒序）"""
     init_db()
+    # 回归修复：limit 未校验（负数 → LIMIT -1 = 不限行）
+    limit = max(1, min(int(limit), 200))
     with contextlib.closing(get_conn()) as conn:
         rows = conn.execute(
             "SELECT id, ip, path, action, result, created_at FROM access_log ORDER BY id DESC LIMIT ?",
@@ -506,6 +510,8 @@ def list_funnel_leads(status: str = "", product: str = "", country: str = "",
                       limit: int = 200) -> list:
     """漏斗线索列表（可按状态/产品/市场筛选，updated_at 降序）"""
     init_db()
+    # 回归修复：limit clamp（与 list_report_history/list_access 同法）
+    limit = max(1, min(int(limit), 500))
     sql = "SELECT * FROM leads_funnel WHERE 1=1"
     args = []
     if status:

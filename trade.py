@@ -106,6 +106,8 @@ GROUP_MEMBERS = {
 # 最新年份探测锁（single-flight）：30 天 TTL 到期后并发请求同时探测会
 # 各自发起 6 次串行 UN 请求（回归修复：compare 5 国并发 → 30 次请求风暴）
 _latest_year_lock = threading.Lock()
+# 探测失败熔断时间戳（回归修复 G1：失败后 10 分钟内不重探，防 429 风暴）
+_latest_probe_fail_ts = 0.0
 
 
 def _read_latest_year_cache() -> int | None:
@@ -142,39 +144,65 @@ def get_latest_year() -> int:
         if latest is not None:
             return latest
         this_year = datetime.date.today().year
+        # 进程内熔断（回归修复 G1）：最近 10 分钟探测失败过则不重探，
+        # 防止限流窗口内每次 analyze/options/pricing/watch 都重发 6 连探测
+        if time.time() - _latest_probe_fail_ts < 600:
+            return this_year - 6
         # 探测范围 6 年（数据更新滞后时也能找到最新可用年份）
         for y in range(this_year, this_year - 6, -1):
-            try:
-                params = {
-                    "reporterCode": "156",
-                    "period": str(y),
-                    "partnerCode": "0",
-                    "cmdCode": "8518",
-                    "flowCode": "X",
-                    "maxRecords": 1,
-                }
-                hdrs = {"Accept": "application/json"}
-                if _use_formal():
-                    hdrs["Ocp-Apim-Subscription-Key"] = cfg.UN_COMTRADE_KEY
-                resp = requests.get(
-                    _FORMAL_URL if _use_formal() else _PREVIEW_URL, params=params,
-                    headers=hdrs,
-                    timeout=30,
-                    proxies={"http": None, "https": None},
-                )
-                if resp.status_code == 200 and resp.json().get("count", 0) > 0:
-                    save_cache("LATEST_YEAR", "0", "0", "X", [{"year": y}], "META")
-                    logging.info("最新可用年份探测: %d", y)
-                    return y
-            except Exception:
-                continue
+            retries = 0  # 429 重试计数（回归修复 G1：429 是限流不是"该年无数据"）
+            while True:
+                try:
+                    params = {
+                        "reporterCode": "156",
+                        "period": str(y),
+                        "partnerCode": "0",
+                        "cmdCode": "8518",
+                        "flowCode": "X",
+                        "maxRecords": 1,
+                    }
+                    hdrs = {"Accept": "application/json"}
+                    if _use_formal():
+                        hdrs["Ocp-Apim-Subscription-Key"] = cfg.UN_COMTRADE_KEY
+                    resp = requests.get(
+                        _FORMAL_URL if _use_formal() else _PREVIEW_URL, params=params,
+                        headers=hdrs,
+                        timeout=30,
+                        proxies={"http": None, "https": None},
+                    )
+                    if resp.status_code == 200 and resp.json().get("count", 0) > 0:
+                        save_cache("LATEST_YEAR", "0", "0", "X", [{"year": y}], "META")
+                        logging.info("最新可用年份探测: %d", y)
+                        return y
+                    if resp.status_code == 429 and retries < 2:
+                        # 429：退避后重试同一年（原实现把 429 当成无数据继续探测
+                        # 下一年，6 连请求加剧限流）
+                        retries += 1
+                        wait = min(15, 5 * retries)
+                        logging.warning("最新年份探测 429，%d 秒后重试同一年 %d", wait, y)
+                        time.sleep(wait)
+                        continue
+                    break  # 非 200/429：该年视为无数据，探测下一年
+                except Exception:
+                    break
             time.sleep(1)
-        logging.warning("最新年份探测失败，回退 %d", this_year - 6)
+        logging.warning("最新年份探测失败，回退 %d（10 分钟内不再重探）", this_year - 6)
+        _latest_probe_fail_ts = time.time()  # 熔断：避免限流雪崩
         return this_year - 6  # 动态兜底：探测范围的最后一年（不再是写死的 2024）
 
 
 # AI 辅助 HS 编码解析缓存（产品名 → 编码，避免重复调用）
+# 回归修复：原 dict 无上限（产品词可无界增长）；超限清空（持引用者不受影响）
 _HS_AI_CACHE: dict = {}
+_HS_AI_CACHE_MAX = 512
+# 内置表动态条目的上限（回归修复 G2：HS_MAP 被 AI 解析结果持续追加）
+_HS_MAP_MAX = 600
+
+
+def _hs_cache_set(product: str, hs: str) -> None:
+    if len(_HS_AI_CACHE) >= _HS_AI_CACHE_MAX:
+        _HS_AI_CACHE.clear()
+    _HS_AI_CACHE[product] = hs
 
 
 def get_hs_candidates(product: str, top_n: int = 3) -> list:
@@ -236,8 +264,9 @@ def _hs_via_ai(product: str) -> str:
         if cached:
             hs = str(cached[0].get("hs", ""))
             if hs.isdigit():
-                _HS_AI_CACHE[product] = hs
-                HS_MAP[product] = hs
+                _hs_cache_set(product, hs)
+                if len(HS_MAP) < _HS_MAP_MAX:  # 回归修复 G2：动态条目设上限防无界增长
+                    HS_MAP[product] = hs
                 desc = str(cached[0].get("desc", "")).strip()
                 if desc:
                     try:
@@ -260,8 +289,9 @@ def _hs_via_ai(product: str) -> str:
         hs = str(data.get("hs_code", "")).strip()
         desc = str(data.get("description", "")).strip()
         if hs.isdigit() and 4 <= len(hs) <= 6:
-            _HS_AI_CACHE[product] = hs
-            HS_MAP[product] = hs  # 写进内置表，下次直接命中
+            _hs_cache_set(product, hs)
+            if len(HS_MAP) < _HS_MAP_MAX:  # 回归修复 G2：动态条目设上限防无界增长
+                HS_MAP[product] = hs  # 写进内置表，下次直接命中
             # 描述持久化：写进 SQLite（cache_key 存产品名）+ HSDESC 反向缓存（按编码精确查）+ 内存表
             try:
                 from database import save_cache
@@ -279,7 +309,7 @@ def _hs_via_ai(product: str) -> str:
             return hs
     except Exception:
         pass
-    _HS_AI_CACHE[product] = ""
+    _hs_cache_set(product, "")  # 失败也缓存空（防重复调 AI），超限自动清空
     return ""
 
 
@@ -328,6 +358,16 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
     flow_code = flow
     # 回归修复：缓存键含数据源模式（preview/formal 切换后旧缓存不得继续命中）
     mode_key = "formal" if _use_formal() else "preview"
+
+    def _write_cache(data, **kw):
+        """写缓存但失败不阻断本次查询（回归修复 G3：原 save_cache 的 sqlite 异常
+        会让 UN 数据查询成功却整体 500；数据本体已取到，缓存失败只影响下次命中）"""
+        try:
+            save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code,
+                       cache_key=mode_key, **kw)
+        except Exception:
+            logging.warning("缓存写入失败（不影响本次结果）: %s/%s/%s", cmd_code, partner_code, period)
+
     cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
                         cache_key=mode_key, ttl_days=_ttl_for_period(period))
     if cached is not None:
@@ -384,20 +424,18 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
             if raw_count >= 500:
                 # 截断即残缺：写 REJECTED 元数据（不写数据缓存）+ 报错拒绝，
                 # DataGate 能查到 rejected 记录并向前端解释"为什么不可用"
-                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
-                           cache_key=mode_key, source="uncomtrade/" + mode_key,
-                           raw_count=raw_count, clean_count=0,
-                           quality="rejected",
-                           validation_reason=f"原始数据达到 {raw_count} 条记录上限（结果不完整），完整性校验未通过")
+                _write_cache([], source="uncomtrade/" + mode_key,
+                             raw_count=raw_count, clean_count=0,
+                             quality="rejected",
+                             validation_reason=f"原始数据达到 {raw_count} 条记录上限（结果不完整），完整性校验未通过")
                 raise ValueError(
                     f"UN Comtrade 返回 {raw_count} 条达到记录上限（结果不完整，已拒绝）")
             # 空数据 = 合法空结果（某国某年确实无贸易记录）→ 立即写 valid 空缓存，
             # 与"有数据但缺总额行"（残缺，rejected）严格区分——没有数据 ≠ 数据没找到
             if not raw_data:
-                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
-                           cache_key=mode_key, source="uncomtrade/" + mode_key,
-                           raw_count=0, clean_count=0,
-                           quality="valid", validation_reason="查询成功，无贸易记录（合法空结果）")
+                _write_cache([], source="uncomtrade/" + mode_key,
+                             raw_count=0, clean_count=0,
+                             quality="valid", validation_reason="查询成功，无贸易记录（合法空结果）")
                 return []
             # 正确聚合（数据准确性，实测验证）：UN Comtrade 按 customsCode(贸易方式：
             # C00=总计=C03+C04+…) 和 motCode(运输方式：0=全部) 拆分为多条，且部分查询
@@ -425,19 +463,17 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
             if not total_rows:
                 # 数据准确性红线（宁缺勿错）：无任何总额行说明数据残缺（截断/申报口径），
                 # 记 REJECTED 元数据 + 报错不写数据缓存，防止调用方把残缺/翻倍数字当完整结果
-                save_cache(cmd_code, partner_code, period, flow_code, [], reporter_code,
-                           cache_key=mode_key, source="uncomtrade/" + mode_key,
-                           raw_count=raw_count, clean_count=0,
-                           quality="rejected",
-                           validation_reason="原始数据缺少总额行（customsCode=C00），完整性校验未通过")
+                _write_cache([], source="uncomtrade/" + mode_key,
+                             raw_count=raw_count, clean_count=0,
+                             quality="rejected",
+                             validation_reason="原始数据缺少总额行（customsCode=C00），完整性校验未通过")
                 raise ValueError("UN Comtrade 返回数据缺少总额行（customsCode=C00），已拒绝")
             data = total_rows
             # 空结果也写缓存（30 天短 TTL 由读取侧 _ttl_for_period 控制）：
             # 某国某年无贸易数据是合法结果，不缓存会导致每次查询都打 API
-            save_cache(cmd_code, partner_code, period, flow_code, data, reporter_code,
-                       cache_key=mode_key, source="uncomtrade/" + mode_key,
-                       raw_count=raw_count, clean_count=clean_count,
-                       quality="valid", validation_reason="C00+mot=0 完整总额行")
+            _write_cache(data, source="uncomtrade/" + mode_key,
+                         raw_count=raw_count, clean_count=clean_count,
+                         quality="valid", validation_reason="C00+mot=0 完整总额行")
             return data
         except requests.exceptions.RequestException as e:
             last_error = str(e)
@@ -652,7 +688,11 @@ def query_trade(product: str, target: str, year: str, reporter: str = "中国"):
     else:
         rows = fetch_year(hs, target_code, year, reporter)
 
-    log_query(product, hs, target)
+    # 回归修复：查询日志是辅助记录，DB 写失败不得让成功的数据查询整体失败
+    try:
+        log_query(product, hs, target)
+    except Exception:
+        logging.warning("查询日志写入失败（不影响结果）: %s / %s", product, target)
     return hs, rows
 
 
@@ -682,7 +722,10 @@ def query_trend(product: str, target: str, years: list, reporter: str = "中国"
         for year in years:
             all_rows.extend(fetch_year(hs, target_code, str(year), reporter))
 
-    log_query(product, hs, target)
+    try:
+        log_query(product, hs, target)  # 回归修复：日志失败不阻断结果
+    except Exception:
+        logging.warning("查询日志写入失败（不影响结果）: %s / %s", product, target)
     return hs, all_rows, summarize_trend(all_rows)
 
 

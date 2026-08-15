@@ -132,10 +132,22 @@
           card.querySelector('[data-refresh]').addEventListener('click', () => refreshWatch(w.id, card));
           card.querySelector('[data-del]').addEventListener('click', async () => {
             if (!confirm('删除订阅 ' + w.product + ' → ' + w.market + '？')) return;
-            await fetch('/api/watch/remove', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ watch_id: w.id }),
-            });
+            try {
+              const r = await fetch('/api/watch/remove', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ watch_id: w.id }),
+              });
+              // 回归修复：原无 r.ok 检查，404/网络错误静默（用户以为删除成功）
+              if (!r.ok) {
+                let detail = '';
+                try { detail = (await r.json()).detail || ''; } catch (_) {}
+                setStatus('删除失败（HTTP ' + r.status + '）' + (detail ? '：' + detail : ''), true);
+                return;
+              }
+            } catch (_) {
+              setStatus('删除失败（网络错误），请重试', true);
+              return;
+            }
             loadWatches();
           });
           listEl.appendChild(card);
@@ -154,11 +166,15 @@
           body: JSON.stringify({ watch_id: id }),
         });
         const d = await r.json();
-        if (!r.ok) { setStatus('刷新失败：' + escapeHtml(d.detail || r.status), true); return; }
+        if (!r.ok) { setStatus('刷新失败：' + (d.detail || r.status), true); return; }
         const chg = d.change_pct;
         let chgHtml;
         if (chg == null && d.prev_value == null) {
           chgHtml = '<div class="chg chg-flat">无对比基线（首次刷新）</div>';
+        } else if (chg == null && d.value == 0 && d.prev_value > 0) {
+          // 回归修复：本次为 0（市场清零/无数据）时不得标成"上次为 0"
+          chgHtml = '<div class="chg chg-flat">本次为 0（上次 ' + fmtValue(d.prev_value) +
+            '，无百分比基线）</div>';
         } else if (chg == null) {
           chgHtml = '<div class="chg chg-flat">上次为 0，本次 ' + fmtValue(d.value) + '（无百分比基线）</div>';
         } else {
@@ -169,11 +185,15 @@
         }
         card.querySelector('.value').innerHTML =
           '<div class="num">' + fmtValue(d.value) + '</div>' + chgHtml;
-        setStatus('已刷新：' + escapeHtml(d.product) + ' → ' + escapeHtml(d.market) + '（' + escapeHtml(d.year) + '年数据）');
+        // 回归修复：textContent 已安全，去掉调用处 escapeHtml（原双重转义显示 &amp;）
+        setStatus('已刷新：' + d.product + ' → ' + d.market + '（' + d.year + '年数据）');
       } catch (_) {
         setStatus('刷新失败（网络错误）', true);
       } finally {
-        btn.disabled = false; btn.textContent = '🔄 刷新';
+        // 回归修复：刷新期间该卡可能已被删除（document.contains 检查防提示错乱）
+        if (document.contains(card)) {
+          btn.disabled = false; btn.textContent = '🔄 刷新';
+        }
       }
     }
 
@@ -187,7 +207,7 @@
           body: JSON.stringify({ product: product, market: market }),
         });
         const d = await r.json();
-        if (!r.ok) { setStatus('添加失败：' + escapeHtml(d.detail || r.status), true); return; }
+        if (!r.ok) { setStatus('添加失败：' + (d.detail || r.status), true); return; }
         setStatus(d.added ? '已添加订阅，点「刷新」拉取首次数值' : '该订阅已存在');
         document.getElementById('watch-product').value = '';
         document.getElementById('watch-market').value = '';

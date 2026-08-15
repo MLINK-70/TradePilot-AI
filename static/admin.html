@@ -60,7 +60,7 @@
     <div id="admin-login-box" style="display:none;margin-bottom:1rem;border:1px solid var(--error);border-radius:10px;padding:1rem;background:rgba(220,38,38,.06);">
       <div style="font-size:.88rem;color:var(--error);margin-bottom:0.6rem;">🔒 请输入管理员密码查看拦截记录</div>
       <div class="admin-form">
-        <input type="password" id="admin-pw" placeholder="管理员密码（.env 的 ADMIN_PASSWORD）">
+        <input type="password" id="admin-pw" maxlength="200" placeholder="管理员密码（.env 的 ADMIN_PASSWORD）">
         <button class="btn-primary" id="admin-login" style="border:none;border-radius:6px;cursor:pointer;padding:0.7rem 1.4rem;">登录</button>
       </div>
       <div class="status-line error" id="admin-login-hint" style="margin:0;"></div>

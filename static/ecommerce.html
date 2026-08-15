@@ -480,10 +480,16 @@
         e.preventDefault();
         const raw = document.getElementById('reviews-input').value;
         // 前端先清洗（去编号/星级/广告行/空行/重复）
-        const reviews = (raw.split('\n').map(s => s.trim()).filter(Boolean));
+        let reviews = (raw.split('\n').map(s => s.trim()).filter(Boolean));
         if (!reviews.length) {
           showStatus('请粘贴评论或使用演示数据', 'error');
           return;
+        }
+        // 回归修复：后端上限是"500 条"（reviews list max_length=500），
+        // maxlength=50000 只限字符数，超 500 行仍会 422；这里按条数截断并提示
+        if (reviews.length > 500) {
+          reviews = reviews.slice(0, 500);
+          showStatus('评论超过 500 条，已取前 500 条分析', 'info');
         }
 
         btn.disabled = true;
@@ -874,12 +880,15 @@
       document.getElementById('compare-btn').addEventListener('click', async () => {
         const prodA = document.getElementById('prod-a').value.trim() || '产品 A';
         const prodB = document.getElementById('prod-b').value.trim() || '产品 B';
-        const reviewsA = document.getElementById('reviews-a').value.split('\n').map(s => s.trim()).filter(Boolean);
-        const reviewsB = document.getElementById('reviews-b').value.split('\n').map(s => s.trim()).filter(Boolean);
+        let reviewsA = document.getElementById('reviews-a').value.split('\n').map(s => s.trim()).filter(Boolean);
+        let reviewsB = document.getElementById('reviews-b').value.split('\n').map(s => s.trim()).filter(Boolean);
         if (!reviewsA.length || !reviewsB.length) {
           showStatus('请粘贴两组评论（A 和 B）', 'error');
           return;
         }
+        // 回归修复：与后端 reviews 条数上限（500）对齐
+        if (reviewsA.length > 500) { reviewsA = reviewsA.slice(0, 500); showStatus('A 组评论超过 500 条，已取前 500 条', 'info'); }
+        if (reviewsB.length > 500) { reviewsB = reviewsB.slice(0, 500); showStatus('B 组评论超过 500 条，已取前 500 条', 'info'); }
         const cb = document.getElementById('compare-btn');
         cb.disabled = true;
         cb.textContent = '对比中…（约 40-60 秒）';

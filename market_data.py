@@ -212,6 +212,12 @@ def _search_web(query: str, max_results: int = 5, depth: str = "basic") -> list:
                 })
             return results
         elif provider == "custom":
+            # 回归修复：请求前对 SEARCH_BASE_URL 二次校验（配置入口被绕过时兜底，
+            # 防带 Key 请求内网/任意地址——与 llm._chat 的 AI 地址纵深防御对齐）
+            try:
+                cfg.validate_search_base_url(cfg.SEARCH_BASE_URL)
+            except ValueError as _e:
+                raise ValueError(f"搜索服务地址被拒绝：{_e}")
             resp = requests.post(
                 cfg.SEARCH_BASE_URL.rstrip("/") + "/search",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},

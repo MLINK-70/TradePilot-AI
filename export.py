@@ -45,6 +45,20 @@ def _parse_share(s) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _pct(x, digits: int = 1, signed: bool = False) -> str:
+    """百分数统一格式化（回归修复 G5：原 cagr/max_swing/market_share 三套写法，
+    精度不齐且无契约）。约定上游传 0-100 百分数；None/非数值 → "—"。"""
+    if x is None:
+        return "—"
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return "—"
+    if signed and v > 0:
+        return f"+{v:.{digits}f}%"
+    return f"{v:.{digits}f}%"
+
+
 def _plot_locked(func):
     """装饰器：串行化 matplotlib 绘图 + 异常安全关闭所有 Figure"""
     @functools.wraps(func)
@@ -388,7 +402,7 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
         y_range = f"{fy}-{ly}" if fy and ly and fy != ly else (f"{fy}年" if fy else year)
         lines.append(f"• 总出口额: {total_value / 1e8:.2f} 亿美元（{y_range}，UN Comtrade）")
         if stats.get("cagr_pct") is not None:
-            lines.append(f"• 年复合增长率: {stats['cagr_pct']}%（{y_range}）")
+            lines.append(f"• 年复合增长率: {_pct(stats['cagr_pct'])}（{y_range}）")
         if stats.get("peak_year"):
             lines.append(f"• 峰值年份: {stats['peak_year']}（{y_range} 区间内）")
         if stats.get("change_over_period_pct") is not None:
@@ -687,7 +701,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         kpi_rows.append(("出口净重", f"{total_wgt / 1e6:.2f} 千吨"))
     if stats:
         if stats.get("cagr_pct") is not None:
-            kpi_rows.append(("年复合增长率 CAGR", f"{stats['cagr_pct']}%"))
+            kpi_rows.append(("年复合增长率 CAGR", _pct(stats['cagr_pct'])))
         if stats.get("peak_year"):
             kpi_rows.append(("峰值年份", f"{stats['peak_year']}"))
     kpi_rows.append(("数据记录数", f"{len(rows)} 条"))
@@ -748,7 +762,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         if stats.get("change_over_period_pct") is not None:
             _p(f"• 区间 {stats['first_year']}-{stats['last_year']} 期末较期初变化 {stats['change_over_period_pct']:.1f}%", indent=False)
         if stats.get("max_swing_year") is not None:
-            _p(f"• 最大单年波动：{stats['max_swing_year']} 年 {stats['max_swing_pct']}%", indent=False)
+            _p(f"• 最大单年波动：{stats['max_swing_year']} 年 {_pct(stats['max_swing_pct'])}", indent=False)
         prices = stats.get("unit_prices") or []
         if prices:
             # 回归修复 E4：price 非数值（None/字符串）时跳过该项，不整体崩溃
@@ -782,7 +796,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         for i, m in enumerate(matrix, 1):
             mtbl.rows[i].cells[0].text = str(m.get("country", ""))
             mtbl.rows[i].cells[1].text = f"{m.get('export_value', 0) / 1e8:.2f}" if m.get("export_value") else "—"
-            mtbl.rows[i].cells[2].text = f"{m['market_share']}%" if m.get("market_share") is not None else "—"
+            mtbl.rows[i].cells[2].text = _pct(m.get("market_share")) if m.get("market_share") is not None else "—"
             mtbl.rows[i].cells[3].text = f"{m['cagr_pct']:+.1f}%" if m.get("cagr_pct") is not None else "—"
             mtbl.rows[i].cells[4].text = f"${m['unit_price']:.2f}" if m.get("unit_price") is not None else "—"
             mtbl.rows[i].cells[5].text = str(m.get("verdict", ""))
@@ -793,7 +807,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         leader = matrix[0] if matrix else {}
         if leader.get("country"):
             # market_share 可为 None（目标市场无进口数据），防 "None%" 渲染（回归修复）
-            share_txt = f"{leader['market_share']}%" if leader.get("market_share") is not None else "暂无数据"
+            share_txt = _pct(leader.get("market_share")) if leader.get("market_share") is not None else "暂无数据"
             _p(f"• {leader['country']}以 {leader.get('export_value', 0) / 1e8:.2f} 亿美元居首（占市场进口 {share_txt}），"
                f"CAGR {(leader.get('cagr_pct') or 0):+.1f}%（{leader.get('verdict', '')}）。", indent=False)
         if rising:
@@ -917,9 +931,9 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
         factor_rows.append(("贸易竞争力 TC", f"{competitiveness['tc']}",
                             "强则出口主导，弱则进口依赖"))
     if competitiveness and competitiveness.get("market_share") is not None:
-        factor_rows.append(("占市场进口份额", f"{competitiveness['market_share']}%", "现有渗透率 = 增长基数"))
+        factor_rows.append(("占市场进口份额", _pct(competitiveness['market_share']), "现有渗透率 = 增长基数"))
     if stats and stats.get("cagr_pct") is not None:
-        factor_rows.append(("出口 CAGR", f"{stats['cagr_pct']}%", "出口动能方向"))
+        factor_rows.append(("出口 CAGR", _pct(stats['cagr_pct']), "出口动能方向"))
     if landscape and landscape.get("top_brands"):
         factor_rows.append(("龙头品牌份额", f"{landscape['top_brands'][0].get('share', '')}", "市场集中度决定进入难度"))
     if len(factor_rows) > 1:
@@ -1225,7 +1239,7 @@ def build_market_report(product: str, country: str, ai: dict,
     if competitiveness and competitiveness.get("tc") is not None:
         kpi_rows.append(("贸易竞争力指数 TC", f"{competitiveness['tc']}"))
         if competitiveness.get("market_share") is not None:
-            kpi_rows.append(("占该国市场进口份额", f"{competitiveness['market_share']}%"))
+            kpi_rows.append(("占该国市场进口份额", _pct(competitiveness['market_share'])))
     if market_context and market_context.get("gdp_per_capita"):
         kpi_rows.append(("人均 GDP", f"{market_context['gdp_per_capita']:,.0f} 美元"))
     if market_context and market_context.get("gdp"):
@@ -1389,8 +1403,9 @@ def build_market_report(product: str, country: str, ai: dict,
                f"{'以出口为主导' if exp_v > imp_v else '进口依赖明显'}——"
                f"该数据反映中国在该市场的角色是{'供应方' if exp_v > imp_v else '采购方'}。")
         if share is not None:
-            _p(f"• 市场出口份额 {share}%：中国产品占{country}该品类进口的比重，"
-               f"即该国每进口 100 美元该品类，约 {share:.0f} 美元来自中国。")
+            _p(f"• 市场出口份额 {_pct(share)}：中国产品占{country}该品类进口的比重，"
+               f"即该国每进口 100 美元该品类，"
+               + ("不足 1 美元来自中国。" if share < 1 else f"约 {share:.1f} 美元来自中国。"))
             _p(f"• 份额解读：{'渗透率较高，进入成熟竞争期' if share >= 15 else (
                 '渗透率中等，仍有扩张空间' if share >= 5 else '渗透率较低，市场拓展空间大')}。")
         # 四态数据质量标记（数据准确性红线）：rejected 时明确告知不可用，
@@ -1530,13 +1545,13 @@ def build_market_report(product: str, country: str, ai: dict,
                 top_share = max(top_share or 0, s)
         if top_share is not None:
             if top_share >= 30:
-                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场集中度较高，新进入者宜避开正面竞争，"
+                _p(f"• 龙头品牌（最大者）份额约 {_pct(top_share)}：市场集中度较高，新进入者宜避开正面竞争，"
                    f"从细分场景（如通勤降噪、运动佩戴、价格带空档）切入。")
             elif top_share >= 15:
-                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场存在主导者，存在差异化空间，"
+                _p(f"• 龙头品牌（最大者）份额约 {_pct(top_share)}：市场存在主导者，存在差异化空间，"
                    f"可在功能或价格带建立差异化定位。")
             else:
-                _p(f"• 龙头品牌（最大者）份额约 {top_share:.0f}%：市场相对分散，竞争格局未固化，"
+                _p(f"• 龙头品牌（最大者）份额约 {_pct(top_share)}：市场相对分散，竞争格局未固化，"
                    f"是新进入者布局的窗口期。")
         if landscape.get("shift_reasons"):
             _p(f"• 格局正在变动（{'；'.join(landscape['shift_reasons'][:2])}），"
@@ -1587,7 +1602,7 @@ def build_market_report(product: str, country: str, ai: dict,
         factor_rows.append(("贸易竞争力 TC", f"{competitiveness['tc']}",
                             f"{'竞争力强，可扩张' if competitiveness['tc'] > 0.5 else '竞争力中等，需提升'}"))
     if competitiveness and competitiveness.get("market_share") is not None:
-        factor_rows.append(("占市场进口份额", f"{competitiveness['market_share']}%", "现有渗透率 = 增长基数"))
+        factor_rows.append(("占市场进口份额", _pct(competitiveness['market_share']), "现有渗透率 = 增长基数"))
     if trade_evidence and trade_evidence.get("trend"):
         trend = trade_evidence["trend"]
         years = sorted(trend.keys())
@@ -1648,7 +1663,7 @@ def build_market_report(product: str, country: str, ai: dict,
         top = brands[0]
         _p(f"• 龙头 {top.get('name', '')} 份额 {top.get('share', '')}：市场集中度决定新进入者难度。", indent=False)
     if competitiveness and competitiveness.get("market_share") is not None:
-        _p(f"• 中国占进口份额 {competitiveness['market_share']}%：现有渗透率是增长的基数。", indent=False)
+        _p(f"• 中国占进口份额 {_pct(competitiveness['market_share'])}：现有渗透率是增长的基数。", indent=False)
 
     # ===== 八、风险分析 =====
     _h("八、风险分析", 1, blank_before=True)

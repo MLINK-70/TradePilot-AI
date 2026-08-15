@@ -196,7 +196,17 @@ def _parse_json(content: str) -> dict:
         try:
             data = json.loads(stripped)
         except json.JSONDecodeError:
-            raise ValueError("AI 返回内容不是合法 JSON，请重试")
+            # 宽松兜底（回归修复）：模型可能输出"以下是结果：{...} 如上"这类
+            # 带前后缀文本；截取首个 { 到末尾 } 再试
+            start = stripped.find("{")
+            end = stripped.rfind("}")
+            if start != -1 and end > start:
+                try:
+                    data = json.loads(stripped[start:end + 1])
+                except json.JSONDecodeError:
+                    raise ValueError("AI 返回内容不是合法 JSON，请重试")
+            else:
+                raise ValueError("AI 返回内容不是合法 JSON，请重试")
 
     if not isinstance(data, dict):
         raise ValueError("DeepSeek 返回结构异常（非 JSON 对象），请重试")

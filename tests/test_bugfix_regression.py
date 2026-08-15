@@ -372,3 +372,48 @@ class TestDesktopPort:
 
         with mock.patch.object(desktop.socket, "socket", return_value=_Sock()):
             assert desktop.find_free_port() == 8123
+
+
+# ── 10. v1.0.3 新功能回归（定价/漏斗/订阅）──────────────────────────────
+
+class TestPricingRobust:
+    def test_dirty_value_rows_skipped(self):
+        """回归：primaryValue 为脏数据（'N/A'）时单价仍可算（原 TypeError 被吞成失败）"""
+        from pricing import _unit_price
+        rows = [{"primaryValue": "N/A", "netWgt": 10.0},
+                {"primaryValue": 100.0, "netWgt": 10.0}]
+        assert _unit_price(rows) == 5.0  # 100 / 20
+
+    def test_suggest_range_never_inverted(self):
+        """回归：出口单价异常高于市场均价时区间不得反转（150–1.3 之类荒谬输出）"""
+        import pricing
+        import trade
+        import database
+        with mock.patch.object(trade, "fetch_year",
+                               side_effect=[[{"primaryValue": 10000.0, "netWgt": 1.0}],
+                                            [{"primaryValue": 1.0, "netWgt": 1.0}]]), \
+             mock.patch.object(trade, "hs_lookup", return_value="8518"), \
+             mock.patch.object(trade, "partner_lookup", return_value="276"), \
+             mock.patch.object(trade, "get_latest_year", return_value=2022), \
+             mock.patch.object(database, "get_cache_meta", return_value=None):
+            r = pricing.suggest_pricing("蓝牙耳机", "德国", "2022")
+        assert r["available"] is True
+        assert r["suggest_low"] <= r["suggest_high"], "区间反转即 bug"
+
+    def test_missing_leg_is_graceful_degrade(self):
+        """回归：单腿缺失（市场均价无净重）是正常降级而非失败"""
+        import pricing
+        import trade
+        import database
+        with mock.patch.object(trade, "fetch_year",
+                               side_effect=[[{"primaryValue": 100.0, "netWgt": 1.0}],
+                                            []]), \
+             mock.patch.object(trade, "hs_lookup", return_value="8518"), \
+             mock.patch.object(trade, "partner_lookup", return_value="276"), \
+             mock.patch.object(trade, "get_latest_year", return_value=2022), \
+             mock.patch.object(database, "get_cache_meta", return_value=None):
+            r = pricing.suggest_pricing("蓝牙耳机", "德国", "2022")
+        assert r["available"] is True
+        assert r["export_unit_price"] == 100.0
+        assert r["market_unit_price"] is None
+        assert "—" in r["explain"]  # 单腿缺失文案用 — 而非崩溃

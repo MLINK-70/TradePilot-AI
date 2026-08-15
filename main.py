@@ -96,9 +96,11 @@ _ALLOWED_HOSTS = {h.strip().lower() for h in
 # 限额宽松（默认每小时 30 次），超限提示而非拒绝业务本身。
 _RATE_LIMIT = int(os.getenv("ANON_RATE_LIMIT", "30"))   # 每窗口次数
 _RATE_WINDOW = 3600                                      # 1 小时
-_RATE_PREFIXES = ("/api/analyze", "/api/trade/query", "/api/trade/export",
-                  "/api/business/", "/api/ecommerce/", "/api/ebay/", "/api/aliexpress/",
-                  "/api/leads/", "/api/agent/")
+# 回归修复 G6：/api/trade/ 一前缀覆盖 query/export/pricing/options/hs-candidates；
+# 补 /api/watch/（订阅刷新消耗 UN Comtrade 额度）、/api/history、/api/company/
+_RATE_PREFIXES = ("/api/analyze", "/api/trade/", "/api/business/", "/api/ecommerce/",
+                  "/api/ebay/", "/api/aliexpress/", "/api/leads/", "/api/agent/",
+                  "/api/watch/", "/api/history", "/api/company/")
 _rate_hits: dict = {}
 
 
@@ -557,10 +559,11 @@ def trade_pricing(req: PricingRequest):
     from pricing import suggest_pricing
     product = req.product.strip()
     market = req.market.strip()
+    reporter = _validate_reporter(req.reporter)  # 回归修复：未知出口国不再静默回退中国
     if not product or not market:
         raise HTTPException(status_code=400, detail="product 和 market 不能为空")
     try:
-        return suggest_pricing(product, market, req.year, req.reporter)
+        return suggest_pricing(product, market, req.year, reporter)
     except Exception as e:
         logging.exception("定价建议失败: %s / %s", product, market)
         raise HTTPException(status_code=502, detail=f"定价建议失败：{e}")
@@ -1354,9 +1357,14 @@ def watch_add(req: WatchRequest):
     from database import add_market_watch
     product = req.product.strip()
     market = req.market.strip()
+    reporter = _validate_reporter(req.reporter)  # 回归修复：未知出口国不再静默回退中国
     if not product or not market:
         raise HTTPException(status_code=400, detail="product 和 market 不能为空")
-    ok = add_market_watch(product, market, req.reporter)
+    # 目标市场也校验（避免无效市场进库，刷新时 502 才能发现）
+    from trade import partner_lookup
+    if not partner_lookup(market):
+        raise HTTPException(status_code=400, detail=f"未知国家/地区：{market}")
+    ok = add_market_watch(product, market, reporter)
     return {"ok": True, "added": ok}
 
 
@@ -1379,6 +1387,7 @@ def watch_refresh(req: WatchRefreshRequest):
     w = watches.get(req.watch_id)
     if not w:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    value = year = None  # 回归修复 G8：try 外预置，防异常面加宽后 UnboundLocalError
     try:
         year = str(get_latest_year())
         hs, rows = query_trade(w["product"], w["market"], year, reporter=w["reporter"])
@@ -1386,6 +1395,12 @@ def watch_refresh(req: WatchRefreshRequest):
         update_watch_snapshot(req.watch_id, value, year)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    except Exception:
+        # 回归修复 G8：DB/其他异常不再裸 500
+        logging.exception("订阅刷新异常: id=%s", req.watch_id)
+        raise HTTPException(status_code=502, detail="订阅刷新失败，请稍后重试")
+    if value is None or year is None:
+        raise HTTPException(status_code=502, detail="订阅刷新失败：无数据返回")
 
     prev = w.get("last_value")
     prev_year = w.get("last_year")
