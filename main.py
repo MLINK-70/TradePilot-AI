@@ -45,8 +45,8 @@ import config as cfg
 from trade import (AREA_MAP, GROUP_MEMBERS, HS_MAP, get_competitiveness,
                    get_competitiveness_matrix, get_competitor_comparison,
                    get_destination_ranking, get_hs_candidates, get_latest_year,
-                   get_top_exporters, query_trade, query_trend,
-                   summarize_stats, summarize_trend)
+                   get_top_exporters, partner_lookup, query_trade, query_trend,
+                   summarize_stats, summarize_trend, _use_formal)
 from hs_descriptions import get_hs_description
 from financials import get_company_financials
 from export import build_csv, build_market_report, build_word_report
@@ -701,6 +701,23 @@ def trade_query(req: TradeQueryRequest):
             for r in rows
         ],
     }
+    # 数据新鲜度 + 血缘（v1.0.2）：每年度数据"有多新、质量如何"，前端可显示 🟢🟡🔴
+    try:
+        from database import get_cache_meta
+        _mode_key = "formal" if _use_formal() else "preview"
+        _rep_code = AREA_MAP.get(reporter, "156")
+        _target_code = partner_lookup(target)
+        freshness = []
+        for y in years:
+            meta = get_cache_meta(hs, _target_code, str(y), "X", _rep_code, cache_key=_mode_key)
+            if meta:
+                freshness.append({"year": y, "fetched_at": meta["fetched_at"],
+                                  "quality": meta["quality"],
+                                  "reason": meta["validation_reason"]})
+        if freshness:
+            result["_freshness"] = freshness
+    except Exception:
+        logging.warning("新鲜度元数据读取失败（不阻断）: %s / %s", product, target)
     # 保存历史（同参数覆盖，供 UI 回看 + 后续缓存命中）
     try:
         from database import save_report_history

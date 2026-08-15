@@ -487,6 +487,26 @@
         tbl.appendChild(tbody);
       }
 
+      // 数据新鲜度徽章（v1.0.2）：🟢 Valid·新 / 🟡 Suspicious 或旧 / 🔴 Rejected
+      // fetched_at 距今 <7 天绿、7-30 天黄、>30 天橙；质量 rejected 红
+      function renderFreshness(freshness) {
+        if (!freshness || !freshness.length) return '';
+        const now = Date.now();
+        const parts = freshness.map(f => {
+          let age = null;
+          try { age = (now - new Date(f.fetched_at).getTime()) / 86400000; } catch (_) {}
+          let dot, label;
+          if (f.quality === 'rejected') { dot = '🔴'; label = '拒绝'; }
+          else if (f.quality === 'suspicious') { dot = '🟡'; label = '存疑'; }
+          else if (age !== null && age > 30) { dot = '🟠'; label = '较旧'; }
+          else if (age !== null && age > 7) { dot = '🟡'; label = '7天+'; }
+          else { dot = '🟢'; label = '新鲜'; }
+          return f.year + ':' + dot + label;
+        });
+        return '<br><span style="font-size:.75rem;color:var(--muted);">数据新鲜度 ' +
+          parts.join(' ') + '</span>';
+      }
+
       function render(data) {
         document.getElementById('stat-total').textContent = data.total_value.toLocaleString('zh-CN');
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
@@ -494,7 +514,8 @@
         document.getElementById('chart-meta').innerHTML =
           'HS' + data.hs_code + ' · ' + (data.hs_description || '品名待确认') +
           '<br>' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
-          ' · 数据来源 UN Comtrade';
+          ' · 数据来源 UN Comtrade' +
+          renderFreshness(data._freshness);
 
         // 关键指标（程序精确计算，行业报告式）
         const stats = data.stats || {};

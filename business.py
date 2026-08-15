@@ -180,6 +180,9 @@ def generate_outreach_from_idea(idea: str, company: str = "", contact: str = "",
                         f"- 开发信中可引用：\"我们的产品正好匹配贵市场{market}对{product}的持续需求\""
                     )
     except Exception:
+        # 静默失败红线：贸易数据查询失败 → 开发信降级为无数据版本（不留痕会
+        # 分不清"查询失败"和"本就没数据"，且会让无数据支撑的销售信悄悄发出）
+        logging.warning("开发信贸易数据查询失败，降级为无数据版本：%s/%s", product, market, exc_info=True)
         trade_line = ""  # 数据查询失败不阻断开发信生成
 
     # 第三步：扩写开发信（含真实数据）

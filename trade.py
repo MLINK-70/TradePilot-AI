@@ -869,8 +869,31 @@ def get_competitiveness(product: str, target: str, year: str, reporter: str = "�
             "available": True,
             "quality": quality,      # valid / suspicious / invalid / rejected
             "quality_note": quality_note,
+            # 计算审计（v1.0.2，调试用）：每个数字的来源 + 公式 + 血缘元数据，
+            # 排查"这个数字为什么不对"时直接看这里，不用翻代码
+            "_audit": {
+                "product": product,
+                "target": target,
+                "year": year,
+                "hs_code": hs,
+                "reporter": reporter,
+                "reporter_code": _rep_code,
+                "tc_formula": f"TC = (X - M) / (X + M) = ({export_value:.0f} - {import_value:.0f}) / ({export_value:.0f} + {import_value:.0f}) = {tc}" if tc is not None else "TC = None（出口或进口数据缺失，防 ±1.0 假完美值）",
+                "share_formula": f"份额 = 出口 / 市场总进口 = {export_value:.0f} / {market_import_value:.0f} = {market_share}%" if market_share is not None else "份额 = None（市场总进口缺失）",
+                "legs": {
+                    "export": check_data_gate(hs, target_code, year, "X", reporter_code=_rep_code,
+                                              cache_key=("formal" if _use_formal() else "preview")),
+                    "import": check_data_gate(hs, target_code, year, "M", reporter_code=_rep_code,
+                                              cache_key=("formal" if _use_formal() else "preview")),
+                    "market_import": check_data_gate(hs, "0", year, "M",
+                                                     reporter_code=AREA_MAP.get(target, "156"),
+                                                     cache_key=("formal" if _use_formal() else "preview")),
+                },
+            },
         }
     except Exception:
+        # 静默失败红线：竞争力数据获取异常必须留痕，防止"系统坏了"伪装成"无数据"
+        logging.exception("get_competitiveness 异常（%s/%s/%s）", product, target, year)
         return {}
 
 
@@ -913,12 +936,15 @@ def get_competitor_comparison(product: str, target: str, year: str,
                 else:
                     rows = fetch_year(hs, target_code or "0", year, reporter=country)
                 value = sum(r.get("primaryValue") or 0 for r in rows)
-                results.append({"country": country, "value": value})
+                results.append({"country": country, "value": value, "error": None})
                 total += value
-            except Exception:
-                results.append({"country": country, "value": 0})
+            except Exception as e:
+                # 静默失败红线（v1.0.2）：数据获取失败 ≠ 该国出口为 0。
+                # 记 error 标记该行不可用，前端/报告可显示"数据缺失"，绝不用 0 冒充
+                logging.warning("竞争力对比 %s 数据获取失败: %s", country, e)
+                results.append({"country": country, "value": None, "error": str(e)[:120]})
         for r in results:
-            r["share"] = round(r["value"] / total * 100, 1) if total else 0
+            r["share"] = round(r["value"] / total * 100, 1) if r["value"] is not None and total else None
         try:
             from database import save_cache
             save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
@@ -926,6 +952,7 @@ def get_competitor_comparison(product: str, target: str, year: str,
             pass
         return {"competitors": results, "available": True}
     except Exception:
+        logging.exception("get_competitor_comparison 异常（%s/%s）", product, target)
         return {}
 
 
@@ -999,6 +1026,7 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
             pass
         return matrix
     except Exception:
+        logging.exception("get_competitiveness_matrix 异常（%s/%s）", product, target)
         return []
 
 
@@ -1048,6 +1076,7 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
             pass
         return top
     except Exception:
+        logging.exception("get_top_exporters 异常（%s/%s）", product, year)
         return []
 
 
@@ -1083,6 +1112,7 @@ def get_destination_ranking(product: str, target: str, year: str,
             r["share"] = round(r["value"] / total * 100, 1) if total else 0
         return {"destinations": results[:10], "available": True}
     except Exception:
+        logging.exception("get_destination_ranking 异常（%s/%s）", product, target)
         return {}
 
 

@@ -807,7 +807,7 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
             years5 = list(range(get_latest_year() - 4, get_latest_year() + 1))
             cpi_series = get_worldbank_series(iso3, "cpi", years5)
         except Exception:
-            pass
+            logging.warning("CPI 通胀数据获取失败（报告缺需求侧章节）：%s", iso3, exc_info=True)
         if cpi_series:
             _h("需求侧：通胀与消费环境", 2)
             _p(f"{target} 通胀率（CPI 年变化 %，World Bank 官方数据）近 5 年趋势：")
@@ -1432,7 +1432,8 @@ def build_market_report(product: str, country: str, ai: dict,
                             "营收稳定，投入平稳" if chg > -5 else "营收收缩，投入承压")
                         _p(f"  近 {len(rev_series)} 年营收变化 {chg:+.1f}%：{direction}。", indent=False)
         except Exception:
-            pass
+            # 静默失败红线：品牌财报获取失败要留痕，分得清"没有财报"和"获取出错"
+            logging.warning("龙头品牌财报画像获取失败（财务章节降级）", exc_info=True)
         if not financials_available:
             _p("（所选龙头品牌的公开财报数据暂缺，跳过财务画像）", indent=False)
         if landscape.get("key_insight"):
