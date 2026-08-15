@@ -112,3 +112,70 @@ class TestCacheKeyNormalization:
         a = (norm("iPhone"), norm("德国"), norm("中国"))
         b = (norm("iphone"), norm("德国"), norm("中国"))
         assert a == b
+
+
+class TestCacheKeyHashable:
+    """回归（v1.0.3 收尾）：trend 值为 dict（{value,weight}）时缓存 key 必须可哈希——
+    嵌套 dict 进 key 会炸 _lock_for（unhashable type: 'dict'）"""
+
+    def _tc(self, quality="valid"):
+        return {"available": True, "tc": 0.6, "export_value": 6.88e8,
+                "import_value": 1.74e8, "market_import_value": 2.2e9,
+                "market_share": 31.2, "quality": quality, "quality_note": ""}
+
+    def test_dict_trend_value_hashable(self):
+        trade = {"hs_code": "8525", "trend": {"2020": {"value": 5e8, "weight": 1e6}}}
+        key = llm._market_cache_key("摄像头", "德国", None, trade, self._tc(), None, None)
+        assert isinstance(hash(key), int)  # 可哈希即不再炸
+
+    def test_dict_trend_key_stable(self):
+        trade_a = {"hs_code": "8525", "trend": {"2020": {"value": 5e8, "weight": 1e6}}}
+        trade_b = {"hs_code": "8525", "trend": {"2020": {"value": 5e8, "weight": 1e6}}}
+        key_a = llm._market_cache_key("摄像头", "德国", None, trade_a, self._tc(), None, None)
+        key_b = llm._market_cache_key("摄像头", "德国", None, trade_b, self._tc(), None, None)
+        assert key_a == key_b
+
+
+class TestDataConfidenceBlock:
+    """回归（v1.0.3 收尾）：数据置信度总览注入——AI 引用数字必须与程序判定的质量一致"""
+
+    FAKE_JSON = ('{"executive_summary": {"background": "x"}, "market_size": {"value": "1", "year": 2026, "note": ""}, '
+                 '"growth_trend": {"cagr": "1%", "forecast_years": "2026-2030", "description": "x", "key_drivers": []}, '
+                 '"top_brands": [], "user_profile": {"age_range": "x", "income_level": "x", "key_needs": [], "buying_habits": []}, '
+                 '"risks": [], "action_plan": [], "summary": "x", "outlook": "x"}')
+
+    def _run(self, competitiveness, trade_evidence=None, market_context=None):
+        captured = {}
+
+        def fake_chat(messages, use_json=True):
+            captured["messages"] = messages
+            return self.FAKE_JSON
+        with mock.patch.object(llm, "_chat", side_effect=fake_chat):
+            llm.analyze_market("摄像头", "德国", market_context=market_context,
+                               trade_evidence=trade_evidence,
+                               competitiveness=competitiveness,
+                               background=None, landscape=None, refresh=True)
+        return captured["messages"][-1]["content"]
+
+    def _tc(self, quality, note=""):
+        return {"available": True, "tc": 0.6, "export_value": 6.88e8,
+                "import_value": 1.74e8, "market_import_value": 2.2e9,
+                "market_share": 31.2, "quality": quality, "quality_note": note}
+
+    def test_confidence_block_present(self):
+        trade = {"hs_code": "8525", "trend": {"2020": {"value": 5e8, "weight": 1e6}}}
+        t = self._run(self._tc("valid"), trade)
+        assert "【数据置信度总览】" in t
+        assert "引用规则" in t
+        assert "可信" in t  # valid → ✅ 可信
+
+    def test_suspicious_flagged(self):
+        t = self._run(self._tc("suspicious", "镜像口径差异"))
+        assert "存疑" in t
+        assert "数据质量: suspicious" in t
+
+    def test_rejected_excluded(self):
+        t = self._run(self._tc("rejected", "出口腿数据被拒绝"))
+        assert "拒绝" in t
+        assert "TC=" not in t          # 被拒数字不进提示词
+        assert "不要引用竞争力数字" in t
