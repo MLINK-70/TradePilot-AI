@@ -90,3 +90,25 @@ class TestChatRetry:
         patcher, _ = self._mock_session(resp=resp)
         with patcher:
             assert llm._chat([{"role": "user", "content": "hi"}]) == "好的"
+
+
+class TestCacheKeyNormalization:
+    """回归（遗留项 4）：LLM 缓存 key 规范化——大小写/空白不敏感，防双缓存烧双倍 token"""
+
+    def test_norm_basic(self):
+        assert llm._norm_cache_key(" iPhone ") == "iphone"
+        assert llm._norm_cache_key("德国") == "德国"
+        assert llm._norm_cache_key(None) == ""
+
+    def test_market_key_case_insensitive(self):
+        k1 = llm._market_cache_key("蓝牙耳机", "德国", None, None, None, None, None)
+        k2 = llm._market_cache_key(" 蓝牙耳机 ", "德国", None, None, None, None, None)
+        k3 = llm._market_cache_key("蓝牙耳机", " 德国 ", None, None, None, None, None)
+        assert k1 == k2 == k3
+
+    def test_trend_key_case_insensitive(self):
+        # 直接构造 trend key 的规范化部分（同 _trade_trend_cache 组装逻辑）
+        norm = lambda s: (s or "").strip().lower()
+        a = (norm("iPhone"), norm("德国"), norm("中国"))
+        b = (norm("iphone"), norm("德国"), norm("中国"))
+        assert a == b

@@ -243,7 +243,9 @@ def get_hs_candidates(product: str, top_n: int = 3) -> list:
                 pass
             return candidates
     except Exception:
-        pass
+        # 回归修复（遗留项 6）：AI 候选解析失败要留痕——否则前端无法区分
+        # "产品未收录"（正常）和"AI 服务挂了"（异常），两者都显示"未收录"
+        logging.warning("AI HS 候选解析失败: %s", product, exc_info=True)
     return []
 
 
@@ -308,7 +310,9 @@ def _hs_via_ai(product: str) -> str:
                     pass
             return hs
     except Exception:
-        pass
+        # 回归修复（遗留项 6）：AI HS 解析失败留痕——区分"产品未收录"（正常，
+        # 前端提示手输）和"AI 服务异常"（需排查），两者此前都静默返回空
+        logging.warning("AI HS 编码解析失败: %s", product, exc_info=True)
     _hs_cache_set(product, "")  # 失败也缓存空（防重复调 AI），超限自动清空
     return ""
 

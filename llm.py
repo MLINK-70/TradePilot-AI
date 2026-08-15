@@ -223,6 +223,15 @@ _market_cache: _LRUCache = _LRUCache()
 MARKET_PROMPT_VER = "v3"
 
 
+def _norm_cache_key(s) -> str:
+    """LLM 缓存 key 规范化：strip + lower（与 database._normalize 口径一致）
+
+    回归修复（遗留项 4）："iPhone"/"iphone"、"德国 " vs "德国" 生成双缓存 →
+    双倍 token 消耗；产品/国家/市场名大小写与空白不敏感。
+    """
+    return (s or "").strip().lower()
+
+
 def _market_cache_key(product: str, country: str,
                       market_context: dict | None,
                       trade_evidence: dict | None,
@@ -247,7 +256,10 @@ def _market_cache_key(product: str, country: str,
         return None
     # AI 提供商/模型签名：切换提供商或模型时旧缓存自动失效
     ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
-    return (product, country, MARKET_PROMPT_VER, ai_sig, _sig(market_context), _sig(trade_evidence),
+    # 回归修复（遗留项 4）：key 规范化（strip+lower）——"iPhone"/"iphone" 双缓存烧双倍 token，
+    # 与 database._normalize 口径一致（产品/国家/市场名大小写不敏感）
+    return (_norm_cache_key(product), _norm_cache_key(country), MARKET_PROMPT_VER, ai_sig,
+            _sig(market_context), _sig(trade_evidence),
             _sig(competitiveness), _sig(background), _sig(landscape))
 
 
@@ -457,7 +469,9 @@ def analyze_trade_trend(product: str, target: str, reporter: str, trend: dict, s
     #  数据行签名兜底：key 内加入 trend 数值摘要）
     ai_sig = (cfg.AI_PROVIDER, cfg.AI_MODEL)
     data_sig = tuple((y, v.get("value"), v.get("weight")) for y, v in trend.items())
-    cache_key = (product, target, reporter, data_sig, PROMPT_VER, ai_sig)
+    # 回归修复（遗留项 4）：key 规范化（strip+lower），与 database._normalize 口径一致
+    cache_key = (_norm_cache_key(product), _norm_cache_key(target), _norm_cache_key(reporter),
+                 data_sig, PROMPT_VER, ai_sig)
     cached = _trade_trend_cache.get(cache_key)  # _LRUCache（阶段 4 迁移漏网点，回归修复）
     if cached is not None:
         return copy.deepcopy(cached)  # 回归修复：返回副本，防调用方原地改 dict 污染缓存
@@ -586,7 +600,9 @@ def analyze_market_comparison(product: str, countries: list, per_country: dict) 
         return (tuple(sorted(te.get("trend", {}).items())),
                 comp.get("tc"), comp.get("market_share"))
     ev_sig = tuple(_ev_sig(per_country.get(c) or {}) for c in countries)
-    cache_key = (product, tuple(countries), PROMPT_VER, ai_sig, ev_sig)
+    # 回归修复（遗留项 4）：key 规范化（strip+lower），与 database._normalize 口径一致
+    cache_key = (_norm_cache_key(product), tuple(_norm_cache_key(c) for c in countries),
+                 PROMPT_VER, ai_sig, ev_sig)
     cached = _compare_cache.get(cache_key)
     if cached is not None:
         return copy.deepcopy(cached)  # 回归修复：返回副本，防调用方污染缓存
