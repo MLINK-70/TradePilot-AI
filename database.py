@@ -153,6 +153,41 @@ def _init_db_unlocked():
                 created_at TEXT NOT NULL
             )
         """)
+        # 线索销售漏斗（v1.0.2 业务收口）：线索从生成到成交的状态管理
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leads_funnel (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product TEXT NOT NULL,
+                country TEXT NOT NULL,
+                company TEXT NOT NULL,
+                business_scope TEXT DEFAULT '',
+                size_signal TEXT DEFAULT '',
+                match_reason TEXT DEFAULT '',
+                source_url TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'new',  -- new/sent/replied/quoted/won/lost
+                note TEXT DEFAULT '',                -- 跟进备注
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(product, country, company, source_url)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_funnel_status ON leads_funnel(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_funnel_updated ON leads_funnel(updated_at)")
+        # 我的市场订阅（v1.0.2 业务收口）：关注 (产品, 市场) 组合，定期看变化
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS market_watch (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product TEXT NOT NULL,
+                market TEXT NOT NULL,
+                reporter TEXT NOT NULL DEFAULT '中国',
+                last_value REAL,             -- 上次快照出口额（美元）
+                last_year TEXT,              -- 上次快照年份
+                last_fetched_at TEXT,        -- 上次刷新时间
+                created_at TEXT NOT NULL,
+                UNIQUE(product, market, reporter)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_market_watch_updated ON market_watch(last_fetched_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_report_history ON report_history(report_type, product, country)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_log ON access_log(result, created_at)")
         conn.commit()
@@ -412,4 +447,172 @@ def delete_admin_session(token: str):
     with _write_lock:
         with contextlib.closing(get_conn()) as conn:
             conn.execute("DELETE FROM admin_sessions WHERE token=?", (token,))
+            conn.commit()
+
+
+# ═══ 线索销售漏斗（v1.0.2 业务收口）═══
+# 状态流转：new（新线索）→ sent（已发开发信）→ replied（已回复）
+#           → quoted（已报价）→ won（已成交）/ lost（已放弃）
+LEAD_STATUSES = ("new", "sent", "replied", "quoted", "won", "lost")
+
+# 允许的状态流转（防跳级/回退失控；won/lost 为终态）
+LEAD_TRANSITIONS = {
+    "new": ("sent", "lost"),
+    "sent": ("replied", "quoted", "lost"),
+    "replied": ("quoted", "sent", "lost"),
+    "quoted": ("won", "lost", "replied"),
+    "won": (),
+    "lost": ("new",),  # 放弃后允许重新激活
+}
+
+
+def save_leads_to_funnel(product: str, country: str, leads: list) -> int:
+    """把检索到的线索批量存入漏斗（同 (product,country,company,url) 去重，保留原状态）"""
+    init_db()
+    added = 0
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            now = datetime.now().isoformat()
+            for ld in leads:
+                if not isinstance(ld, dict):
+                    continue
+                company = (ld.get("company") or "").strip()[:100]
+                if not company:
+                    continue
+                cur = conn.execute(
+                    "SELECT id FROM leads_funnel WHERE product=? AND country=? AND company=? AND source_url=?",
+                    (product, country, company, (ld.get("source_url") or "").strip()[:300]),
+                ).fetchone()
+                if cur:
+                    continue  # 已存在：保留原状态（不重置漏斗进度）
+                conn.execute(
+                    """INSERT INTO leads_funnel
+                       (product, country, company, business_scope, size_signal, match_reason, source_url,
+                        status, note, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 'new', '', ?, ?)""",
+                    (product, country, company,
+                     (ld.get("business_scope") or "").strip()[:200],
+                     (ld.get("size_signal") or "").strip()[:100],
+                     (ld.get("match_reason") or "").strip()[:200],
+                     (ld.get("source_url") or "").strip()[:300],
+                     now, now),
+                )
+                added += 1
+            conn.commit()
+    return added
+
+
+def list_funnel_leads(status: str = "", product: str = "", country: str = "",
+                      limit: int = 200) -> list:
+    """漏斗线索列表（可按状态/产品/市场筛选，updated_at 降序）"""
+    init_db()
+    sql = "SELECT * FROM leads_funnel WHERE 1=1"
+    args = []
+    if status:
+        sql += " AND status=?"
+        args.append(status)
+    if product:
+        sql += " AND product=?"
+        args.append(product)
+    if country:
+        sql += " AND country=?"
+        args.append(country)
+    sql += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+    args.append(limit)
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def funnel_stats() -> dict:
+    """漏斗统计：各状态数量（销售管道看板数据）"""
+    init_db()
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM leads_funnel GROUP BY status").fetchall()
+    stats = {s: 0 for s in LEAD_STATUSES}
+    for r in rows:
+        if r["status"] in stats:
+            stats[r["status"]] = r["n"]
+    return stats
+
+
+def update_lead_status(lead_id: int, new_status: str, note: str = "") -> bool:
+    """线索状态流转：校验允许的转移 + 记录更新时间；note 留空则不改备注"""
+    if new_status not in LEAD_STATUSES:
+        raise ValueError(f"非法状态: {new_status}")
+    init_db()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            row = conn.execute("SELECT status FROM leads_funnel WHERE id=?", (lead_id,)).fetchone()
+            if not row:
+                return False
+            cur = row["status"]
+            if new_status not in LEAD_TRANSITIONS.get(cur, ()):
+                raise ValueError(f"不允许从 {cur} 直接流转到 {new_status}")
+            note_sql = ", note=?" if note.strip() else ""
+            note_args = (note.strip()[:500],) if note.strip() else ()
+            conn.execute(
+                f"UPDATE leads_funnel SET status=?, updated_at=?{note_sql} WHERE id=?",
+                (new_status, datetime.now().isoformat()) + note_args + (lead_id,),
+            )
+            conn.commit()
+    return True
+
+
+def delete_lead(lead_id: int) -> bool:
+    """删除一条线索"""
+    init_db()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            cur = conn.execute("DELETE FROM leads_funnel WHERE id=?", (lead_id,))
+            conn.commit()
+    return cur.rowcount > 0
+
+
+# ═══ 我的市场订阅（v1.0.2 业务收口）═══
+
+def add_market_watch(product: str, market: str, reporter: str = "中国") -> bool:
+    """添加关注 (产品, 市场)；已存在返回 False"""
+    init_db()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO market_watch (product, market, reporter, created_at) VALUES (?, ?, ?, ?)",
+                (product.strip()[:100], market.strip()[:50], reporter.strip()[:50],
+                 datetime.now().isoformat()),
+            )
+            conn.commit()
+    return cur.rowcount > 0
+
+
+def list_market_watch() -> list:
+    """订阅列表（含上次快照）"""
+    init_db()
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM market_watch ORDER BY last_fetched_at IS NULL DESC, last_fetched_at DESC, id DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def remove_market_watch(watch_id: int) -> bool:
+    """删除订阅"""
+    init_db()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            cur = conn.execute("DELETE FROM market_watch WHERE id=?", (watch_id,))
+            conn.commit()
+    return cur.rowcount > 0
+
+
+def update_watch_snapshot(watch_id: int, value: float, year: str):
+    """刷新快照：记录最新出口额 + 年份 + 时间"""
+    init_db()
+    with _write_lock:
+        with contextlib.closing(get_conn()) as conn:
+            conn.execute(
+                "UPDATE market_watch SET last_value=?, last_year=?, last_fetched_at=? WHERE id=?",
+                (value, year, datetime.now().isoformat(), watch_id),
+            )
             conn.commit()

@@ -147,7 +147,11 @@ def _extract_leads(product: str, country: str, raw_results: list) -> list:
 
 
 def find_leads(product: str, country: str) -> dict:
-    """主入口：产品 + 目标市场 → 客户线索列表（带来源 URL + 免责声明）"""
+    """主入口：产品 + 目标市场 → 客户线索列表（带来源 URL + 免责声明）
+
+    检索到的线索自动存入销售漏斗（leads_funnel），供漏斗页做状态管理
+    （new → sent → replied → quoted → won/lost）。
+    """
     product = (product or "").strip()
     country = (country or "").strip()
     if not product or not country:
@@ -160,6 +164,14 @@ def find_leads(product: str, country: str) -> dict:
             "message": "未检索到相关线索（请确认搜索 Key 已配置：Tavily）",
         }
     leads = _extract_leads(product, country, raw)
+    # 业务收口：线索入漏斗（失败不阻断检索结果，仅记日志——入库是增强不是主流程）
+    try:
+        from database import save_leads_to_funnel
+        added = save_leads_to_funnel(product, country, leads)
+        if added:
+            logging.info("线索已入漏斗 %d 条: %s / %s", added, product, country)
+    except Exception:
+        logging.warning("线索入漏斗失败（不影响检索结果）: %s / %s", product, country, exc_info=True)
     return {"leads": leads, "disclaimer": DISCLAIMER}
 
 

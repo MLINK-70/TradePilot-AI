@@ -132,6 +132,7 @@
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
     <a href="/leads.html">客户线索</a>
+    <a href="/watch.html">我的订阅</a>
     <a href="/admin.html">管理面板</a>
   </nav>
   <header class="hero">
@@ -188,8 +189,24 @@
         <button type="button" id="dl-report">下载 Word 报告</button>
         <button type="button" id="dl-report-pdf">下载 PDF</button>
         <button type="button" id="dl-data">下载 CSV 数据</button>
+        <button type="button" id="btn-pricing" style="background:var(--teal,#0d9488);">💰 定价建议</button>
       </div>
       <p id="status" class="status" aria-live="polite"></p>
+    </section>
+
+    <!-- 定价建议结果（v1.0.2 业务收口：数据驱动定价，程序计算） -->
+    <section id="pricing-box" hidden style="margin-top:1rem;">
+      <div class="chart-box">
+        <h3 class="analysis-title">💰 建议定价区间（数据驱动）</h3>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-v" id="price-low">—</div><div class="kpi-l">建议下沿</div><div class="kpi-tag">美元/公斤</div></div>
+          <div class="kpi"><div class="kpi-v" id="price-mid">—</div><div class="kpi-l">建议中位</div><div class="kpi-tag">美元/公斤</div></div>
+          <div class="kpi"><div class="kpi-v" id="price-high">—</div><div class="kpi-l">建议上沿</div><div class="kpi-tag">美元/公斤</div></div>
+          <div class="kpi"><div class="kpi-v" id="price-export">—</div><div class="kpi-l">出口单价</div><div class="kpi-tag">美元/公斤</div></div>
+        </div>
+        <p class="meta" id="price-explain" style="margin-top:0.8rem;"></p>
+        <p class="meta" id="price-audit" style="font-size:.75rem;"></p>
+      </div>
     </section>
 
     <section id="result" hidden>
@@ -969,6 +986,49 @@
           }
         } catch (_) {
           showStatus('数据下载失败（网络错误）', 'error');
+        }
+      });
+
+      // 定价建议（v1.0.2 业务收口：数据驱动定价）
+      document.getElementById('btn-pricing').addEventListener('click', async () => {
+        if (!lastQuery) return;
+        const btn = document.getElementById('btn-pricing');
+        btn.disabled = true;
+        btn.textContent = '计算中…';
+        const box = document.getElementById('pricing-box');
+        try {
+          const resp = await fetch('/api/trade/pricing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product: lastQuery.product, market: lastQuery.target,
+              reporter: lastQuery.reporter,
+            }),
+          });
+          const d = await resp.json();
+          if (!resp.ok || !d.available) {
+            box.hidden = false;
+            document.getElementById('price-explain').textContent = '⚠️ ' + (d.reason || d.detail || '定价数据不可用');
+            document.getElementById('price-audit').textContent = '';
+            return;
+          }
+          const fmt = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+          document.getElementById('price-low').textContent = fmt(d.suggest_low);
+          document.getElementById('price-mid').textContent = fmt(d.suggest_mid);
+          document.getElementById('price-high').textContent = fmt(d.suggest_high);
+          document.getElementById('price-export').textContent = fmt(d.export_unit_price);
+          document.getElementById('price-explain').textContent = d.explain || '';
+          const legs = (d._audit && d._audit.legs) || {};
+          const legTxt = Object.entries(legs).map(([k, v]) => k + ':' + (v.quality || 'unknown')).join(' · ');
+          document.getElementById('price-audit').textContent = '数据血缘：HS' + (d.hs_code || '') +
+            ' · ' + (d.year || '') + '年 · ' + legTxt;
+          box.hidden = false;
+        } catch (_) {
+          box.hidden = false;
+          document.getElementById('price-explain').textContent = '⚠️ 定价计算失败（网络错误）';
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '💰 定价建议';
         }
       });
 

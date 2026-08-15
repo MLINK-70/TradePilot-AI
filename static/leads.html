@@ -51,6 +51,7 @@
     <a href="/ecommerce.html">跨境电商</a>
     <a href="/business.html">开发信</a>
     <a href="/leads.html" class="active">客户线索</a>
+    <a href="/watch.html">我的订阅</a>
     <a href="/admin.html">管理面板</a>
   </nav>
   <main style="max-width:860px;margin:0 auto;padding:1.2rem 1rem;">
@@ -69,6 +70,27 @@
     <div id="leads-result"></div>
     <div id="outreach-box"></div>
     <p class="disclaimer" id="leads-disclaimer"></p>
+
+    <hr style="border:none;border-top:1px dashed var(--border);margin:1.5rem 0;">
+    <h2 style="margin-bottom:0.4rem;color:var(--text);">📈 销售漏斗</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:0.8rem;">
+      检索到的线索自动进入漏斗：<strong>新线索 → 已发开发信 → 已回复 → 已报价 → 成交/放弃</strong>，
+      跟踪每一家的跟进进度。
+    </p>
+    <div id="funnel-stats" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.9rem;"></div>
+    <div class="leads-form" style="margin-bottom:0.7rem;">
+      <select id="funnel-filter" style="flex:1;min-width:120px;padding:0.6rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);color:var(--text);">
+        <option value="">全部状态</option>
+        <option value="new">🆕 新线索</option>
+        <option value="sent">✉️ 已发开发信</option>
+        <option value="replied">💬 已回复</option>
+        <option value="quoted">💰 已报价</option>
+        <option value="won">✅ 已成交</option>
+        <option value="lost">🚫 已放弃</option>
+      </select>
+      <button class="btn-outreach" id="funnel-refresh" style="flex:none;">刷新漏斗</button>
+    </div>
+    <div id="funnel-list"></div>
   </main>
 
   <script>
@@ -172,6 +194,101 @@
         btn.disabled = false;
       }
     }
+
+    // ═══ 销售漏斗（v1.0.2 业务收口）═══
+    const F_STATUS_LABEL = {
+      new: '🆕 新线索', sent: '✉️ 已发开发信', replied: '💬 已回复',
+      quoted: '💰 已报价', won: '✅ 已成交', lost: '🚫 已放弃',
+    };
+    const F_NEXT = {
+      new: [['sent', '✉️ 发开发信'], ['lost', '🚫 放弃']],
+      sent: [['replied', '💬 已回复'], ['quoted', '💰 已报价'], ['lost', '🚫 放弃']],
+      replied: [['quoted', '💰 已报价'], ['sent', '↩️ 撤回'], ['lost', '🚫 放弃']],
+      quoted: [['won', '✅ 成交'], ['lost', '🚫 放弃'], ['replied', '↩️ 回到已回复']],
+      won: [], lost: [['new', '🔄 重新激活']],
+    };
+
+    async function loadFunnelStats() {
+      try {
+        const r = await fetch('/api/leads/funnel/stats');
+        const s = await r.json();
+        const box = document.getElementById('funnel-stats');
+        box.innerHTML = '';
+        const order = ['new', 'sent', 'replied', 'quoted', 'won', 'lost'];
+        order.forEach(k => {
+          const chip = document.createElement('span');
+          chip.style.cssText = 'padding:0.35rem 0.8rem;border-radius:999px;font-size:0.8rem;background:var(--card-2);border:1px solid var(--border);color:var(--text);';
+          chip.textContent = F_STATUS_LABEL[k] + ' ' + (s[k] || 0);
+          box.appendChild(chip);
+        });
+      } catch (_) { /* 统计加载失败静默 */ }
+    }
+
+    async function loadFunnel() {
+      const status = document.getElementById('funnel-filter').value;
+      try {
+        const r = await fetch('/api/leads/funnel/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: status }),
+        });
+        const data = await r.json();
+        const list = document.getElementById('funnel-list');
+        list.innerHTML = '';
+        const leads = data.leads || [];
+        if (!leads.length) {
+          list.innerHTML = '<div class="status-line">（漏斗暂无线索——先在上方检索）</div>';
+          return;
+        }
+        leads.forEach(ld => {
+          const card = document.createElement('div');
+          card.className = 'lead-card';
+          const nextBtns = (F_NEXT[ld.status] || []).map(([st, label]) =>
+            '<button class="btn-outreach" style="margin-right:0.4rem;" data-act="' + st + '" data-id="' + ld.id + '">' + label + '</button>'
+          ).join('');
+          card.innerHTML =
+            '<h3>' + escapeHtml(ld.company) +
+            ' <span style="font-size:.75rem;padding:0.15rem 0.6rem;border-radius:999px;background:var(--accent-soft);color:var(--accent);">' +
+            (F_STATUS_LABEL[ld.status] || ld.status) + '</span></h3>' +
+            '<div class="meta">' + escapeHtml(ld.product) + ' → ' + escapeHtml(ld.country) +
+            ' · ' + escapeHtml((ld.business_scope || '').slice(0, 80)) + '</div>' +
+            (ld.note ? '<div class="meta">📝 ' + escapeHtml(ld.note) + '</div>' : '') +
+            '<div class="src">来源：<a href="' + safeUrl(ld.source_url) + '" target="_blank" rel="noopener">' + escapeHtml(ld.source_url) + '</a></div>' +
+            '<div class="actions">' + nextBtns +
+            '<button class="btn-outreach" style="margin-right:0.4rem;background:transparent;border:1px solid var(--error);color:var(--error);" data-act="del" data-id="' + ld.id + '">🗑 删除</button></div>';
+          card.querySelectorAll('button[data-act]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const act = btn.dataset.act;
+              const id = Number(btn.dataset.id);
+              if (act === 'del') {
+                if (!confirm('删除这条线索？')) return;
+                await fetch('/api/leads/funnel/delete', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ lead_id: id }),
+                });
+              } else {
+                const note = act === 'won' || act === 'lost'
+                  ? prompt(act === 'won' ? '成交备注（可选）' : '放弃原因（可选）', '') || ''
+                  : '';
+                await fetch('/api/leads/funnel/update', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ lead_id: id, status: act, note: note }),
+                });
+              }
+              loadFunnel(); loadFunnelStats();
+            });
+          });
+          list.appendChild(card);
+        });
+      } catch (_) {
+        document.getElementById('funnel-list').innerHTML = '<div class="status-line error">漏斗加载失败</div>';
+      }
+    }
+
+    document.getElementById('funnel-refresh').addEventListener('click', () => { loadFunnel(); loadFunnelStats(); });
+    document.getElementById('funnel-filter').addEventListener('change', loadFunnel);
+    loadFunnelStats();
+    loadFunnel();
   </script>
   <script src="settings.js?v=19"></script>
 </body>

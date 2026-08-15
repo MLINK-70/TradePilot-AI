@@ -528,6 +528,28 @@ class TradeQueryRequest(BaseModel):
     reporter: str = Field(default="中国", max_length=50)  # 出口国（报告国），默认中国
 
 
+class PricingRequest(BaseModel):
+    product: str = Field(max_length=100)
+    market: str = Field(max_length=50)
+    year: str = Field(default="", max_length=10)
+    reporter: str = Field(default="中国", max_length=50)
+
+
+@app.post("/api/trade/pricing")
+def trade_pricing(req: PricingRequest):
+    """定价建议：产品 + 目标市场 → 数据驱动的价格区间（程序计算，可追溯）"""
+    from pricing import suggest_pricing
+    product = req.product.strip()
+    market = req.market.strip()
+    if not product or not market:
+        raise HTTPException(status_code=400, detail="product 和 market 不能为空")
+    try:
+        return suggest_pricing(product, market, req.year, req.reporter)
+    except Exception as e:
+        logging.exception("定价建议失败: %s / %s", product, market)
+        raise HTTPException(status_code=502, detail=f"定价建议失败：{e}")
+
+
 def _years_from_range(start_year: int, end_year: int | None) -> list:
     """起止年 → 年份列表；end_year 为空默认到最新可用年份"""
     latest = get_latest_year()  # 动态探测最新可用年份
@@ -1233,6 +1255,137 @@ def lead_outreach(req: LeadOutreachRequest):
                                    req.company, req.contact, req.email, req.hook)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ── 线索销售漏斗（v1.0.2 业务收口）──
+class LeadStatusRequest(BaseModel):
+    status: str = ""
+    product: str = ""
+    country: str = ""
+
+
+class LeadUpdateRequest(BaseModel):
+    lead_id: int
+    status: str = ""
+    note: str = ""
+
+
+class LeadDeleteRequest(BaseModel):
+    lead_id: int
+
+
+@app.post("/api/leads/funnel/list")
+def funnel_list(req: LeadStatusRequest):
+    """漏斗线索列表（可按状态/产品/市场筛选）"""
+    from database import list_funnel_leads
+    return {"leads": list_funnel_leads(req.status, req.product, req.country)}
+
+
+@app.get("/api/leads/funnel/stats")
+def funnel_stats():
+    """漏斗统计：各状态数量（销售管道看板）"""
+    from database import funnel_stats
+    return funnel_stats()
+
+
+@app.post("/api/leads/funnel/update")
+def funnel_update(req: LeadUpdateRequest):
+    """状态流转：new → sent → replied → quoted → won/lost（校验合法转移）"""
+    from database import update_lead_status
+    try:
+        ok = update_lead_status(req.lead_id, req.status, req.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="线索不存在")
+    return {"ok": True}
+
+
+@app.post("/api/leads/funnel/delete")
+def funnel_delete(req: LeadDeleteRequest):
+    """删除一条线索"""
+    from database import delete_lead
+    if not delete_lead(req.lead_id):
+        raise HTTPException(status_code=404, detail="线索不存在")
+    return {"ok": True}
+
+
+# ── 我的市场订阅（v1.0.2 业务收口）──
+class WatchRequest(BaseModel):
+    product: str = Field(max_length=100)
+    market: str = Field(max_length=50)
+    reporter: str = Field(default="中国", max_length=50)
+
+
+class WatchDeleteRequest(BaseModel):
+    watch_id: int
+
+
+class WatchRefreshRequest(BaseModel):
+    watch_id: int
+
+
+@app.get("/api/watch/list")
+def watch_list():
+    """订阅列表（含上次快照与变化）"""
+    from database import list_market_watch
+    return {"watches": list_market_watch()}
+
+
+@app.post("/api/watch/add")
+def watch_add(req: WatchRequest):
+    """添加关注 (产品, 市场)"""
+    from database import add_market_watch
+    product = req.product.strip()
+    market = req.market.strip()
+    if not product or not market:
+        raise HTTPException(status_code=400, detail="product 和 market 不能为空")
+    ok = add_market_watch(product, market, req.reporter)
+    return {"ok": True, "added": ok}
+
+
+@app.post("/api/watch/remove")
+def watch_remove(req: WatchDeleteRequest):
+    """删除订阅"""
+    from database import remove_market_watch
+    if not remove_market_watch(req.watch_id):
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    return {"ok": True}
+
+
+@app.post("/api/watch/refresh")
+def watch_refresh(req: WatchRefreshRequest):
+    """刷新一条订阅：拉最新出口额 → 与上次快照对比变化"""
+    from database import list_market_watch, update_watch_snapshot
+    from trade import get_latest_year, partner_lookup, query_trade
+
+    watches = {w["id"]: w for w in list_market_watch()}
+    w = watches.get(req.watch_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    try:
+        year = str(get_latest_year())
+        hs, rows = query_trade(w["product"], w["market"], year, reporter=w["reporter"])
+        value = sum(r.get("primaryValue") or 0 for r in rows)
+        update_watch_snapshot(req.watch_id, value, year)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    prev = w.get("last_value")
+    prev_year = w.get("last_year")
+    change_pct = None
+    if prev is not None and prev > 0 and value > 0:
+        change_pct = round((value - prev) / prev * 100, 1)
+    return {
+        "ok": True,
+        "product": w["product"],
+        "market": w["market"],
+        "value": value,
+        "year": year,
+        "prev_value": prev,
+        "prev_year": prev_year,
+        "change_pct": change_pct,
+    }
 
 
 @app.get("/api/admin/access-log")

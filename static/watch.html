@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradePilot AI — 我的市场订阅</title>
+  <link rel="stylesheet" href="style.css?v=18">
+  <style>
+    .watch-form { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .watch-form input, .watch-form select {
+      flex: 1; min-width: 140px; padding: 0.7rem; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--card); color: var(--text); font-size: 0.95rem;
+    }
+    .watch-card {
+      border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.8rem;
+      background: var(--card); display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+    }
+    .watch-card .info { flex: 1; min-width: 200px; }
+    .watch-card h3 { margin: 0 0 0.3rem; color: var(--text); font-size: 1rem; }
+    .watch-card .meta { color: var(--muted); font-size: 0.8rem; }
+    .watch-card .value { text-align: right; }
+    .watch-card .value .num { font-size: 1.15rem; font-weight: 600; color: var(--text); }
+    .watch-card .value .chg { font-size: 0.85rem; }
+    .chg-up { color: var(--teal, #0d9488); }
+    .chg-down { color: var(--error); }
+    .chg-flat { color: var(--muted); }
+    .btn-watch {
+      padding: 0.4rem 1rem; border: none; border-radius: 6px; background: var(--accent);
+      color: #fff; cursor: pointer; font-size: 0.85rem;
+    }
+    .btn-watch.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-watch.danger { background: transparent; border: 1px solid var(--error); color: var(--error); }
+    .status-line { font-size: 0.85rem; color: var(--muted); margin: 0.5rem 0; }
+    .status-line.error { color: var(--error); }
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">Trade<em>Pilot</em><span class="brand-tag">Export Intelligence</span></a>
+    <div class="brand-right">
+      <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+    </div>
+  </header>
+  <nav class="nav-line">
+    <a href="/agent.html">AI Agent</a>
+    <a href="/">市场分析</a>
+    <a href="/trade.html">贸易数据</a>
+    <a href="/ecommerce.html">跨境电商</a>
+    <a href="/business.html">开发信</a>
+    <a href="/leads.html">客户线索</a>
+    <a href="/watch.html" class="active">我的订阅</a>
+    <a href="/admin.html">管理面板</a>
+  </nav>
+  <main style="max-width:860px;margin:0 auto;padding:1.2rem 1rem;">
+    <h2 style="margin-bottom:0.4rem;color:var(--text);">📌 我的市场订阅</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem;">
+      关注 (产品 → 市场) 组合，一键刷新看出口额变化——每周看一眼，比每次都重新分析高效。
+    </p>
+
+    <div class="watch-form">
+      <input type="text" id="watch-product" placeholder="产品，如 蓝牙耳机">
+      <input type="text" id="watch-market" placeholder="目标市场，如 德国">
+      <button class="btn-watch" id="watch-add" style="flex:none;">➕ 添加订阅</button>
+    </div>
+
+    <div class="status-line" id="watch-status"></div>
+    <div id="watch-list"></div>
+  </main>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('theme-toggle');
+      const saved = localStorage.getItem('tradepilot-theme');
+      if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      btn.addEventListener('click', () => {
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+        localStorage.setItem('tradepilot-theme', dark ? 'light' : 'dark');
+        btn.textContent = dark ? '🌙' : '☀️';
+      });
+    })();
+
+    const statusEl = document.getElementById('watch-status');
+    const listEl = document.getElementById('watch-list');
+
+    function setStatus(msg, isError) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status-line' + (isError ? ' error' : '');
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmtValue(v) {
+      if (v == null) return '—';
+      return '$' + Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' 美元';
+    }
+
+    async function loadWatches() {
+      try {
+        const r = await fetch('/api/watch/list');
+        const d = await r.json();
+        listEl.innerHTML = '';
+        const ws = d.watches || [];
+        if (!ws.length) {
+          listEl.innerHTML = '<div class="status-line">（还没有订阅——输入产品与市场，点「添加订阅」）</div>';
+          return;
+        }
+        ws.forEach(w => {
+          const card = document.createElement('div');
+          card.className = 'watch-card';
+          let chgHtml = '<div class="chg chg-flat">尚未刷新</div>';
+          if (w.last_value != null) {
+            chgHtml = '<div class="chg chg-flat">上次：' + fmtValue(w.last_value) +
+              '（' + (w.last_year || '?') + '年）</div>';
+          }
+          card.innerHTML =
+            '<div class="info">' +
+            '<h3>' + escapeHtml(w.product) + ' → ' + escapeHtml(w.market) +
+            ' <span style="font-size:.75rem;color:var(--muted);">(' + escapeHtml(w.reporter || '中国') + '出口)</span></h3>' +
+            '<div class="meta">订阅于 ' + escapeHtml((w.created_at || '').slice(0, 16).replace('T', ' ')) + '</div>' +
+            '</div>' +
+            '<div class="value"><div class="num">' + fmtValue(w.last_value) + '</div>' + chgHtml + '</div>' +
+            '<div style="display:flex;gap:0.4rem;flex-direction:column;">' +
+            '<button class="btn-watch" data-refresh="' + w.id + '">🔄 刷新</button>' +
+            '<button class="btn-watch danger" data-del="' + w.id + '">🗑 删除</button>' +
+            '</div>';
+          card.querySelector('[data-refresh]').addEventListener('click', () => refreshWatch(w.id, card));
+          card.querySelector('[data-del]').addEventListener('click', async () => {
+            if (!confirm('删除订阅 ' + w.product + ' → ' + w.market + '？')) return;
+            await fetch('/api/watch/remove', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ watch_id: w.id }),
+            });
+            loadWatches();
+          });
+          listEl.appendChild(card);
+        });
+      } catch (_) {
+        listEl.innerHTML = '<div class="status-line error">订阅列表加载失败</div>';
+      }
+    }
+
+    async function refreshWatch(id, card) {
+      const btn = card.querySelector('[data-refresh]');
+      btn.disabled = true; btn.textContent = '刷新中…';
+      try {
+        const r = await fetch('/api/watch/refresh', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ watch_id: id }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setStatus('刷新失败：' + escapeHtml(d.detail || r.status), true); return; }
+        const chg = d.change_pct;
+        let chgHtml;
+        if (chg == null) {
+          chgHtml = '<div class="chg chg-flat">无对比基线（首次刷新）</div>';
+        } else {
+          const cls = chg > 0.5 ? 'chg-up' : (chg < -0.5 ? 'chg-down' : 'chg-flat');
+          const arrow = chg > 0.5 ? '📈 +' : (chg < -0.5 ? '📉 ' : '➖ ');
+          chgHtml = '<div class="chg ' + cls + '">' + arrow + (chg > 0 ? chg : chg) + '% 较上次（' +
+            escapeHtml(d.prev_year || '?') + '年）</div>';
+        }
+        card.querySelector('.value').innerHTML =
+          '<div class="num">' + fmtValue(d.value) + '</div>' + chgHtml;
+        setStatus('已刷新：' + escapeHtml(d.product) + ' → ' + escapeHtml(d.market) + '（' + escapeHtml(d.year) + '年数据）');
+      } catch (_) {
+        setStatus('刷新失败（网络错误）', true);
+      } finally {
+        btn.disabled = false; btn.textContent = '🔄 刷新';
+      }
+    }
+
+    document.getElementById('watch-add').addEventListener('click', async () => {
+      const product = document.getElementById('watch-product').value.trim();
+      const market = document.getElementById('watch-market').value.trim();
+      if (!product || !market) { setStatus('请填写产品和目标市场', true); return; }
+      try {
+        const r = await fetch('/api/watch/add', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: product, market: market }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setStatus('添加失败：' + escapeHtml(d.detail || r.status), true); return; }
+        setStatus(d.added ? '已添加订阅，点「刷新」拉取首次数值' : '该订阅已存在');
+        document.getElementById('watch-product').value = '';
+        document.getElementById('watch-market').value = '';
+        loadWatches();
+      } catch (_) { setStatus('网络错误', true); }
+    });
+
+    loadWatches();
+  </script>
+  <script src="settings.js?v=19"></script>
+</body>
+</html>
