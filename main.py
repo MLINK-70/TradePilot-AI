@@ -202,39 +202,45 @@ def _collect_evidence(product: str, country: str) -> tuple:
 
     阶段 4 优化：互不依赖的证据采集并行（ThreadPoolExecutor），
     原本串行 3-5 次网络往返压缩为 1 轮；get_latest_year 只取一次。
+    注：市场分析不拦截同国（如"空调→中国"分析中国市场机会是合法的）——
+    同国时 query_trend 抛错由 _trade_part 捕获降级（贸易证据缺失，
+    市场规模/竞争格局/World Bank 经济数据照常），报告仍完整生成。
     """
-    from trade import AREA_MAP, GROUP_MEMBERS, get_latest_year, partner_lookup
-
-    # 回归修复（v1.0.3 收尾）：同国查询（如"空调→中国"且出口国默认中国）会在
-    # _trade_part 里被"失败不阻断"吞掉 → 前端显示"出口数据缺失"误导。
-    # 在这里显式拦截，让 /api/analyze 把明确错误返回给用户。
-    _rep = AREA_MAP.get("中国", "156")  # 市场分析默认出口国中国
-    _tgt = partner_lookup(country)
-    if _rep and _tgt and _rep == _tgt and _tgt not in GROUP_MEMBERS:
-        raise ValueError(
-            f"目标市场「{country}」与出口国「中国」相同——同国贸易查询无意义，"
-            f"请更换目标市场"
-        )
+    from trade import get_latest_year
 
     def _trade_part():
         try:
+            from trade import AREA_MAP, GROUP_MEMBERS, partner_lookup
             ly = get_latest_year()  # 移入 try（回归修复：脏缓存解析曾在此处漏成 500）
-            # 近 5 年窗口（与多国对比 _collect_country_evidence 一致，保证 CAGR 口径可比）
-            hs, rows, trend = query_trend(product, country, list(range(ly - 4, ly + 1)))
             trade_evidence = {}
             competitiveness = {}
-            if trend:
-                # 数据精度（回归修复）：round 2 位会把 <50 万美元出口额归零
-                # （0.005 亿美元 → 0.0），下游 CAGR 计算 first>0 判失败 → 指标缺失；
-                # 保留 4 位（最小 1 万美元精度），AI 注入与报告计算都不失真
-                trade_evidence = {
-                    "hs_code": hs,
-                    "trend": {str(y): round(v["value"] / 1e8, 4) for y, v in trend.items()},
-                    "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
-                    "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
-                }
-            if len(rows):
-                competitiveness = get_competitiveness(product, country, str(ly))
+            # 同国（如"空调→中国"）时跳过 query_trend（中国→中国无出口数据），
+            # 但市场总进口（该国从全球进口）仍然有效——市场规模底数不能丢
+            _rep_code = AREA_MAP.get("中国", "156")
+            _tgt_code = partner_lookup(country)
+            _same = bool(_rep_code and _tgt_code and _rep_code == _tgt_code
+                         and _tgt_code not in GROUP_MEMBERS)
+            if not _same:
+                # 近 5 年窗口（与多国对比 _collect_country_evidence 一致，保证 CAGR 口径可比）
+                hs, rows, trend = query_trend(product, country, list(range(ly - 4, ly + 1)))
+                if trend:
+                    # 数据精度（回归修复）：round 2 位会把 <50 万美元出口额归零
+                    # （0.005 亿美元 → 0.0），下游 CAGR 计算 first>0 判失败 → 指标缺失；
+                    # 保留 4 位（最小 1 万美元精度），AI 注入与报告计算都不失真
+                    trade_evidence = {
+                        "hs_code": hs,
+                        "trend": {str(y): round(v["value"] / 1e8, 4) for y, v in trend.items()},
+                        "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
+                        "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+                    }
+                if len(rows):
+                    competitiveness = get_competitiveness(product, country, str(ly))
+            else:
+                # 同国：仅取市场总进口（市场规模底数），TC/出口趋势天然缺失
+                try:
+                    competitiveness = get_competitiveness(product, country, str(ly))
+                except Exception:
+                    logging.warning("同国市场分析竞争力数据获取失败（不阻断）", exc_info=True)
             return trade_evidence, competitiveness
         except Exception:
             logging.exception("贸易证据链采集失败（不阻断）")

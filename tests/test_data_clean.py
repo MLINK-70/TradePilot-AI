@@ -256,12 +256,18 @@ class TestSameCountryGuard:
             trade.query_trend("空调", "中国", [2023, 2024])
         assert "相同" in str(ctx.value)
 
-    def test_collect_evidence_same_country(self):
-        import pytest
+    def test_collect_evidence_same_country(self, tmp_db):
+        """市场分析不拦截同国（空调→中国合法），但贸易证据缺失是预期降级"""
         from main import _collect_evidence
-        with pytest.raises(ValueError) as ctx:
-            _collect_evidence("空调", "中国")
-        assert "相同" in str(ctx.value)
+        # mock 掉网络相关：query_trend 同国会被内部跳过；get_competitiveness 返回空
+        with mock.patch("main.query_trend", side_effect=ValueError("目标市场与出口国相同")), \
+             mock.patch("main.get_competitiveness", return_value={}), \
+             mock.patch("main.get_market_context", return_value=None), \
+             mock.patch("main.get_trade_background", return_value=None), \
+             mock.patch("main.get_competitive_landscape", return_value=None):
+            # 不应抛错——返回 5 元组
+            ev = _collect_evidence("空调", "中国")
+        assert isinstance(ev, tuple) and len(ev) == 5
 
     def test_normal_country_not_blocked(self, tmp_db):
         """正常组合（德国 ≠ 中国）不得被同国拦截"""
@@ -273,4 +279,4 @@ class TestSameCountryGuard:
              mock.patch("main.get_trade_background", return_value=None), \
              mock.patch("main.get_competitive_landscape", return_value=None):
             ev = _collect_evidence("空调", "德国")
-        assert isinstance(ev, tuple)
+        assert isinstance(ev, tuple) and len(ev) == 5
