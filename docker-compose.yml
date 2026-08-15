@@ -9,11 +9,13 @@ services:
     env_file:
       - .env
     environment:
-      # 服务器对外演示：允许通过域名/Host 访问（按需改成你的域名）
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}
+      # 服务器对外演示：默认放行任意 Host（回归修复：原默认 127.0.0.1,localhost
+      # 导致远程浏览器访问必被 400 拒绝）。
+      # ⚠️ 安全提示：公开部署建议显式设置域名，如 ALLOWED_HOSTS=your-domain.com
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
     volumes:
       - tradepilot-data:/app/data
-      # 数据库与缓存持久化（tradepilot.db 在容器 /app 下）
+      # 数据库与缓存持久化（tradepilot.db 由镜像内 RUN 预生成空库，copy-up 进卷）
       - tradepilot-db:/app/tradepilot.db
     restart: unless-stopped
 

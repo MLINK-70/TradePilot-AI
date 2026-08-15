@@ -115,7 +115,7 @@ def _read_latest_year_cache() -> int | None:
         cached = get_cached("LATEST_YEAR", "0", "0", "X", "META", ttl_days=30)
         if cached:
             return int(cached[0]["year"])
-    except (KeyError, TypeError, ValueError, IndexError, Exception):
+    except Exception:
         logging.warning("最新年份缓存解析失败，按未命中处理", exc_info=True)
     return None
 
@@ -375,6 +375,9 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
                 # 否则用户会看到假"无贸易数据"且被永久缓存
                 raise ValueError("UN Comtrade 返回异常结构（缺少 data 字段），已拒绝")
             raw_data = payload.get("data", []) or []
+            if not isinstance(raw_data, list):
+                # 回归修复：data 为 dict/字符串时逐行解析会 AttributeError
+                raise ValueError("UN Comtrade 返回异常结构（data 非数组），已拒绝")
             raw_count = len(raw_data)
             # 截断检测必须在过滤之前（回归修复：原实现过滤后才检查，500 条原始行里
             # 若恰无 C00/mot=0 总额行，残缺结果会被静默当作完整数据缓存）
@@ -697,9 +700,17 @@ def summarize_trend(rows: list) -> dict:
             year = int(period[:4]) if len(period) >= 4 and period[:4].isdigit() else None
         if not year:
             continue
+        try:
+            value = float(r.get("primaryValue") or 0)
+            weight = float(r.get("netWgt") or 0)
+        except (TypeError, ValueError):
+            # 回归修复：脏数据（"N/A"、带逗号数字等）单行跳过并告警，
+            # 不再让整条查询以 502 崩溃
+            logging.warning("跳过脏数据行: refYear=%s primaryValue=%r", year, r.get("primaryValue"))
+            continue
         entry = by_year.setdefault(year, {"value": 0.0, "weight": 0.0})
-        entry["value"] += float(r.get("primaryValue") or 0)
-        entry["weight"] += float(r.get("netWgt") or 0)
+        entry["value"] += value
+        entry["weight"] += weight
     return {y: v for y, v in sorted(by_year.items())}
 
 
@@ -945,11 +956,14 @@ def get_competitor_comparison(product: str, target: str, year: str,
                 results.append({"country": country, "value": None, "error": str(e)[:120]})
         for r in results:
             r["share"] = round(r["value"] / total * 100, 1) if r["value"] is not None and total else None
-        try:
-            from database import save_cache
-            save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
-        except Exception:
-            pass
+        # 回归修复：任一竞争对手数据缺失（error 行）时不写缓存——
+        # 瞬时失败会变成 90 天"数据缺失"标签；宁缺勿错，下次查询重试
+        if not any(r.get("error") for r in results):
+            try:
+                from database import save_cache
+                save_cache("COMPARE", hs, year, "X", results, "0", cache_key=cache_k)
+            except Exception:
+                pass
         return {"competitors": results, "available": True}
     except Exception:
         logging.exception("get_competitor_comparison 异常（%s/%s）", product, target)
@@ -1058,22 +1072,31 @@ def get_top_exporters(product: str, year: str, top_n: int = 6) -> list:
         except Exception:
             pass
         results = []
+        failed = 0
         for country in candidates:
             try:
                 rows = fetch_year(hs, "0", year, reporter=country, flow="X")
                 value = sum(r.get("primaryValue") or 0 for r in rows)
                 if value > 0:
                     results.append({"country": country, "value": value})
-            except Exception:
-                continue
+            except Exception as e:
+                # 回归修复：失败不再静默——记录数量，残缺排名不得写缓存
+                failed += 1
+                logging.warning("TOP 出口国轮询 %s 失败: %s", country, e)
         results.sort(key=lambda x: x["value"], reverse=True)
         top = results[:top_n]
-        # 写缓存（含 fetch_year 已缓存，这里存排名结果）
-        try:
-            from database import save_cache
-            save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="V1|rank")
-        except Exception:
-            pass
+        # 回归修复：有失败国时只返回不缓存（瞬时网络失败会变成数周错误排名）；
+        # 全部成功才持久化
+        if failed == 0:
+            try:
+                from database import save_cache
+                save_cache("TOPEXP", hs, year, "X", top, "0", cache_key="V1|rank")
+            except Exception:
+                pass
+        elif failed > len(candidates) // 2:
+            # 过半失败：结果不可信，整体降级（宁缺勿错）
+            logging.error("TOP 出口国轮询失败 %d/%d 国，返回空（宁缺勿错）", failed, len(candidates))
+            return []
         return top
     except Exception:
         logging.exception("get_top_exporters 异常（%s/%s）", product, year)
@@ -1096,6 +1119,7 @@ def get_destination_ranking(product: str, target: str, year: str,
         members = GROUP_MEMBERS[target_code]
         results = []
         total = 0
+        failed = 0
         for country in members:
             code = AREA_MAP.get(country, "")
             if not code:
@@ -1105,11 +1129,16 @@ def get_destination_ranking(product: str, target: str, year: str,
                 value = sum(r.get("primaryValue") or 0 for r in rows)
                 results.append({"country": country, "value": value})
                 total += value
-            except Exception:
-                continue
+            except Exception as e:
+                # 回归修复：失败不再静默——残缺排名会误导"哪些国家是大市场"
+                failed += 1
+                logging.warning("目的地排名 %s 查询失败: %s", country, e)
         results.sort(key=lambda x: x["value"], reverse=True)
         for r in results:
             r["share"] = round(r["value"] / total * 100, 1) if total else 0
+        if failed:
+            return {"destinations": results[:10], "available": False,
+                    "message": f"{failed} 个成员国数据缺失，排名不完整"}
         return {"destinations": results[:10], "available": True}
     except Exception:
         logging.exception("get_destination_ranking 异常（%s/%s）", product, target)

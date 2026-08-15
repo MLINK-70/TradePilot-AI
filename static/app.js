@@ -35,8 +35,15 @@
         // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
         const cd = resp.headers.get('Content-Disposition') || '';
         const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-        a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-市场分析报告.' + actualFmt;
+        let name = 'TradePilot-市场分析报告.' + actualFmt;
+        if (m) {
+          try { name = decodeURIComponent(m[1]); } catch (_) {}  // 畸形头不再抛 URIError
+        }
+        a.download = name;
+        // 回归修复：锚点须挂载到 DOM 再 click（Safari 对 detached 元素不触发下载）
+        document.body.appendChild(a);
         a.click();
+        a.remove();
         // blob URL 用后回收（防内存泄漏）
         setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
       } else {
@@ -91,9 +98,12 @@
           li.addEventListener('click', () => {
             // 回填表单：市场记录填产品/国家，贸易记录跳转贸易页
             if (it.report_type === 'trade') {
+              // 回归修复：params 解析包 try/catch（原 JSON.parse 无保护，脏数据点击即崩）
+              let p = {};
+              try { p = JSON.parse(it.params || '{}'); } catch (_) {}
               window.location.href = '/trade.html?product=' + encodeURIComponent(it.product) +
-                '&target=' + encodeURIComponent(it.country) + '&start=' + (JSON.parse(it.params || '{}').start_year || '') +
-                '&reporter=' + encodeURIComponent(JSON.parse(it.params || '{}').reporter || '中国');
+                '&target=' + encodeURIComponent(it.country) + '&start=' + (p.start_year || '') +
+                '&reporter=' + encodeURIComponent(p.reporter || '中国');
             } else {
               document.getElementById('product').value = it.product;
               document.getElementById('country').value = it.country;
@@ -198,7 +208,11 @@
         headlines.forEach(h => {
           const li = document.createElement('li');
           const a = document.createElement('a');
-          a.href = h.url || '#';
+          // 回归修复：外部 URL 协议校验（原 h.url 直拼 href，javascript: 可执行）
+          try {
+            const u = new URL(String(h.url || ''));
+            a.href = (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '#';
+          } catch (_) { a.href = '#'; }
           a.target = '_blank';
           a.rel = 'noopener noreferrer';
           a.textContent = h.title || '';

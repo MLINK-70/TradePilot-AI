@@ -506,10 +506,11 @@
 
       // 数据新鲜度徽章（v1.0.2）：🟢 Valid·新 / 🟡 Suspicious 或旧 / 🔴 Rejected
       // fetched_at 距今 <7 天绿、7-30 天黄、>30 天橙；质量 rejected 红
+      // 回归修复：返回结构化数组（原返回 HTML 字符串，被调用方拼进 innerHTML）
       function renderFreshness(freshness) {
-        if (!freshness || !freshness.length) return '';
+        if (!freshness || !freshness.length) return null;
         const now = Date.now();
-        const parts = freshness.map(f => {
+        return freshness.map(f => {
           let age = null;
           try { age = (now - new Date(f.fetched_at).getTime()) / 86400000; } catch (_) {}
           let dot, label;
@@ -518,21 +519,34 @@
           else if (age !== null && age > 30) { dot = '🟠'; label = '较旧'; }
           else if (age !== null && age > 7) { dot = '🟡'; label = '7天+'; }
           else { dot = '🟢'; label = '新鲜'; }
-          return f.year + ':' + dot + label;
+          return { year: f.year, label: dot + label };
         });
-        return '<br><span style="font-size:.75rem;color:var(--muted);">数据新鲜度 ' +
-          parts.join(' ') + '</span>';
       }
 
       function render(data) {
         document.getElementById('stat-total').textContent = data.total_value.toLocaleString('zh-CN');
         document.getElementById('stat-weight').textContent = data.total_weight.toLocaleString('zh-CN');
         document.getElementById('stat-count').textContent = data.record_count;
-        document.getElementById('chart-meta').innerHTML =
-          'HS' + data.hs_code + ' · ' + (data.hs_description || '品名待确认') +
-          '<br>' + (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
-          ' · 数据来源 UN Comtrade' +
-          renderFreshness(data._freshness);
+        // 回归修复：chart-meta 曾用 innerHTML 拼接 hs_description/reporter/target
+        // （用户输入+外部数据，全站唯一未消毒注入面），改纯 DOM 构建
+        const metaEl = document.getElementById('chart-meta');
+        metaEl.innerHTML = '';
+        const metaL1 = document.createElement('span');
+        metaL1.textContent = 'HS' + data.hs_code + ' · ' + (data.hs_description || '品名待确认');
+        const metaL2 = document.createElement('span');
+        metaL2.textContent = (lastQuery.reporter || '中国') + '出口至' + lastQuery.target +
+          ' · 数据来源 UN Comtrade';
+        metaEl.appendChild(metaL1);
+        metaEl.appendChild(document.createElement('br'));
+        metaEl.appendChild(metaL2);
+        const fresh = renderFreshness(data._freshness);
+        if (fresh && fresh.length) {
+          const metaL3 = document.createElement('span');
+          metaL3.style.cssText = 'font-size:.75rem;color:var(--muted);';
+          metaL3.textContent = '数据新鲜度 ' + fresh.map(f => f.year + ':' + f.label).join(' ');
+          metaEl.appendChild(document.createElement('br'));
+          metaEl.appendChild(metaL3);
+        }
 
         // 关键指标（程序精确计算，行业报告式）
         const stats = data.stats || {};
@@ -866,8 +880,13 @@
             // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
             const cd = resp.headers.get('Content-Disposition') || '';
             const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-            a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-报告.' + fmt;
+            let name = 'TradePilot-报告.' + fmt;
+            if (m) { try { name = decodeURIComponent(m[1]); } catch (_) {} }
+            a.download = name;
+            // 回归修复：锚点挂 DOM 再 click（Safari detached 元素不触发下载）
+            document.body.appendChild(a);
             a.click();
+            a.remove();
             // blob URL 用后回收（防内存泄漏，与 dl-data 一致）
             setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
           } else {
@@ -977,8 +996,13 @@
             // 从响应头 Content-Disposition 提取精确文件名（RFC5987 解码）
             const cd = resp.headers.get('Content-Disposition') || '';
             const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-            a.download = m ? decodeURIComponent(m[1]) : 'TradePilot-原始数据.csv';
+            let name = 'TradePilot-原始数据.csv';
+            if (m) { try { name = decodeURIComponent(m[1]); } catch (_) {} }
+            a.download = name;
+            // 回归修复：锚点挂 DOM 再 click（Safari detached 元素不触发下载）
+            document.body.appendChild(a);
             a.click();
+            a.remove();
             // blob URL 用后回收（防内存泄漏）
             setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
           } else {

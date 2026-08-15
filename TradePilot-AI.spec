@@ -48,7 +48,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # 回归修复 F9：UPX 压缩触发杀软误报且破坏签名（Win10+ 自带 Defender 常拦）
     console=False,  # 无控制台窗口（GUI 应用）
     icon=None,
 )

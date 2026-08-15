@@ -40,6 +40,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller pywin32 pywebview
+      # 回归修复 F6：Windows 打包依赖从 requirements-win.txt 显式安装
+      # （原裸装最新版，与项目声明的 win 清单脱节）
+      - run: pip install -r requirements-win.txt
       - run: pyinstaller TradePilot-AI.spec --noconfirm
       - uses: actions/upload-artifact@v4
         with:

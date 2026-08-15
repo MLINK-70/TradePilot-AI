@@ -285,3 +285,90 @@ class TestCollectorsFixes:
                 '"name": "X"}]}</script>')
         products = collectors._json_ld_products(html)
         assert len(products) == 1 and products[0]["name"] == "X"
+
+
+# ── 9. 第二轮审查修复（markdown 渲染 / 脏数据 / 残缺缓存 / desktop）──────
+
+class TestMarkdownReportGuards:
+    def test_non_list_fields_no_crash(self):
+        """回归：LLM 把数组字段返回成 int/dict/字符串时渲染不得 500"""
+        from main import markdown_report
+        d = {
+            "executive_summary": {"data_points": 5, "key_findings": "串", "challenges": {}},
+            "market_size": {"value": "1亿", "year": 2026},
+            "growth_trend": {"key_drivers": 3},
+            "top_brands": 7,
+            "user_profile": {"key_needs": None, "buying_habits": "x"},
+            "risks": 9,
+            "action_plan": 1,
+            "summary": "ok",
+        }
+        md = markdown_report("耳机", "德国", d)
+        assert "## 市场规模" in md  # 正常渲染其余部分
+
+
+class TestSummarizeTrendDirtyData:
+    def test_dirty_rows_skipped_not_crash(self):
+        """回归：primaryValue 为 "N/A" 的脏行跳过，不再整体 502"""
+        import trade
+        rows = [{"refYear": 2022, "primaryValue": "N/A", "netWgt": 1.0},
+                {"refYear": 2022, "primaryValue": 100.0, "netWgt": 2.0}]
+        trend = trade.summarize_trend(rows)
+        assert trend[2022]["value"] == 100.0
+
+
+class TestTopExportersNoPartialCache:
+    def test_partial_failure_not_cached(self, tmp_db):
+        """回归：TOP 出口国轮询有失败国时不得写缓存（残缺排名会留错误数周）"""
+        import trade
+        hs = trade.hs_lookup("蓝牙耳机") or "8518"
+        year = "2022"
+
+        # 4 国失败（< 半数 8，不触发整体降级）、其余成功
+        FAIL = {"中国", "德国", "日本", "韩国"}
+
+        def fake_fetch_year(cmd, partner, period, reporter="中国", flow="X"):
+            if reporter in FAIL:
+                raise ValueError("网络失败")
+            return [{"primaryValue": 100.0}]
+
+        with mock.patch.object(trade, "fetch_year", side_effect=fake_fetch_year):
+            top = trade.get_top_exporters("蓝牙耳机", year)
+        # 有失败 → 不写缓存
+        cached = tmp_db.get_cached("TOPEXP", hs, year, "X", "0",
+                                   cache_key="V1|rank", ttl_days=0)
+        assert cached is None
+        # 成功国仍在结果中
+        assert any(t["country"] not in FAIL for t in top)
+
+
+class TestDesktopPort:
+    def test_no_free_port_returns_none(self):
+        """回归：socket 分配失败时返回 None（原静默回退到必失败的 8000）"""
+        import desktop
+
+        class _AlwaysBusy:
+            def __enter__(self):
+                raise OSError("address in use")
+            def __exit__(self, *a):
+                return False
+
+        with mock.patch.object(desktop.socket, "socket", return_value=_AlwaysBusy()):
+            assert desktop.find_free_port() is None
+
+    def test_os_allocated_port_returned(self):
+        """回归：bind(0) 由 OS 分配端口并读回（无 TOCTOU、无范围限制）"""
+        import desktop
+
+        class _Sock:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def bind(self, addr):
+                pass
+            def getsockname(self):
+                return ("127.0.0.1", 8123)
+
+        with mock.patch.object(desktop.socket, "socket", return_value=_Sock()):
+            assert desktop.find_free_port() == 8123

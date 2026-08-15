@@ -344,8 +344,10 @@ def _add_toc_field(doc: Document, anchor: object = None) -> None:
 @_plot_locked
 def build_trend_chart(trend: dict) -> io.BytesIO:
     """生成趋势折线图 PNG（内存流），供 Word 报告嵌入"""
-    # 按年份排序（键可能是 str/int）；兼容 {year: {value, weight}} 与 {year: float} 两种结构
-    years = sorted(trend.keys(), key=lambda k: int(k))
+    # 按年份排序（回归修复 E2：键统一转 int——fill_between 对 str 键数组
+    # 会抛 TypeError；兼容 {year: {value, weight}} 与 {year: float} 两种结构）
+    trend = _norm_series(trend)
+    years = sorted(trend.keys())
     def _val(y):
         v = trend[y]
         return v["value"] if isinstance(v, dict) else v
@@ -398,12 +400,16 @@ def build_executive_summary(product: str, target: str, year: str, stats: dict,
 
 
 def _is_valid_pdf(path: str) -> bool:
-    """PDF 有效性校验：文件存在、非 0 字节、%PDF 魔数开头（防半成品文件）"""
+    """PDF 有效性校验：文件存在、非 0 字节、%PDF 魔数开头 + %%EOF 结尾
+    （回归修复：原只查 4 字节魔数，截断/损坏文件会被当成品返回）"""
     try:
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return False
         with open(path, "rb") as f:
-            return f.read(4) == b"%PDF"
+            head = f.read(4)
+            f.seek(max(0, os.path.getsize(path) - 1024))
+            tail = f.read(1024)
+        return head == b"%PDF" and b"%%EOF" in tail
     except OSError:
         return False
 
@@ -448,7 +454,77 @@ def finalize_docx(buf: io.BytesIO, as_pdf: bool = False) -> tuple:
             try:
                 os.remove(p)
             except OSError:
-                pass
+                # 回归修复 E8：Windows 下文件被占用删除失败时留痕（原静默累积临时文件）
+                logging.debug("临时文件清理失败（可能被占用）: %s", p)
+
+
+def _run_com_with_timeout(func, timeout: float = 45.0) -> bool:
+    """在独立线程里执行 Word COM 调用并限时等待（回归修复 E1）
+
+    问题：Word 挂起（修复弹窗/RPC 卡死）时原实现永久占线程，且 _WORD_LOCK
+    被长期持有堵死所有导出，LibreOffice 回退永远等不到。
+    方案：COM 放 daemon 线程 + join(timeout)；超时返回 False（COM 线程自行收尾），
+    调用方直接走回退路径，不再阻塞。线程内显式 CoInitialize（COM 线程亲和）。
+    """
+    import logging
+    import threading as _t
+    result = {}
+
+    def runner():
+        import pythoncom
+        pythoncom.CoInitialize()
+        try:
+            func()
+            result["ok"] = True
+        except Exception as e:
+            result["error"] = e
+        finally:
+            pythoncom.CoUninitialize()
+
+    t = _t.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        logging.warning("Word COM 调用超时（>%ss），跳过 COM 阶段", timeout)
+        return False
+    if "error" in result:
+        raise result["error"]
+    return bool(result.get("ok"))
+
+
+def _word_convert_pdf(docx_path: str) -> None:
+    """Word COM 转 PDF（在 _run_com_with_timeout 线程内执行）"""
+    import win32com.client
+    # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
+    # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
+    word = win32com.client.DispatchEx("Word.Application")
+    word.Visible = False
+    try:
+        word.DisplayAlerts = 0
+        doc = word.Documents.Open(docx_path)
+        doc.SaveAs2(docx_path.replace(".docx", ".pdf"), FileFormat=17)
+        doc.Close()
+    finally:
+        word.Quit()
+
+
+def _find_soffice():
+    """探测 LibreOffice 可执行文件：PATH + 常见安装路径（回归修复 E6：
+    原只查 PATH，Windows/macOS 默认不在 PATH）"""
+    import shutil
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found:
+        return found
+    candidates = [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/usr/bin/soffice",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return None
 
 
 def _convert_to_pdf(docx_path: str) -> None:
@@ -457,38 +533,30 @@ def _convert_to_pdf(docx_path: str) -> None:
     Linux 下 PDF 永远降级 docx——LibreOffice 白装）。
     """
     import logging
-    import shutil
     import subprocess
 
     with _WORD_LOCK:
-        # 路径 1：Word COM（Windows + 已装 Word）
+        # 路径 1：Word COM（Windows + 已装 Word）——带超时（回归修复 E1）
         try:
-            import win32com.client
-            # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
-            # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
-            word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            try:
-                word.DisplayAlerts = 0
-                doc = word.Documents.Open(docx_path)
-                doc.SaveAs2(docx_path.replace(".docx", ".pdf"), FileFormat=17)
-                doc.Close()
-            finally:
-                word.Quit()
-            return
+            if _run_com_with_timeout(lambda: _word_convert_pdf(docx_path)):
+                return
         except Exception as e:
             logging.warning("Word COM 转 PDF 失败（尝试 LibreOffice 回退）: %s", e)
         # 路径 2：LibreOffice headless（跨平台后备）
         try:
-            soffice = shutil.which("soffice") or shutil.which("libreoffice")
+            soffice = _find_soffice()
             if soffice is None:
                 logging.warning("未找到 soffice/libreoffice，PDF 转换不可用（将降级 docx）")
                 return
             out_dir = os.path.dirname(os.path.abspath(docx_path))
-            subprocess.run(
+            proc = subprocess.run(
                 [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
                 timeout=120, capture_output=True,
             )
+            # 回归修复 E6：非零退出（profile 锁冲突等）时记录 stderr，不再静默
+            if proc.returncode != 0:
+                err = (proc.stderr or b"").decode("utf-8", errors="replace")[-500:]
+                logging.warning("LibreOffice 退出码 %d: %s", proc.returncode, err)
         except Exception as e:
             logging.warning("LibreOffice 转 PDF 失败（将降级 docx）: %s", e)
 
@@ -683,10 +751,16 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
             _p(f"• 最大单年波动：{stats['max_swing_year']} 年 {stats['max_swing_pct']}%", indent=False)
         prices = stats.get("unit_prices") or []
         if prices:
-            _p("• 单价趋势：" + "; ".join(f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in prices), indent=False)
-            # 单价柱状图（量价结构一眼看清）
-            _p("单价（美元/公斤）逐年变化：")
-            _add_bar_chart(doc, {p["year"]: p["price"] for p in prices}, "出口单价趋势", "美元/公斤")
+            # 回归修复 E4：price 非数值（None/字符串）时跳过该项，不整体崩溃
+            clean_prices = [p for p in prices
+                            if isinstance(p.get("price"), (int, float)) and p.get("year") is not None]
+            if clean_prices:
+                _p("• 单价趋势：" + "; ".join(
+                    f"{p['year']}年 {p['price']:.2f} 美元/公斤" for p in clean_prices), indent=False)
+                # 单价柱状图（量价结构一眼看清）
+                _p("单价（美元/公斤）逐年变化：")
+                _add_bar_chart(doc, {p["year"]: p["price"] for p in clean_prices},
+                               "出口单价趋势", "美元/公斤")
 
     # ===== 四、出口大国对比（饼图主角 + 表格作证）=====
     _h("四、出口大国对比", 1, blank_before=True)
@@ -933,85 +1007,94 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
     return buf
 
 
+def _word_refresh_fields(path: str) -> None:
+    """Word COM 更新域/修表格跨页（在 _run_com_with_timeout 线程内执行）"""
+    import win32com.client
+    # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
+    # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
+    word = win32com.client.DispatchEx("Word.Application")
+    word.Visible = False
+    try:
+        word.DisplayAlerts = 0  # 防兼容性/恢复弹窗卡死
+        doc = word.Documents.Open(path)
+        doc.Repaginate()
+        # 清理页首空行段落（章节空行被推到新页首时删除，避免页首空两行）
+        for _ in range(3):
+            doc.Repaginate()
+            cleaned = False
+            for pg in range(1, doc.ComputeStatistics(2) + 1):  # wdStatisticPages
+                try:
+                    first_para = doc.Range(
+                        doc.GoTo(1, 1, 1, pg).Start,  # wdGoToPage
+                        doc.GoTo(1, 1, 1, pg).Start
+                    ).Paragraphs(1)
+                except Exception:
+                    continue
+                txt = first_para.Range.Text.strip()
+                # 空行特征：无文字（可能含空格/极小字 run）且不是表格
+                if txt in ("", " ") and first_para.Range.Tables.Count == 0:
+                    if first_para.Range.Information(3) == pg:
+                        first_para.Range.Delete()
+                        cleaned = True
+                        break
+            if not cleaned:
+                break
+        # 检测并修复表格跨页（最多 3 轮，插入分页符后分页变化需重新检查）
+        for _ in range(3):
+            doc.Repaginate()
+            fixed = False
+            for tbl in doc.Tables:
+                try:
+                    first_pg = tbl.Rows(1).Range.Information(3)  # wdActiveEndPageNumber
+                    last_pg = tbl.Rows(tbl.Rows.Count).Range.Information(3)
+                except Exception:
+                    continue
+                if first_pg != last_pg:
+                    # 表格跨页：在表格第一行前插入分页符（整表下移一页）
+                    tbl.Rows(1).Range.InsertBreak(7)  # wdPageBreak
+                    fixed = True
+                    break  # 分页已变，重新检查
+            if not fixed:
+                break
+        doc.Repaginate()
+        doc.Fields.Update()
+        for section in doc.Sections:
+            for f in section.Footers:
+                if f.Range.Fields.Count:
+                    f.Range.Fields.Update()
+        # 关闭拼写/语法检查（COM 重写 settings.xml 会清掉，保存后补写）
+        try:
+            doc.SpellingChecked = True
+            doc.GrammarChecked = True
+        except Exception:
+            pass
+        doc.Save()
+        doc.Close()
+    finally:
+        word.Quit()
+    # COM 保存后补写文档级"隐藏拼写错误"设置（COM 重写 settings.xml 会清掉）
+    from docx import Document as _Doc
+    _doc = _Doc(path)
+    _disable_spellcheck(_doc)
+    _doc.save(path)
+
+
 def _refresh_fields_docx(path: str) -> None:
     """用 Word COM 打开 docx 并更新所有域（PAGEREF 页码/页脚 PAGE），保存后返回
 
     顺带修复表格跨页：检测每个表格首行/末行页码，跨页时表格前插入分页符
     （整表移到下一页，不切断）。仅 Windows + 已装 Word 时可用；失败静默。
     用线程锁串行化：Word COM 单实例，并发调用会冲突。
+    回归修复 E1：COM 调用限时（Word 挂起不再永久占线程/堵锁），超时跳过
+    （docx 仍可用，域靠 updateFields 打开时更新）。
     """
+    import logging
     with _WORD_LOCK:
         try:
-            import win32com.client
-            # DispatchEx 强制新建独立实例（回归修复：Dispatch 会连接用户已打开的
-            # Word，随后 Quit() 会关掉用户文档，有数据丢失风险）
-            word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            try:
-                word.DisplayAlerts = 0  # 防兼容性/恢复弹窗卡死
-                doc = word.Documents.Open(path)
-                doc.Repaginate()
-                # 清理页首空行段落（章节空行被推到新页首时删除，避免页首空两行）
-                for _ in range(3):
-                    doc.Repaginate()
-                    cleaned = False
-                    for pg in range(1, doc.ComputeStatistics(2) + 1):  # wdStatisticPages
-                        try:
-                            first_para = doc.Range(
-                                doc.GoTo(1, 1, 1, pg).Start,  # wdGoToPage
-                                doc.GoTo(1, 1, 1, pg).Start
-                            ).Paragraphs(1)
-                        except Exception:
-                            continue
-                        txt = first_para.Range.Text.strip()
-                        # 空行特征：无文字（可能含空格/极小字 run）且不是表格
-                        if txt in ("", " ") and first_para.Range.Tables.Count == 0:
-                            if first_para.Range.Information(3) == pg:
-                                first_para.Range.Delete()
-                                cleaned = True
-                                break
-                    if not cleaned:
-                        break
-                # 检测并修复表格跨页（最多 3 轮，插入分页符后分页变化需重新检查）
-                for _ in range(3):
-                    doc.Repaginate()
-                    fixed = False
-                    for tbl in doc.Tables:
-                        try:
-                            first_pg = tbl.Rows(1).Range.Information(3)  # wdActiveEndPageNumber
-                            last_pg = tbl.Rows(tbl.Rows.Count).Range.Information(3)
-                        except Exception:
-                            continue
-                        if first_pg != last_pg:
-                            # 表格跨页：在表格第一行前插入分页符（整表下移一页）
-                            tbl.Rows(1).Range.InsertBreak(7)  # wdPageBreak
-                            fixed = True
-                            break  # 分页已变，重新检查
-                    if not fixed:
-                        break
-                doc.Repaginate()
-                doc.Fields.Update()
-                for section in doc.Sections:
-                    for f in section.Footers:
-                        if f.Range.Fields.Count:
-                            f.Range.Fields.Update()
-                # 关闭拼写/语法检查（COM 重写 settings.xml 会清掉，保存后补写）
-                try:
-                    doc.SpellingChecked = True
-                    doc.GrammarChecked = True
-                except Exception:
-                    pass
-                doc.Save()
-                doc.Close()
-            finally:
-                word.Quit()
-            # COM 保存后补写文档级"隐藏拼写错误"设置（COM 重写 settings.xml 会清掉）
-            from docx import Document as _Doc
-            _doc = _Doc(path)
-            _disable_spellcheck(_doc)
-            _doc.save(path)
-        except Exception:
-            pass  # 无 Word/COM 失败：交给 updateFields 打开时更新
+            _run_com_with_timeout(lambda: _word_refresh_fields(path))
+        except Exception as e:
+            # 无 Word/COM 失败：交给 updateFields 打开时更新（回归修复 E8：不再静默）
+            logging.debug("Word COM 域更新失败（降级 updateFields）: %s", e)
 
 
 def build_market_report(product: str, country: str, ai: dict,
@@ -1675,11 +1758,28 @@ def build_market_report(product: str, country: str, ai: dict,
     return buf
 
 
+def _norm_series(series: dict) -> dict:
+    """键类型归一化（回归修复 E2）：str/int 键统一为 int 键 + 数值兜底。
+
+    项目内 trend 键型两轨并存（summarize_trend 返回 int、trade_evidence 是 str），
+    此前绘图函数用 int 键取数、报告函数用 str 键取数，换调用方即炸。
+    注意：本函数是纯数据转换，禁止加 @_plot_locked（会被持锁的绘图函数调用而死锁）。
+    """
+    out = {}
+    for k, v in (series or {}).items():
+        try:
+            out[int(k)] = v
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 @_plot_locked
 def _add_bar_chart(doc: Document, series: dict, title: str, unit: str, divisor: float = 1.0):
     """柱状图：多年数据 → matplotlib PNG → 嵌入 Word"""
     import matplotlib.pyplot as plt
-    years = sorted(int(y) for y in series.keys())
+    series = _norm_series(series)
+    years = sorted(series.keys())
     values = [series[y] / divisor for y in years]
     fig, ax = plt.subplots(figsize=(8, 4))
     fig.subplots_adjust(left=0.12, right=0.95, top=0.85, bottom=0.15)
@@ -1701,7 +1801,8 @@ def _add_bar_chart(doc: Document, series: dict, title: str, unit: str, divisor: 
 def _add_line_chart(doc: Document, series: dict, title: str, unit: str, divisor: float = 1.0):
     """折线图：多年数据 → matplotlib PNG → 嵌入 Word"""
     import matplotlib.pyplot as plt
-    years = sorted(int(y) for y in series.keys())
+    series = _norm_series(series)
+    years = sorted(series.keys())
     values = [series[y] / divisor for y in years]
     fig, ax = plt.subplots(figsize=(8, 4))
     fig.subplots_adjust(left=0.12, right=0.95, top=0.85, bottom=0.15)
@@ -1940,11 +2041,12 @@ def build_agent_report(md: str, product: str, country: str) -> io.BytesIO:
         if not line:
             continue
         if line.startswith("### "):
-            _h(line[4:], level=2)
+            _h(line[4:], level=3)
         elif line.startswith("## "):
-            _h(line[3:], level=1)
+            _h(line[2:], level=2)
         elif line.startswith("# "):
-            _h(line[2:], level=0)
+            # 回归修复：原映射到 level=0（Title 封面样式），正文出现 22pt 巨字
+            _h(line[2:], level=1)
         elif line.startswith("> "):
             para = doc.add_paragraph()
             r = para.add_run(line[2:])

@@ -67,6 +67,9 @@
     </div>
 
     <div id="admin-content" hidden>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem;">
+        <button class="btn-primary" id="admin-logout" style="border:none;border-radius:6px;cursor:pointer;padding:0.5rem 1.1rem;font-size:.85rem;">🚪 退出登录</button>
+      </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="num" id="stat-blocked">—</div><div class="label">累计拦截未授权访问</div></div>
         <div class="stat-card"><div class="num" id="stat-ok">—</div><div class="label">放行安全事件记录</div></div>
@@ -196,11 +199,19 @@
         });
         if (resp.ok) {
           loginHint.textContent = '';
+          document.getElementById('admin-pw').value = '';  // 回归修复：密码残留清空
           await refresh();
         } else {
           loginHint.textContent = '密码错误';
+          document.getElementById('admin-pw').value = '';
         }
       } catch (_) { loginHint.textContent = '网络错误'; }
+    });
+
+    // 登出（回归修复：原无登出入口，共享电脑无法退出）
+    document.getElementById('admin-logout').addEventListener('click', async () => {
+      try { await fetch('/api/admin/logout', { method: 'POST' }); } catch (_) {}
+      await refresh();
     });
     document.getElementById('admin-pw').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') document.getElementById('admin-login').click();

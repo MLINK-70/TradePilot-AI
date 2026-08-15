@@ -1,0 +1,39 @@
+# 构建上下文排除清单（回归修复：此前无 .dockerignore，COPY . . 会把
+# venv(557MB)/build/dist(204MB)/.env(真实密钥)/tradepilot.db 全部烤进镜像）
+# 密钥与本地数据一律不进镜像；数据库由 Dockerfile 内 RUN 生成空库，运行时挂卷持久化
+
+# 密钥与环境
+.env
+.env.*
+!.env.example
+
+# 本地依赖与构建产物
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 本地数据（含真实业务库）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/raw/
+data/samples/
+
+# 开发与测试（生产镜像不需要）
+.git/
+.github/
+tests/
+scripts/
+*.spec
+_docs/
+
+# 临时与杂项
+*.log
+.DS_Store
+Thumbs.db

@@ -27,6 +27,7 @@ def res_path(name: str) -> str:
     return os.path.join(BASE_DIR, name)
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -68,6 +69,21 @@ async def lifespan(app):
 
 app = FastAPI(title="TradePilot AI", description="面向消费电子出海的 AI 市场分析平台",
               lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    """422 校验错误可读化（回归修复：FastAPI 默认 detail 是数组，
+    前端到处 textContent 显示成 "[object Object]"，用户看不懂失败原因）"""
+    msgs = []
+    for e in exc.errors():
+        loc = ".".join(str(x) for x in e.get("loc", []) if x not in ("body", "query", "path"))
+        msg = str(e.get("msg", ""))
+        msgs.append(f"{loc}: {msg}" if loc else msg)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "；".join(msgs) if msgs else "请求参数不合法"},
+    )
 
 # 安全加固（v1.0 审查第一批）：
 # 1) 移除宽 CORS（allow_origins=["*"] 曾允许任意网页跨源调用本机 API 烧 token/读历史）。
@@ -1513,6 +1529,11 @@ def _safe(value, default=""):
     return default if value is None else str(value)
 
 
+def _list_of(value) -> list:
+    """LLM 可能把数组字段返回成 dict/int/字符串（回归修复：直接迭代会 TypeError 崩 500）"""
+    return value if isinstance(value, list) else []
+
+
 def markdown_report(product: str, country: str, d: dict) -> str:
     """把 DeepSeek 返回的结构化 JSON 渲染成 Markdown 报告"""
     lines = [f"# {product}市场分析（{country}）", ""]
@@ -1523,12 +1544,15 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         lines += ["> **摘要**", ""]
         if es.get("background"):
             lines += [f"> **背景**：{_safe(es['background'])}", ""]
-        if es.get("data_points"):
-            lines += ["> **关键数据**：", *[f"> - {_safe(item)}" for item in es["data_points"]], ""]
-        if es.get("key_findings"):
-            lines += ["> **核心发现**：", *[f"> - {_safe(item)}" for item in es["key_findings"]], ""]
-        if es.get("challenges"):
-            lines += ["> **主要挑战**：", *[f"> - {_safe(item)}" for item in es["challenges"]], ""]
+        data_points = _list_of(es.get("data_points"))
+        if data_points:
+            lines += ["> **关键数据**：", *[f"> - {_safe(item)}" for item in data_points], ""]
+        key_findings = _list_of(es.get("key_findings"))
+        if key_findings:
+            lines += ["> **核心发现**：", *[f"> - {_safe(item)}" for item in key_findings], ""]
+        challenges = _list_of(es.get("challenges"))
+        if challenges:
+            lines += ["> **主要挑战**：", *[f"> - {_safe(item)}" for item in challenges], ""]
         if es.get("recommendation"):
             lines += [f"> **建议**：{_safe(es['recommendation'])}", ""]
         lines.append("")
@@ -1555,12 +1579,12 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         f"- **趋势描述**：{_safe(gt.get('description'))}",
         "",
         "**关键驱动因素**：",
-        *[f"- {_safe(item)}" for item in (gt.get("key_drivers") or [])],
+        *[f"- {_safe(item)}" for item in _list_of(gt.get("key_drivers"))],
         "",
     ]
 
     # 热门品牌（含点评列，IDC 风格）
-    brands = d.get("top_brands") or []
+    brands = _list_of(d.get("top_brands"))
     lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 | 点评 |", "| --- | --- | --- | --- |"]
     for b in brands:
         if not isinstance(b, dict):
@@ -1585,15 +1609,15 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         f"- **收入水平**：{_safe(up.get('income_level'))}",
         "",
         "**核心需求**：",
-        *[f"- {_safe(item)}" for item in (up.get("key_needs") or [])],
+        *[f"- {_safe(item)}" for item in _list_of(up.get("key_needs"))],
         "",
         "**购买习惯**：",
-        *[f"- {_safe(item)}" for item in (up.get("buying_habits") or [])],
+        *[f"- {_safe(item)}" for item in _list_of(up.get("buying_habits"))],
         "",
     ]
 
     # 风险分析（含具体法规条款）
-    risks = d.get("risks") or []
+    risks = _list_of(d.get("risks"))
     lines += ["## 风险分析", "| 风险类型 | 等级 | 说明 | 相关法规 |", "| --- | --- | --- | --- |"]
     for r in risks:
         if not isinstance(r, dict):
@@ -1602,7 +1626,7 @@ def markdown_report(product: str, country: str, d: dict) -> str:
     lines.append("")
 
     # 行动路线（分步可执行）
-    ap = d.get("action_plan") or []
+    ap = _list_of(d.get("action_plan"))
     if ap:
         lines += ["## 行动路线"]
         for i, step in enumerate(ap, 1):

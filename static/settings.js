@@ -98,6 +98,7 @@
       <button id="set-close" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;">关闭</button>
     </div>
     <p id="set-status" style="font-size:.8rem;margin-top:8px;color:var(--error);"></p>
+    <button id="set-admin-logout" style="display:none;margin-top:10px;width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;">🚪 退出管理员登录</button>
   </div>`;
 
   document.body.insertAdjacentHTML('beforeend', HTML);
@@ -214,15 +215,28 @@
       if (resp.ok) {
         document.getElementById('set-admin-box').style.display = 'none';
         document.getElementById('set-save').disabled = false;
+        document.getElementById('set-admin-pw').value = '';  // 回归修复：密码残留清空
+        document.getElementById('set-admin-logout').style.display = 'block';  // 登出口（原无）
         status.style.color = 'var(--teal)';
         status.textContent = '管理员已登录，可修改设置';
       } else {
         hint.style.color = 'var(--error)';
         hint.textContent = '密码错误';
+        document.getElementById('set-admin-pw').value = '';
       }
     } catch (_) {
       hint.textContent = '网络错误';
     }
+  });
+
+  // 登出（回归修复：原前端无登出入口，会话数天有效，共享电脑无法退出）
+  document.getElementById('set-admin-logout').addEventListener('click', async () => {
+    try { await fetch('/api/admin/logout', { method: 'POST' }); } catch (_) {}
+    document.getElementById('set-admin-logout').style.display = 'none';
+    document.getElementById('set-admin-box').style.display = 'block';
+    document.getElementById('set-save').disabled = true;
+    status.style.color = 'var(--muted)';
+    status.textContent = '已退出管理员登录';
   });
 
   document.getElementById('set-save').addEventListener('click', async () => {

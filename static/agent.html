@@ -155,19 +155,8 @@
   <script src="marked.min.js?v=12"></script>
   <script src="dompurify.min.js?v=12"></script>
   <script>
-    // 主题切换：data-theme 属性机制（与 theme.js 一致）
-    (function () {
-      const btn = document.getElementById('theme-toggle');
-      const saved = localStorage.getItem('tradepilot-theme');
-      if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-      btn.textContent = saved === 'dark' ? '☀️' : '🌙';
-      btn.addEventListener('click', () => {
-        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-        document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
-        localStorage.setItem('tradepilot-theme', dark ? 'light' : 'dark');
-        btn.textContent = dark ? '🌙' : '☀️';
-      });
-    })();
+    // 主题切换统一由 theme.js 负责（回归修复：此处曾内联一份 IIFE 与 theme.js
+    // 双重绑定 #theme-toggle，一次点击被切换两次，视觉上主题不生效）
 
     // AI Agent 一句话全流程（SSE 流式进度）
     (function () {
@@ -235,8 +224,13 @@
               sum.textContent = ev.summary || '';
               prog.appendChild(sum);
               if (ev.report) {
-                document.getElementById('agent-report').innerHTML =
-                  DOMPurify.sanitize(marked.parse(ev.report));
+                const reportEl = document.getElementById('agent-report');
+                if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                  // 回归修复：marked/DOMPurify 加载失败时降级纯文本（原直接抛错被误报"网络错误"）
+                  reportEl.innerHTML = DOMPurify.sanitize(marked.parse(ev.report));
+                } else {
+                  reportEl.textContent = ev.report;
+                }
               }
               const leadsEl = document.getElementById('agent-leads');
               leadsEl.innerHTML = '';
@@ -340,10 +334,15 @@
             return;
           }
           const blob = await resp.blob();
+          // 回归修复：PDF 请求被后端降级为 docx（无 Word/LibreOffice）时
+          // 按 X-Export-Fallback 头修正文件名与提示，不再产出"假 PDF"
+          const fallback = resp.headers.get('X-Export-Fallback');
+          const ext = fallback || fmt;
+          if (fallback) alert('本机未安装 Word/LibreOffice，已降级导出 docx 文件');
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'TradePilot-Agent-' + (product || '报告') + '-' + (country || '') + '-市场分析报告.' + fmt;
+          a.download = 'TradePilot-Agent-' + (product || '报告') + '-' + (country || '') + '-市场分析报告.' + ext;
           document.body.appendChild(a);
           a.click();
           a.remove();
