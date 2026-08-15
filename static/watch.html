@@ -157,12 +157,14 @@
         if (!r.ok) { setStatus('刷新失败：' + escapeHtml(d.detail || r.status), true); return; }
         const chg = d.change_pct;
         let chgHtml;
-        if (chg == null) {
+        if (chg == null && d.prev_value == null) {
           chgHtml = '<div class="chg chg-flat">无对比基线（首次刷新）</div>';
+        } else if (chg == null) {
+          chgHtml = '<div class="chg chg-flat">上次为 0，本次 ' + fmtValue(d.value) + '（无百分比基线）</div>';
         } else {
           const cls = chg > 0.5 ? 'chg-up' : (chg < -0.5 ? 'chg-down' : 'chg-flat');
           const arrow = chg > 0.5 ? '📈 +' : (chg < -0.5 ? '📉 ' : '➖ ');
-          chgHtml = '<div class="chg ' + cls + '">' + arrow + (chg > 0 ? chg : chg) + '% 较上次（' +
+          chgHtml = '<div class="chg ' + cls + '">' + arrow + chg + '% 较上次（' +
             escapeHtml(d.prev_year || '?') + '年）</div>';
         }
         card.querySelector('.value').innerHTML =

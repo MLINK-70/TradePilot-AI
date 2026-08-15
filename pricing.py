@@ -83,10 +83,14 @@ def suggest_pricing(product: str, market: str, year: str = "",
             suggest_high = round(market_up * 1.2, 2)
             basis = "市场进口均价（出口单价缺失，按市场价带估算）"
 
+        # 回归修复：单腿缺失（export_up/market_up 为 None）时格式化会崩（None:.2f），
+        # 文案条件化显示"—"，让"只有一条腿"是正常降级而非"获取失败"
+        exp_txt = f"{export_up:.2f}" if export_up is not None else "—"
+        mkt_txt = f"{market_up:.2f}" if market_up is not None else "—"
         explain = (
             f"基于 {year} 年 UN Comtrade 真实贸易数据：中国出口{market}该品类"
-            f"（HS {hs}）单价约 {export_up:.2f} 美元/公斤，{market} 市场进口均价约 "
-            f"{market_up:.2f} 美元/公斤。建议定价区间 {suggest_low:.2f}–{suggest_high:.2f} 美元/公斤"
+            f"（HS {hs}）单价约 {exp_txt} 美元/公斤，{market} 市场进口均价约 "
+            f"{mkt_txt} 美元/公斤。建议定价区间 {suggest_low:.2f}–{suggest_high:.2f} 美元/公斤"
             f"（依据：{basis}）。实际售价还需结合规格、品牌与渠道，此区间为数据参考带。"
         )
 

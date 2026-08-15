@@ -267,9 +267,14 @@
                   body: JSON.stringify({ lead_id: id }),
                 });
               } else {
-                const note = act === 'won' || act === 'lost'
-                  ? prompt(act === 'won' ? '成交备注（可选）' : '放弃原因（可选）', '') || ''
-                  : '';
+                // 回归修复：won/lost 弹备注时用户点"取消"（null）应中止流转，
+                // 不能把"取消"当成"空备注照常流转"
+                let note = '';
+                if (act === 'won' || act === 'lost') {
+                  const input = prompt(act === 'won' ? '成交备注（可选，取消则中止）' : '放弃原因（可选，取消则中止）', '');
+                  if (input === null) { loadFunnel(); return; }  // 取消：不流转
+                  note = input;
+                }
                 await fetch('/api/leads/funnel/update', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ lead_id: id, status: act, note: note }),
