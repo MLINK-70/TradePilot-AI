@@ -40,9 +40,16 @@ class CollectorError(Exception):
 def _is_forbidden_ip(ip) -> bool:
     """内网/保留地址判定（回归修复：补 is_multicast/is_unspecified/CGNAT；
     0.0.0.0 在旧版 Python is_private=False 属版本相关，一并显式拦截）"""
+    # IPv4-mapped IPv6（::ffff:192.168.1.1 等）先解包按 IPv4 规则判：
+    # IPv6 分支只查 loopback/link-local/unspecified/multicast，
+    # 会把内网 IPv4 的 mapped 形式当公网放行（SSRF 校验绕过）。
     if ip.version == 6:
-        # IPv6：拒绝环回/链路本地/未指定；其余（含 2001::/32 等）是公网
-        return ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast
+        mapped = ip.ipv4_mapped
+        if mapped is not None:
+            ip = mapped
+        else:
+            # IPv6：拒绝环回/链路本地/未指定；其余（含 2001::/32 等）是公网
+            return ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast
     return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
             or ip.is_multicast or ip.is_unspecified or ip == ipaddress.ip_address("0.0.0.0")
             or ip in ipaddress.ip_network("100.64.0.0/10"))  # CGNAT 共享地址段

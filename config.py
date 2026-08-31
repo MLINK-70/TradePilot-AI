@@ -118,6 +118,12 @@ def _validate_outbound_base_url(url: str, what: str) -> str:
         raise ValueError(f"{what}地址缺少主机名")
 
     def _is_local(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        # IPv4-mapped IPv6（::ffff:10.0.0.1 等）必须先解包按 IPv4 规则判：
+        # 实测 is_private=True 能识别，但下方 IPv6 分支只查 loopback/link-local，
+        # 会把内网 IPv4 的 mapped 形式当公网放行（SSRF 校验绕过）。
+        mapped = ip.ipv4_mapped if ip.version == 6 else None
+        if mapped is not None:
+            ip = mapped
         # IPv6：只拒绝环回(::1)和链路本地(fe80::)。其余（含 2001::/32 Teredo 隧道段、
         # 2001:db8:: 文档段）都是公网，is_private 会把它们误判为内网导致误拒。
         if ip.version == 6:

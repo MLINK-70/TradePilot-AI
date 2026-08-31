@@ -88,8 +88,11 @@ def suggest_pricing(product: str, market: str, year: str = "",
             except Exception:
                 meta = None
             if meta and meta["quality"] == "rejected":
+                # 键名修正：get_cache_meta 返回 validation_reason（无 reason 键），
+                # 原写法 meta['reason'] 命中即 KeyError → 被外层 except 吞成
+                # 通用文案"定价数据获取失败"，G10 的"具体原因透出"失效
                 return {"available": False,
-                        "reason": f"{leg_name}数据被拒绝（完整性校验未通过）：{meta['reason']}"}
+                        "reason": f"{leg_name}数据被拒绝（完整性校验未通过）：{meta['validation_reason']}"}
 
         export_up = _unit_price(exp_rows)
         market_up = _unit_price(imp_rows)

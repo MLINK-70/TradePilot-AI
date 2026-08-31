@@ -393,8 +393,10 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
         _meta = get_cache_meta(cmd_code, partner_code, period, flow_code, reporter_code,
                                cache_key=mode_key)
         if _meta and _meta["quality"] == "rejected":
+            # 键名修正：get_cache_meta 返回 validation_reason（无 reason 键），
+            # 原写法 .get("reason") 恒为 None，日志里括号永远空白，"留痕"失效
             logging.warning("缓存为 REJECTED（%s），按未命中重新请求: %s/%s/%s",
-                            (_meta.get("reason") or "")[:60], cmd_code, partner_code, period)
+                            (_meta.get("validation_reason") or "")[:60], cmd_code, partner_code, period)
             cached = None
         else:
             cached = get_cached(cmd_code, partner_code, period, flow_code, reporter_code,
@@ -411,6 +413,15 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
         "partnerCode": partner_code,
         "cmdCode": cmd_code,
         "flowCode": flow_code,
+        # 原产国/目的国（partner2）维度关掉，只要合计行。
+        # 原因：UN Comtrade 对 partnerCode=0（全球）的查询会按 partner2Code 拆行——
+        # 德国 2024 年进口 HS 8518 拆出 106 个原产国 × 3 种 customsCode × 多种 motCode
+        # = 500+ 行，直接撞上 maxRecords 上限被判"结果不完整"而拒绝。
+        # 后果是"市场总进口"（份额分母）永远取不到，竞争力指标 TC + 市场份额整体失效，
+        # 定价建议（依赖市场进口均价）同死。实测：加此参数后同一查询 500 行 → 18 行，
+        # 总额 38.73 亿美元（正确）；对非全球查询无副作用（中国→德国、美国→德国
+        # 加参数前后均 1 行同值）。
+        "partner2Code": 0,
         "maxRecords": 500,
     }
     last_error = None
@@ -476,9 +487,12 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
             seen = set()
             unique = []
             for r in raw_data:
+                # partner2Code（原产国/目的国）必须进去重键：它也是一条拆分维度，
+                # 漏掉会把 106 个原产国行折叠成 1 行，取到的值差约 1900 倍
+                # （实测德国 2024 进口 HS 8518：折叠后 200 万美元 vs 真实 38.73 亿美元）。
                 key = (r.get("reporterCode"), r.get("partnerCode"), r.get("cmdCode"),
                        r.get("period"), r.get("motCode"), r.get("mosCode"),
-                       r.get("customsCode"))
+                       r.get("customsCode"), r.get("partner2Code"))
                 if key in seen:
                     continue
                 seen.add(key)
@@ -1059,8 +1073,16 @@ def get_competitor_comparison(product: str, target: str, year: str,
                 # 记 error 标记该行不可用，前端/报告可显示"数据缺失"，绝不用 0 冒充
                 logging.warning("竞争力对比 %s 数据获取失败: %s", country, e)
                 results.append({"country": country, "value": None, "error": str(e)[:120]})
+        # 份额诚实性（宁缺勿错）：任一国家数据获取失败时分母就不完整——
+        # 此时给成功国算 share，等于把缺失国家的份额等比摊到剩下国家头上
+        # （实测：英国失败被剔除后，中国 34% 被放大成 52%）。统一置 None，
+        # 让前端/报告显示"数据缺失"而不是一个虚高的占比。
+        has_error = any(r.get("error") for r in results)
         for r in results:
-            r["share"] = round(r["value"] / total * 100, 1) if r["value"] is not None and total else None
+            if has_error:
+                r["share"] = None
+            else:
+                r["share"] = round(r["value"] / total * 100, 1) if r["value"] is not None and total else None
         # 回归修复：有 error 行时不写缓存（瞬时失败不固化成"数据缺失"）；
         # 写缓存带血缘 source（P1-6）
         if not any(r.get("error") for r in results):
@@ -1105,6 +1127,7 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
         top_names = top_names[:6]
 
         matrix = []
+        failed = 0
         for country in top_names:
             try:
                 hs, rows, trend = query_trend(product, target, years, reporter=country)
@@ -1137,15 +1160,22 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
                     "unit_price": unit_price,
                     "verdict": verdict,
                 })
-            except Exception:
+            except Exception as e:
+                # 失败国不再无声消失（原先 except: continue 连日志都没有，
+                # 排查"为什么矩阵里没有 X 国"时无迹可寻）
+                failed += 1
+                logging.warning("竞争力矩阵 %s 数据获取失败: %s", country, e)
                 continue
         matrix.sort(key=lambda x: (x["export_value"] or 0), reverse=True)
-        try:
-            from database import save_cache
-            save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k,
-                       source="uncomtrade/" + mode_tag)  # P1-6：血缘
-        except Exception:
-            pass
+        # 残缺矩阵不得写缓存（与 get_top_exporters 同口径）：某国瞬时失败被固化，
+        # 之后数周都命中这份缺国排名。失败时只返回当次结果，下次重新拉取
+        if failed == 0:
+            try:
+                from database import save_cache
+                save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k,
+                           source="uncomtrade/" + mode_tag)  # P1-6：血缘
+            except Exception:
+                pass
         return matrix
     except Exception:
         logging.exception("get_competitiveness_matrix 异常（%s/%s）", product, target)

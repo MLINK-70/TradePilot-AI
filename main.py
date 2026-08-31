@@ -1632,8 +1632,12 @@ def markdown_report(product: str, country: str, d: dict) -> str:
     ]
 
     # 热门品牌（含点评列，IDC 风格）
+    # 口径列必显（数据准确性）：landscape 的 share_scope（如"2021年中国市场"）
+    # 原先只存不显——德国报告里挂着中国份额用户也看不出来。把份额+口径摆到
+    # 明面上，数据口径对不上时一眼可见，而不是被表格伪装成"德国市场格局"
     brands = _list_of(d.get("top_brands"))
-    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 市场地位 | 点评 |", "| --- | --- | --- | --- |"]
+    lines += ["## 热门品牌", "| 品牌 | 所属国家 | 份额（口径） | 市场地位 | 点评 |",
+              "| --- | --- | --- | --- | --- |"]
     for b in brands:
         if not isinstance(b, dict):
             continue
@@ -1643,8 +1647,16 @@ def markdown_report(product: str, country: str, d: dict) -> str:
         pos = _safe(b.get("position"))
         if ship or growth:
             pos = pos + (f" · 出货{ship}" if ship else "") + (f" · 同比{growth}" if growth else "")
+        share = _safe(b.get("share"))
+        scope = _safe(b.get("share_scope"))
+        share_parts = []
+        if share:
+            share_parts.append(share)
+        if scope:
+            share_parts.append(f"口径：{scope}")
+        share_cell = "；".join(share_parts) if share_parts else "—"
         lines.append(
-            f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | "
+            f"| {_safe(b.get('name'))} | {_safe(b.get('origin'))} | {share_cell} | "
             f"{pos} | {note} |"
         )
     lines.append("")

@@ -841,15 +841,18 @@ def build_word_report(product: str, target: str, year: str, hs_code: str,
             _add_pie_chart(doc, pie_labels, pie_vals, f"{product} 品牌份额", raw_values=pie_vals)
         # 份额排名表（作证饼图 + 地位说明）
         _h("品牌份额排名", 2)
-        _p("饼图份额对应的品牌全量明细——排名、份额与市场地位：", indent=False)
-        btbl = doc.add_table(rows=1 + len(brands), cols=3)
+        _p("饼图份额对应的品牌全量明细——排名、份额、口径与市场地位。份额口径（如「2021年中国市场出货量份额」）必须与份额同列标注，避免把中国份额误读成目标市场份额。", indent=False)
+        btbl = doc.add_table(rows=1 + len(brands), cols=4)
         btbl.style = "Light Grid Accent 1"
-        for j, head in enumerate(["品牌", "市场份额", "市场地位"]):
+        for j, head in enumerate(["品牌", "市场份额", "份额口径", "市场地位"]):
             btbl.rows[0].cells[j].text = head
         for i, b in enumerate(brands, 1):
             btbl.rows[i].cells[0].text = str(b.get("name", ""))
             btbl.rows[i].cells[1].text = str(b.get("share", ""))
-            btbl.rows[i].cells[2].text = str(b.get("position", ""))
+            # 数据可信（B5 口径纪律）：share_scope 缺失时显式标注"未标注口径"，
+            # 而非留空让份额数字脱离口径裸奔（中国份额被误读成德国份额的根源）
+            btbl.rows[i].cells[2].text = str(b.get("share_scope", "") or "未标注口径")
+            btbl.rows[i].cells[3].text = str(b.get("position", ""))
         if landscape.get("shift_reasons"):
             _h("格局变动原因", 2)
             for r in landscape["shift_reasons"]:

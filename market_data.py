@@ -369,16 +369,21 @@ def get_competitive_landscape(product: str, market: str, force_refresh: bool = F
             {"role": "user", "content": f"产品: {product}，市场: {market}\n搜索到的内容:\n" + "\n---\n".join(snippets[:10])},
         ], use_json=True)
         result = _parse_json(content)
-        # 数据准确性：校验份额和 ≤105%（防 LLM 幻觉，如三家各 40%）
-        total_share = 0.0
+        # 数据准确性：校验份额和 ≤105%（防 LLM 幻觉，如三家各 40%）。
+        # 口径纪律：不同 share_scope（全球/某国/某细分）的份额语义不同、不可相加
+        # （与提示词"口径不同不得并列计算"对齐）——按口径分组各自求和，
+        # 任一单口径超限才判幻觉；混口径一把加既会误报也会漏报
+        scope_sums = {}
         for b in result.get("top_brands", []):
             s = str(b.get("share", "")).replace("％", "%").replace(",", "")
             m = re.search(r"(\d+(?:\.\d+)?)", s)
             if m:
-                total_share += float(m.group(1))
-        if result.get("top_brands") and total_share > 105:
-            logging.error("[数据准确性] 竞争格局份额和 %.1f%% > 105%%，疑似幻觉，top_brands 置空降级",
-                          total_share)
+                scope = str(b.get("share_scope", "")).strip() or "未标注口径"
+                scope_sums[scope] = scope_sums.get(scope, 0.0) + float(m.group(1))
+        over_scope = max(scope_sums.values()) if scope_sums else 0.0
+        if result.get("top_brands") and over_scope > 105:
+            logging.error("[数据准确性] 竞争格局单口径份额和 %.1f%% > 105%%，疑似幻觉，top_brands 置空降级",
+                          over_scope)
             result["top_brands"] = []
             result["key_insight"] = "竞争格局份额数据异常（份额和超过 100%），已降级，请人工核实。"
         result["_updated"] = datetime.now().isoformat()
