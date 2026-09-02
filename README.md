@@ -1,6 +1,6 @@
 # TradePilot AI — 跨境贸易智能平台
 
-> 面向消费电子出海的 **AI 市场分析与业务辅助平台**（v1.0.3 稳定版）。
+> 面向消费电子出海的 **AI 市场分析与业务辅助平台**（v1.0.4 稳定版）。
 > 一句话：输入产品 + 目标国家，**30 秒出报告**——市场分析、贸易数据、竞品画像、客户线索、定制开发信全流程跑通。
 
 <p align="center">
@@ -200,6 +200,7 @@ TradePilot-AI/
 | ✅ v1.0.1 | fix | UN Comtrade 正确聚合（55 亿→6.88 亿）+ SEC/A 股财务修复 |
 | ✅ v1.0.2 | rev | 数据层收口（血缘/DataGate/四态质量）+ 业务闭环 + 安全加固 |
 | ✅ v1.0.3 | fix | 竞争力指标/定价恢复（partner2Code 拆行）+ 份额虚高 + IPv4-mapped SSRF + 口径透明 |
+| ✅ v1.0.4 | fix+feat | MATRIX 缓存串台（partner_code 补 HS）+ 限流并发锁 + Blast Radius 测试 + 报告级快照 _snapshot + unit 字段 |
 | 🔜 v1.1 | refactor | `export.py` / `main.py` 拆分（routers/ + export/ 包）、前端 `common.js` 抽取 |
 
 ---
@@ -208,6 +209,7 @@ TradePilot-AI/
 
 完整的版本更新说明已迁移至 GitHub Releases：
 
+- [v1.0.4 — 数据隔离修复 + 报告级快照](https://github.com/MLINK-70/TradePilot-AI/releases/tag/v1.0.4)
 - [v1.0.3 — 数据准确性修复](https://github.com/MLINK-70/TradePilot-AI/releases/tag/v1.0.3)
 - [v1.0.2 — 重大修复合集](https://github.com/MLINK-70/TradePilot-AI/releases/tag/v1.0.2)
 - [v1.0.1 — 数据准确性专项](https://github.com/MLINK-70/TradePilot-AI/releases/tag/v1.0.1)
