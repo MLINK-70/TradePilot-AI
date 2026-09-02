@@ -229,4 +229,8 @@ TradePilot-AI/
 
 ---
 
+## 🤝 致谢
+
 数据来源：[UN Comtrade](https://comtrade.un.org) · [World Bank Open Data](https://data.worldbank.org) · [Tavily Search](https://tavily.com) · [WTO Global Trade Outlook](https://www.wto.org) · [SEC EDGAR](https://www.sec.gov/edgar) · [东方财富数据中心](https://data.eastmoney.com)
+
+AI 提供商：[DeepSeek](https://deepseek.com) · [OpenAI](https://openai.com) · [Anthropic Claude](https://anthropic.com)

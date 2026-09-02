@@ -537,6 +537,10 @@ def fetch_year(cmd_code: str, partner_code: str, period: str, reporter: str = "�
 # AI 只负责解释数据，不决定数据可信度。所有分析入口引用数字前过此闸。
 QUALITY_ORDER = {"rejected": 0, "invalid": 1, "suspicious": 2, "valid": 3}
 
+# 计算版本（报告级快照用）：CAGR / TC / 市场份额 / 单价的公式版本。
+# 改公式时递增——让旧报告的快照能回答"当时用的是哪版计算逻辑"
+CALC_VERSION = "v1"
+
 
 def check_data_gate(cmd_code: str, partner_code: str, period: str, flow_code: str,
                     reporter_code: str = "156", cache_key: str = "") -> dict:
@@ -1111,12 +1115,23 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
         # key 用完整年份元组：中间年份不同（如 [2018,2019,2022] vs [2018,2020,2022]）
         # 不再命中同一缓存（B 类审查 #3）；含数据源模式（回归修复）
         mode_tag = "formal" if _use_formal() else "preview"
+        # 产品维度必须进缓存 key（串台修复，2026-09-02）：
+        # 原实现 get_cached("MATRIX", "0", "0", "X", "0", cache_key=...) 把
+        # cmd/partner/period/reporter 全填 "0"，只靠 cache_key 里的
+        # target+years+reporter 区分——同一 (目标市场,年份序列,出口国) 下换产品
+        # 查询会命中同一份矩阵，导致"查咖啡机却拿到蓝牙耳机的出口大国数据"
+        # （数字本身真实合理、页面不报错，属于最难发现的一类错）。
+        # 与 COMPARE/TOPEXP 对齐：partner_code 存 HS 编码。
+        hs_code = hs_lookup(product)
         cache_k = f"{mode_tag}|V1|{target}|{'-'.join(map(str, years))}|{reporter}"
         try:
             from database import get_cached
-            cached = get_cached("MATRIX", "0", "0", "X", "0", cache_key=cache_k, ttl_days=_ttl_for_period(str(years[-1])))
-            if cached is not None and isinstance(cached, list):
-                return cached
+            # hs 为空时跳过缓存（无法区分产品，宁可不命中也不串台）
+            if hs_code:
+                cached = get_cached("MATRIX", hs_code, str(years[-1]), "X", "0",
+                                    cache_key=cache_k, ttl_days=_ttl_for_period(str(years[-1])))
+                if cached is not None and isinstance(cached, list):
+                    return cached
         except Exception:
             pass
         # 出口大国名单（动态识别，复用 TOPEXP 缓存）
@@ -1168,12 +1183,13 @@ def get_competitiveness_matrix(product: str, target: str, years: list,
                 continue
         matrix.sort(key=lambda x: (x["export_value"] or 0), reverse=True)
         # 残缺矩阵不得写缓存（与 get_top_exporters 同口径）：某国瞬时失败被固化，
-        # 之后数周都命中这份缺国排名。失败时只返回当次结果，下次重新拉取
-        if failed == 0:
+        # 之后数周都命中这份缺国排名。失败时只返回当次结果，下次重新拉取。
+        # hs_code 非空才写（空 = 无法区分产品，写了会造成跨产品串台）
+        if failed == 0 and hs_code:
             try:
                 from database import save_cache
-                save_cache("MATRIX", "0", "0", "X", matrix, "0", cache_key=cache_k,
-                           source="uncomtrade/" + mode_tag)  # P1-6：血缘
+                save_cache("MATRIX", hs_code, str(years[-1]), "X", matrix, "0",
+                           cache_key=cache_k, source="uncomtrade/" + mode_tag)  # P1-6：血缘
             except Exception:
                 pass
         return matrix

@@ -159,9 +159,10 @@ def suggest_pricing(product: str, market: str, year: str = "",
             "available": True,
             "hs_code": hs,
             "year": year,
-            "export_unit_price": export_up,   # 美元/公斤
-            "market_unit_price": market_up,   # 美元/公斤
-            "suggest_low": suggest_low,       # 美元/公斤
+            "unit": "USD/kg",  # 单位绑定（防 USD/kg 与 USD 混用——贸易数据产品的隐藏雷）
+            "export_unit_price": export_up,
+            "market_unit_price": market_up,
+            "suggest_low": suggest_low,
             "suggest_mid": suggest_mid,
             "suggest_high": suggest_high,
             "basis": basis,

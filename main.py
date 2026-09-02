@@ -102,19 +102,25 @@ _RATE_PREFIXES = ("/api/analyze", "/api/trade/", "/api/business/", "/api/ecommer
                   "/api/ebay/", "/api/aliexpress/", "/api/leads/", "/api/agent/",
                   "/api/watch/", "/api/history", "/api/company/")
 _rate_hits: dict = {}
+# 限流字典并发锁（自检修复，2026-09-02）：FastAPI 多线程并发请求时，
+# _rate_hits 的"读列表→追加→写回"三步非原子，并发下计数可能少算
+# → 限流偏松（不会数据损坏，但攻击性并发可能突破限额）。加锁兜底。
+import threading as _threading
+_rate_lock = _threading.Lock()
 
 
 def _rate_allowed(ip: str) -> bool:
     """滑动窗口：窗口内命中数 <= 限额则放行"""
     now = time.time()
-    hits = [t for t in _rate_hits.get(ip, []) if now - t < _RATE_WINDOW]
-    hits.append(now)
-    _rate_hits[ip] = hits
-    # 防无界增长：超过 1000 个 IP 时清空窗口内无请求的 key（回归修复）
-    if len(_rate_hits) > 1000:
-        for k in [k for k, v in _rate_hits.items() if not [t for t in v if now - t < _RATE_WINDOW]]:
-            _rate_hits.pop(k, None)
-    return len(hits) <= _RATE_LIMIT
+    with _rate_lock:
+        hits = [t for t in _rate_hits.get(ip, []) if now - t < _RATE_WINDOW]
+        hits.append(now)
+        _rate_hits[ip] = hits
+        # 防无界增长：超过 1000 个 IP 时清空窗口内无请求的 key（回归修复）
+        if len(_rate_hits) > 1000:
+            for k in [k for k, v in _rate_hits.items() if not [t for t in v if now - t < _RATE_WINDOW]]:
+                _rate_hits.pop(k, None)
+        return len(hits) <= _RATE_LIMIT
 
 
 def _client_ip(request: Request) -> str:
@@ -232,6 +238,8 @@ def _collect_evidence(product: str, country: str) -> tuple:
                         "trend": {str(y): round(v["value"] / 1e8, 4) for y, v in trend.items()},
                         "weight_trend": {str(y): round(v.get("weight", 0) / 1e6, 2) for y, v in trend.items()},
                         "total_value": round(sum(v["value"] for v in trend.values()) / 1e8, 2),
+                        # 单位绑定（防亿美元与美元混用——数值靠变量名维持正确性是雷）
+                        "unit": {"trend": "亿美元", "weight_trend": "千吨", "total_value": "亿美元"},
                     }
                 if len(rows):
                     competitiveness = get_competitiveness(product, country, str(ly))
@@ -328,6 +336,20 @@ def analyze(req: AnalyzeRequest, request: Request):
     # 保存历史（同参数覆盖，供 UI 回看 + 后续缓存命中）
     # 回归修复 R3：历史结果带生成时间戳（前端可显示"数据截至"，7 天历史
     # 命中时用户能判断结果的新旧）
+    # 报告级快照（2026-09-02）：把"这份报告基于哪批数据、哪个公式、哪个提示词、哪个模型"
+    # 打包进结果，以后能回答"9月2日看到的这份报告为什么是这个数字"
+    result["_snapshot"] = {
+        "calc_version": trade.CALC_VERSION,
+        "prompt_version": {"market": llm.MARKET_PROMPT_VER},
+        "model": {"provider": cfg.AI_PROVIDER, "model": cfg.AI_MODEL},
+        "sources": {
+            "trade": bool(data.get("_trade")),
+            "competitiveness": bool(data.get("_competitiveness") and data.get("_competitiveness").get("available")),
+            "market_context": bool(market_ctx and market_ctx.get("available")),
+            "background": bool(background and background.get("summary")),
+            "landscape": bool(data.get("_landscape") and data.get("_landscape").get("top_brands")),
+        },
+    }
     result["_generated_at"] = datetime.now().isoformat(timespec="seconds")
     try:
         save_report_history("market", product, country, result)
@@ -789,6 +811,18 @@ def trade_query(req: TradeQueryRequest):
                              "reporter": req.reporter}, ensure_ascii=False)
         # 回归修复 R3：历史结果带生成时间戳
         result["_generated_at"] = datetime.now().isoformat(timespec="seconds")
+        # 报告级快照：贸易数据报告的版本信息（回答"这份报告基于哪版数据/公式"）
+        result["_snapshot"] = {
+            "calc_version": trade.CALC_VERSION,
+            "prompt_version": {"trade_trend": "v2-entry-strategy"},
+            "model": {"provider": cfg.AI_PROVIDER, "model": cfg.AI_MODEL},
+            "data_mode": "formal" if _use_formal() else "preview",
+            "sources": {
+                "trade": bool(result.get("trend")),
+                "competitiveness": bool(result.get("competitiveness") and result["competitiveness"].get("available")),
+                "freshness": bool(result.get("_freshness")),
+            },
+        }
         save_report_history("trade", product, target, result, params)
     except Exception:
         logging.warning("保存贸易历史失败: %s / %s", product, target)
